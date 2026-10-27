@@ -11,6 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
+DEFAULT_TITLE = "Untitled reel"
 Kind = Literal["character", "object", "place"]
 Display = Literal["cutaway", "overlay"]
 
@@ -203,8 +204,7 @@ class Moment(Strict):
     entities: list[str] = Field(default_factory=list)
     prompt: str
     enabled: bool = True
-    region: Region | None = None  # where an overlay card goes, clear of the face
-    placed_display: Display | None = None  # the display the region was worked out for
+    faces: list[Region] | None = None  # face boxes while it is on screen (None: not looked for yet)
     note: str | None = None  # e.g. why an overlay is shown full screen
     asset: Asset | None = None
     error: str | None = None

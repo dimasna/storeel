@@ -25,36 +25,21 @@ from ..common import Cancelled, now_iso
 from ..files import ProjectFiles
 from ..jobs import JobContext, PipelineError
 from ..media import ffmpeg as ff
-from ..models import Project, Region, Render
+from ..models import Moment, Project, Region, Render
 from .captions import build_pages
+from .layout import CAPTION_CENTER, card_region
 from .render import caption_page, card, watermark
 
 W, H = ff.WIDTH, ff.HEIGHT
 OVERLAY_FPS_MAX = 30  # the overlay layer runs at half rate on 50/60 fps reels
 CAPTION_SIZE = 0.042  # of the height
 CAPTION_WIDTH = 0.76  # of the width: the platforms' buttons cover the right edge
-CAPTION_CENTER = {"lower": 0.72, "middle": 0.5}
-CAPTION_HALF_BAND = 0.065
 WATERMARK_SIZE = 0.026
 WATERMARK_Y = {"center": 0.5, "top": 0.135, "bottom": 0.865}
 CUT_FADE = 0.2
 CARD_IN, CARD_OUT = 0.25, 0.18
 ZOOM = 0.08  # Ken Burns: cutaways zoom by this much over their time on screen
 KEEP_RENDERS = 5
-
-
-def caption_band(position: str) -> tuple[float, float]:
-    """The vertical band captions can occupy, in fractions of the height."""
-    center = CAPTION_CENTER.get(position, CAPTION_CENTER["lower"])
-    return center - CAPTION_HALF_BAND, center + CAPTION_HALF_BAND
-
-
-def default_region(position: str) -> Region:
-    """Where a card goes when no face was found: the largest band clear of the captions."""
-    top, _ = caption_band(position)
-    if position == "middle":
-        return Region(x0=0.08, y0=0.1, x1=0.92, y1=top - 0.015)
-    return Region(x0=0.08, y0=0.11, x1=0.92, y1=min(0.5, top - 0.015))
 
 
 def _composite(canvas: Image.Image, image: Image.Image, x: int, y: int) -> None:
@@ -83,6 +68,14 @@ def _ease_out(p: float) -> float:
 def _smooth(p: float) -> float:
     p = min(1.0, max(0.0, p))
     return p * p * (3 - 2 * p)
+
+
+def shown_region(moment: Moment, caption_position: str, captions_on: bool) -> Region | None:
+    """Where an overlay's card goes; None means the picture fills the screen (a cutaway, or an
+    overlay with no room beside the face)."""
+    if moment.display == "cutaway":
+        return None
+    return card_region(moment.faces, caption_position, captions_on)
 
 
 @dataclass
@@ -185,12 +178,12 @@ class Compositor:
             start, end = max(0.0, moment.start), min(self.duration, moment.end)
             if end - start < 0.3:
                 continue
-            if moment.display == "cutaway":
+            region = shown_region(moment, style.caption_position, style.captions != "off")
+            if region is None:
                 size = (round(W * (1 + ZOOM)), round(H * (1 + ZOOM)))
                 source = ImageOps.fit(picture, size, Image.LANCZOS)
                 self.cutaways.append(_Cutaway(start, end, source, zoom_in=len(self.cutaways) % 2 == 0))
             else:
-                region = moment.region or default_region(style.caption_position)
                 image = card(picture, round(region.width * W), round(region.height * H))
                 center = (round((region.x0 + region.x1) / 2 * W), round((region.y0 + region.y1) / 2 * H))
                 self.cards.append(_Card(start, end, image, center, ident=len(self.cards) + 1))
