@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Secrets: only the template is tracked
+.env
+.env.*
+!.env.example
+
+# Local data: uploads, intermediate media, renders and the job database
+/data/
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/
