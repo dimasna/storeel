@@ -35,21 +35,26 @@ STYLES = {
     "comic": "bold comic-book art, thick black outlines, flat vivid colours",
 }
 NO_TEXT = "No text, letters, captions, logos or watermarks anywhere in the image."
-CARD_SIZES = [(16 / 9, "1600x900"), (4 / 3, "1440x1080"), (1.0, "1080x1080"), (3 / 4, "1080x1440")]
-FULL_SIZE = "1080x1920"
+# The Responses API's image_generation tool takes only these sizes ("auto" aside) and rejects
+# any other "WxH" with "unknown value", even though the guide describes free-form sizes.
+LANDSCAPE, SQUARE, PORTRAIT = "1536x1024", "1024x1024", "1024x1536"
+CARD_SIZES = [(3 / 2, LANDSCAPE), (1.0, SQUARE), (2 / 3, PORTRAIT)]
+# Full-screen pictures are asked for in the tallest shape, 2:3, and centre-cropped to 9:16
+# (about a sixth of the width is lost on each side).
+FULL_SIZE = PORTRAIT
 MAX_REFERENCES = 4
 ANCHOR = {
     "character": (
-        "1024x1536",
+        PORTRAIT,
         "Character reference of {name}: {description}. One figure, full body, standing, facing the viewer, "
         "neutral expression, plain light grey background.",
     ),
     "object": (
-        "1080x1080",
+        SQUARE,
         "Reference image of {name}: {description}. The object alone, centred, plain light grey background, "
         "soft even light.",
     ),
-    "place": ("1536x1024", "Establishing shot of {name}: {description}. No people."),
+    "place": (LANDSCAPE, "Establishing shot of {name}: {description}. No people."),
 }
 
 
@@ -59,6 +64,7 @@ class Request:
     size: str
     image_search: bool
     references: list[str]  # entity ids whose reference image is included
+    full_screen: bool = False
 
     def fingerprint(self) -> list:
         """Everything that changes the image, with image parts reduced to their hashes."""
@@ -68,13 +74,14 @@ class Request:
                 parts.append(digest(part["image_url"]))
             else:
                 parts.append(part["text"])
-        return [parts, self.size, self.image_search]
+        return [parts, self.size, self.image_search, self.full_screen]
 
 
-def card_size(moment: Moment, style: Style) -> str:
+def card_size(moment: Moment, style: Style) -> str | None:
+    """The size to ask for a card, or None when the picture fills the screen."""
     region = shown_region(moment, style.caption_position, style.captions != "off")
     if region is None:
-        return FULL_SIZE
+        return None
     aspect = (region.width * WIDTH) / (region.height * HEIGHT)
     return min(CARD_SIZES, key=lambda option: abs(math.log(aspect / option[0])))[1]
 
@@ -112,16 +119,17 @@ def moment_request(
             }
         )
         content.append(_image_part(ctx, entity.ref_key or ""))
-    size = card_size(moment, style)
+    card = card_size(moment, style)
+    full_screen = card is None
     text = f"Create one new image: {moment.prompt.rstrip('.')}."
     for entity in shown:
         if entity not in with_refs and entity.description:
             text += f" {entity.name} looks like this: {entity.description.rstrip('.')}."
     text += f" Style: {STYLES[style.visual_style]}."
-    if size == FULL_SIZE:
+    if full_screen:
         text += (
-            " Vertical 9:16 frame. Keep the main subject in the upper two thirds; the bottom third sits under"
-            " captions, so keep it simple."
+            " Vertical frame, cropped to 9:16 at the sides: keep the main subject centred and in the upper"
+            " two thirds; the bottom third sits under captions, so keep it simple."
         )
     else:
         text += " The subject is centred and fills the frame."
@@ -130,7 +138,9 @@ def moment_request(
         text += " Draw a new scene: do not copy the reference images or their plain backgrounds."
     content.append({"type": "input_text", "text": text})
     image_search = any(entity.real_world for entity in shown)
-    return Request(content, size, image_search, [e.id for e in with_refs])
+    return Request(
+        content, card or FULL_SIZE, image_search, [e.id for e in with_refs], full_screen=full_screen
+    )
 
 
 def generate(ctx: JobContext, request: Request) -> tuple[bytes, int, int, float]:
@@ -284,7 +294,7 @@ def make_pictures(ctx: JobContext, analysis: Analysis, style: Style, only: set[s
                     stored.error = error
                     stored.note = (
                         "no room beside the face, so it is shown full screen"
-                        if stored.display == "overlay" and request.size == FULL_SIZE
+                        if stored.display == "overlay" and request.full_screen
                         else None
                     )
 
