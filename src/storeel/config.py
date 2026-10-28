@@ -58,8 +58,12 @@ class Settings:
     api_key: str
     api_base: str
     data_dir: Path
-    text_model: str  # writes the scripts and plans the pictures (Muse Wonder or Muse Spark)
-    text_effort: str
+    # The text models: one writes the scripts, one watches the video and plans the pictures.
+    script_model: str
+    script_effort: str
+    plan_model: str
+    plan_effort: str
+    max_output_tokens: int  # per text-model call, reasoning included: bounds a runaway answer
     image_model: str
     image_reasoning: str
     image_parallel: int
@@ -88,15 +92,13 @@ def get_settings() -> Settings:
         api_key=_get("MODEL_API_KEY", ""),
         api_base=_api_base(_get("META_API_BASE_URL", "https://api.meta.ai/v1")),
         data_dir=Path(_get("STOREEL_DATA_DIR", "data")).expanduser().resolve(),
-        # STOREEL_SPARK_* are the names these settings had before Muse Wonder became the default.
-        text_model=_get("STOREEL_TEXT_MODEL", _get("STOREEL_SPARK_MODEL", "muse-wonder-1.0")),
-        text_effort=_get_choice(
-            "STOREEL_TEXT_EFFORT"
-            if os.environ.get("STOREEL_TEXT_EFFORT", "").strip()
-            else "STOREEL_SPARK_EFFORT",
-            "max",
-            TEXT_EFFORTS,
-        ),
+        # Chosen by comparing the models on the real API (October 2026): Muse Spark wrote the
+        # more reliable scripts, Muse Wonder the better picture plans (see README).
+        script_model=_get("STOREEL_SCRIPT_MODEL", "muse-spark-1.3"),
+        script_effort=_get_choice("STOREEL_SCRIPT_EFFORT", "max", TEXT_EFFORTS),
+        plan_model=_get("STOREEL_PLAN_MODEL", "muse-wonder-1.0"),
+        plan_effort=_get_choice("STOREEL_PLAN_EFFORT", "max", TEXT_EFFORTS),
+        max_output_tokens=_get_int("STOREEL_MAX_OUTPUT_TOKENS", 32000, minimum=1000),
         image_model=_get("STOREEL_IMAGE_MODEL", "muse-image-1.0"),
         image_reasoning=_get_choice("STOREEL_IMAGE_REASONING", "high", IMAGE_REASONING),
         image_parallel=_get_int("STOREEL_IMAGE_PARALLEL", 4),

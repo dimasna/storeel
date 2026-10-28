@@ -60,6 +60,7 @@ class MetaAPIError(RuntimeError):
         param: str | None = None,
         retryable: bool = False,
         retry_after: float | None = None,
+        usage: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -69,6 +70,7 @@ class MetaAPIError(RuntimeError):
         self.param = param
         self.retryable = retryable
         self.retry_after = retry_after
+        self.usage = usage or {}  # set when a response stopped early after using tokens
 
     def __str__(self) -> str:
         details = [str(x) for x in (self.status, self.code or self.error_type) if x]
@@ -77,6 +79,11 @@ class MetaAPIError(RuntimeError):
     @property
     def content_policy(self) -> bool:
         return (self.code or "") == "content_policy_violation"
+
+    @property
+    def output_limit(self) -> bool:
+        """The answer hit max_output_tokens (for a structured answer: it ran away)."""
+        return (self.code or "") == "max_output_tokens"
 
 
 @dataclass
@@ -349,9 +356,15 @@ class MetaClient:
                         seconds=seconds,
                     )
                 elif kind == "response.incomplete":
-                    details = (event.get("response") or {}).get("incomplete_details") or {}
+                    stopped = event.get("response") or {}
+                    details = stopped.get("incomplete_details") or {}
                     reason = details.get("reason") or "unknown reason"
-                    raise MetaAPIError(f"the response stopped early: {reason}", code=str(reason))
+                    # Tokens spent before the stop are billed, so the usage travels with the error.
+                    raise MetaAPIError(
+                        f"the response stopped early: {reason}",
+                        code=str(reason),
+                        usage=stopped.get("usage") or {},
+                    )
                 elif kind == "response.failed":
                     raise _stream_error((event.get("response") or {}).get("error") or {}, "response failed")
                 elif kind == "error":

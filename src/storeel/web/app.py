@@ -239,9 +239,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "max_input_seconds": settings.max_input_seconds,
             "max_upload_mb": settings.max_upload_mb,
             "models": {
-                "text": settings.text_model,
-                "text_name": text_model_name(settings.text_model),
-                "text_effort": settings.text_effort,
+                "script": settings.script_model,
+                "script_name": text_model_name(settings.script_model),
+                "script_effort": settings.script_effort,
+                "plan": settings.plan_model,
+                "plan_name": text_model_name(settings.plan_model),
+                "plan_effort": settings.plan_effort,
                 "image": settings.image_model,
                 "asr": settings.asr_model,
                 "sam": settings.sam_model,
@@ -262,7 +265,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse({"detail": f"Meta did not accept the key: {exc}"}, status_code=status)
         finally:
             client.close()
-        needed = [settings.text_model, settings.image_model, settings.asr_model, settings.sam_model]
+        needed = [
+            settings.script_model,
+            settings.plan_model,
+            settings.image_model,
+            settings.asr_model,
+            settings.sam_model,
+        ]
+        needed = list(dict.fromkeys(needed))
         return JSONResponse({"ok": True, "models": models, "missing": [m for m in needed if m not in models]})
 
     @app.get("/api/projects")

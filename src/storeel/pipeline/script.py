@@ -1,4 +1,4 @@
-"""Path B: the text model (Muse Wonder by default) writes a scene-by-scene script from the idea."""
+"""Path B: the script model (Muse Spark by default) writes a scene-by-scene script from the idea."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from ..common import slug
 from ..jobs import JobContext, PipelineError
+from ..meta import MetaAPIError
 from ..meta.schema import OutputError, parse_output, text_format
 from ..models import DEFAULT_TITLE, Idea, Project, Scene, Script, ScriptEntity, text_model_name
 from ..prompts import load_prompt
@@ -145,26 +146,35 @@ def clean_script(
 
 
 class ScriptUnusable(ValueError):
-    """The text model answered, but not with a script that can be recorded."""
+    """The script model answered, but not with a script that can be recorded."""
 
 
 def _ask(ctx: JobContext, idea: Idea, note: str | None) -> ScriptOut:
     prompt = _prompt(idea) + (f"\n\n{note}" if note else "")
-    model = ctx.settings.text_model
-    result = ctx.client.responses(
-        {
-            "model": model,
-            "store": False,
-            "instructions": INSTRUCTIONS,
-            "input": [
-                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": prompt}]}
-            ],
-            "reasoning": {"effort": ctx.settings.text_effort},
-            "text": text_format("reel_script", ScriptOut),
-        },
-        cancel=ctx.cancelled,
-    )
-    ctx.spend_text(model, result)
+    model = ctx.settings.script_model
+    try:
+        result = ctx.client.responses(
+            {
+                "model": model,
+                "store": False,
+                "instructions": INSTRUCTIONS,
+                "input": [
+                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": prompt}]}
+                ],
+                "reasoning": {"effort": ctx.settings.script_effort},
+                "max_output_tokens": ctx.settings.max_output_tokens,
+                "text": text_format("reel_script", ScriptOut),
+            },
+            cancel=ctx.cancelled,
+        )
+    except MetaAPIError as exc:
+        if not exc.output_limit:
+            raise
+        ctx.spend_text(model, exc.usage)
+        raise ScriptUnusable(
+            f"the answer ran past {ctx.settings.max_output_tokens} output tokens and was stopped"
+        ) from exc
+    ctx.spend_text(model, result.usage)
     ctx.log(
         f"script written in {result.seconds:.0f}s"
         f" ({result.input_tokens} in, {result.output_tokens} out tokens)"
@@ -183,10 +193,10 @@ def write_script(ctx: JobContext) -> Script:
     if project.idea is None:
         raise PipelineError("describe the idea first")
     idea = project.idea
-    name = text_model_name(ctx.settings.text_model)
+    name = text_model_name(ctx.settings.script_model)
     ctx.log(
         f"{name}: writing a {idea.length}s {idea.format} script ({idea.language},"
-        f" effort {ctx.settings.text_effort})"
+        f" effort {ctx.settings.script_effort})"
     )
     try:
         script = clean_script(_ask(ctx, idea, None), idea.language, idea_title(idea))

@@ -13,15 +13,29 @@ Create reel ┤                                                             ├�
 
 | Step | Model | What it does |
 | --- | --- | --- |
-| Scene script (idea path) | Muse Wonder 1.0, max effort | Writes a scene-by-scene script for a teleprompter, with the picture planned per scene |
+| Scene script (idea path) | Muse Spark 1.3, max effort | Writes a scene-by-scene script for a teleprompter, with the picture planned per scene |
 | Transcribe | Muse Voice Transcribe | Speech turns with timing; words are then timed from the audio (see below) |
 | Analyze | Muse Wonder 1.0, max effort (video) | Lists the characters, objects and places, and picks the moments that get a picture |
 | Analyze | SAM 3.1 | Cuts those seen in the video out as reference images; finds the face so cards go beside it |
 | Generate assets | Muse Image | Reference pictures for recurring entities, then one picture per moment |
 | Compile | ffmpeg + Pillow | Your video, full-screen cutaways or picture cards, word-highlighted captions, watermark, loudness-normalised audio |
 
-The text model and its effort are set with `STOREEL_TEXT_MODEL` and `STOREEL_TEXT_EFFORT`
-(see `.env.example`). `muse-spark-1.3` with `medium` effort is much cheaper and faster.
+Each text step has its own model and effort (`STOREEL_SCRIPT_*`, `STOREEL_PLAN_*`; see
+`.env.example`). The defaults come from a comparison on the real API (October 2026; 3
+scripts and 1 picture plan per setup, on a synthetic clip, so a small sample):
+
+- **Scripts**: Muse Spark returned clean scripts every time (8 of 8). Muse Wonder's writing
+  was as good, but 7 of 8 scripts had structural mistakes: the cat filed as an object or
+  named "silver laptop", delivery notes written as labels, scene purposes mixed up, ids
+  padded with random characters. Spark at `max` added the most concrete detail.
+- **Picture plans**: Muse Wonder recognised the speaker in the video (so SAM cut her out and
+  she appears in her own pictures), chose full-screen cutaways where a selfie close-up
+  leaves no room for a card, and wrote more specific prompts. Muse Image drew equally well
+  from either plan.
+
+Every text-model answer is capped at `STOREEL_MAX_OUTPUT_TOKENS` (32,000, reasoning
+included). A script that hits the cap is asked for once more; a picture plan that hits it
+stops the job with a message.
 
 ## Setup
 
@@ -51,7 +65,7 @@ Every option is documented in `.env.example`. Projects, uploads and renders are 
 - **I have a video**: drop one or more clips (MP4, MOV or WebM; up to 3 minutes in total).
   Portrait works best; other shapes are centre-cropped to 9:16.
 - **Start from an idea**: describe the idea, pick format, tone, length and language, and
-  edit the script the text model writes. Record each scene in the browser (camera with the
+  edit the script the script model writes. Record each scene in the browser (camera with the
   lines as a teleprompter, countdown, review, retake) or upload a take per scene.
 - **Style**: picture look and how many pictures, caption style, colour, case and position,
   watermark text and position.
@@ -72,7 +86,7 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   edges trail the speech. A loudness envelope finds where speech actually runs and pauses;
   the pauses are matched to sentence and clause ends, and words share each stretch by
   syllables. Edited captions are re-timed over the same speech.
-- **Pictures follow the words**: the text model quotes the words each picture illustrates, and
+- **Pictures follow the words**: the plan model quotes the words each picture illustrates, and
   the quote is located in the timed transcript, so a picture starts on its word.
 - **Consistency** comes from reference images: what the video shows is cut out by SAM;
   what recurs but is not in the video gets a generated reference first.
@@ -87,7 +101,7 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   held in memory until that job ends, and never written to the database, disk or logs. A
   restart forgets every key; jobs that were waiting are marked failed and can be started
   again. Rendering needs no key.
-- Every Model API request is sent with `store: false`. The video sent to the text model is a
+- Every Model API request is sent with `store: false`. The video sent to the plan model is a
   small silent copy, uploaded with a one-hour expiry and deleted right after the call.
 - The default models run in Standard mode. The cheaper `-contributor` Muse Spark models let
   Meta train on what you send; don't use them for other people's videos.
@@ -95,9 +109,10 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   cross-site requests, and should not be exposed on a network you don't trust.
 - List prices: $0.01 per picture, $0.0025 per SAM image, $0.18 per hour of transcription,
   plus text-model tokens. Muse Wonder costs $4 per 1M input and $20 per 1M output tokens
-  (Muse Spark: $1.25 and $4.25), and reasoning tokens count as output, so at `max` effort
-  the text model is most of a reel's cost. The studio shows each reel's usage and an
-  estimate priced by the model that was used.
+  (Muse Spark: $1.25 and $4.25), and reasoning tokens count as output. With the defaults, a
+  30-second reel costs about $0.17: around $0.03 for the script, $0.09 for the picture plan
+  and $0.05 for five pictures. The studio shows each reel's usage and an estimate priced by
+  the model that was used.
 
 ## Not verified yet
 

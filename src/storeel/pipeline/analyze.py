@@ -1,4 +1,4 @@
-"""The text model (Muse Wonder by default) watches the video with its transcript and plans the
+"""The plan model (Muse Wonder by default) watches the video with its transcript and plans the
 pictures.
 
 It lists the characters, objects and places the pictures need (and which of them can be
@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from ..common import digest, slug
 from ..jobs import JobContext, PipelineError
+from ..meta import MetaAPIError
 from ..meta.schema import OutputError, parse_output, text_format
 from ..models import (
     DEFAULT_TITLE,
@@ -224,8 +225,8 @@ def analyze(ctx: JobContext, source: Source, transcript: Transcript) -> Analysis
     plan = project.script.model_dump(exclude={"scenes": {"__all__": {"take"}}}) if project.script else None
     key = digest(
         VERSION,
-        ctx.settings.text_model,
-        ctx.settings.text_effort,
+        ctx.settings.plan_model,
+        ctx.settings.plan_effort,
         source.digest,
         [(t.start, t.end, t.original) for t in transcript.turns],
         count,
@@ -242,14 +243,14 @@ def analyze(ctx: JobContext, source: Source, transcript: Transcript) -> Analysis
         return analysis
 
     client = ctx.client
-    model = ctx.settings.text_model
+    model = ctx.settings.plan_model
     name = text_model_name(model)
     proxy = ctx.files.path(source.proxy_key)
     file_id = client.upload_file(proxy, "video/mp4", expires_seconds=3600, cancel=ctx.cancelled)
     try:
         ctx.log(
             f"{name}: watching {source.duration:.1f}s of video with {len(transcript.turns)} turn(s)"
-            f" (effort {ctx.settings.text_effort})"
+            f" (effort {ctx.settings.plan_effort})"
         )
         result = client.responses(
             {
@@ -266,14 +267,23 @@ def analyze(ctx: JobContext, source: Source, transcript: Transcript) -> Analysis
                         ],
                     }
                 ],
-                "reasoning": {"effort": ctx.settings.text_effort},
+                "reasoning": {"effort": ctx.settings.plan_effort},
+                "max_output_tokens": ctx.settings.max_output_tokens,
                 "text": text_format("reel_pictures", AnalysisOut),
             },
             cancel=ctx.cancelled,
         )
+    except MetaAPIError as exc:
+        if not exc.output_limit:
+            raise
+        ctx.spend_text(model, exc.usage)
+        raise PipelineError(
+            f"{name}'s picture plan ran past {ctx.settings.max_output_tokens} output tokens and was"
+            " stopped; try again (or raise STOREEL_MAX_OUTPUT_TOKENS for a long video)"
+        ) from exc
     finally:
         client.delete_file(file_id)  # the video is personal: do not leave it stored
-    ctx.spend_text(model, result)
+    ctx.spend_text(model, result.usage)
     ctx.log(
         f"analysis took {result.seconds:.0f}s: {result.input_tokens} input tokens"
         f" ({result.cached_tokens} cached), {result.output_tokens} output"

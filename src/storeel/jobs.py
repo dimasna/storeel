@@ -23,7 +23,6 @@ from .db import Job
 from .files import ProjectFiles
 from .media.ffmpeg import FFmpegError
 from .meta import MetaAPIError, MetaClient
-from .meta.client import ResponseResult
 from .models import Project, Usage, text_usd
 from .services import Services
 
@@ -125,13 +124,16 @@ class JobContext:
             for name, amount in amounts.items():
                 setattr(self._usage, name, getattr(self._usage, name) + amount)
 
-    def spend_text(self, model: str, result: ResponseResult) -> None:
-        """Count one text-model call, priced by the model that made it."""
+    def spend_text(self, model: str, usage: dict) -> None:
+        """Count one text-model call from its `usage`, priced by the model that made it."""
+        input_tokens = int(usage.get("input_tokens") or 0)
+        cached = int((usage.get("input_tokens_details") or {}).get("cached_tokens") or 0)
+        output_tokens = int(usage.get("output_tokens") or 0)
         self.spend(
-            spark_input_tokens=result.input_tokens,
-            spark_cached_tokens=result.cached_tokens,
-            spark_output_tokens=result.output_tokens,
-            text_usd=text_usd(model, result.input_tokens, result.cached_tokens, result.output_tokens),
+            spark_input_tokens=input_tokens,
+            spark_cached_tokens=cached,
+            spark_output_tokens=output_tokens,
+            text_usd=text_usd(model, input_tokens, cached, output_tokens),
         )
 
     def flush_usage(self) -> None:
