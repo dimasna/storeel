@@ -173,23 +173,25 @@ class _Cutaway:
 
 @dataclass
 class _Card:
-    """A card or cut-out: pops in (fade and a small rise), fades out."""
+    """A card or cut-out: pops in (fade and a small rise), fades out. With `animate` off it is
+    simply there for its time (the part badge, which the platforms' cover frame must show)."""
 
     start: float
     end: float
     image: Image.Image  # RGBA
     center: tuple[int, int]
     ident: int = field(default=0)
+    animate: bool = True
 
     def animating(self, t: float) -> bool:
-        return t - self.start < POP_IN or self.end - t < FADE_OUT
+        return self.animate and (t - self.start < POP_IN or self.end - t < FADE_OUT)
 
     def draw(self, canvas: Image.Image, t: float) -> None:
         alpha, rise = 1.0, 0.0
-        if t - self.start < POP_IN:
+        if self.animate and t - self.start < POP_IN:
             eased = _ease_out((t - self.start) / POP_IN)
             alpha, rise = eased, (1 - eased) * 0.02 * H
-        elif self.end - t < FADE_OUT:
+        elif self.animate and self.end - t < FADE_OUT:
             alpha = max(0.0, (self.end - t) / FADE_OUT)
         image = _faded(self.image, alpha)
         x = round(self.center[0] - image.width / 2)
@@ -224,8 +226,18 @@ class Compositor:
                 self.pages.append(_Page(page.start, page.end, layout.image, xy, layout.marks, starts))
         self.cutaways: list[_Cutaway] = []
         self.cards: list[_Card] = []
-        spans: list[tuple[float, float]] = []
         self.unchecked_faces = 0  # "auto" blur without face boxes: blurred to be safe
+        self.blurs = blur_windows(self._build_pictures(project, files), self.duration)
+        self.mark: tuple[Image.Image, tuple[int, int]] | None = None
+        if style.watermark:
+            image = watermark(style.watermark, round(H * WATERMARK_SIZE), round(W * 0.8))
+            y = WATERMARK_Y[style.watermark_position] * H
+            self.mark = (image, (round(W / 2 - image.width / 2), round(y - image.height / 2)))
+
+    def _build_pictures(self, project: Project, files: ProjectFiles) -> list[tuple[float, float]]:
+        """The moments' pictures as cutaways and cards; returns the spans to blur the speaker in."""
+        style = project.style
+        spans: list[tuple[float, float]] = []
         moments = project.analysis.moments if project.analysis else []
         for moment in moments:
             if not (moment.enabled and moment.asset and files.exists(moment.asset.key)):
@@ -250,12 +262,7 @@ class Compositor:
                 blur = hit is not False
             if blur:
                 spans.append((start, end))
-        self.blurs = blur_windows(spans, self.duration)
-        self.mark: tuple[Image.Image, tuple[int, int]] | None = None
-        if style.watermark:
-            image = watermark(style.watermark, round(H * WATERMARK_SIZE), round(W * 0.8))
-            y = WATERMARK_Y[style.watermark_position] * H
-            self.mark = (image, (round(W / 2 - image.width / 2), round(y - image.height / 2)))
+        return spans
 
     @property
     def frame_count(self) -> int:
@@ -423,12 +430,14 @@ def encode(
     ctx.log(f"encoded {total} overlay frames in {time.monotonic() - started:.1f}s")
 
 
-def compose(ctx: JobContext, project: Project, fit_mb: int | None = None) -> Render:
+def compose(
+    ctx: JobContext, project: Project, fit_mb: int | None = None, compositor: Compositor | None = None
+) -> Render:
     files = ctx.files
     if project.source is None:
         raise PipelineError("process the clips before rendering")
     master = files.path(project.source.key)
-    compositor = Compositor(project, files)
+    compositor = compositor or Compositor(project, files)
     ctx.log(
         f"compose: {compositor.duration:.1f}s at {project.source.fps} fps,"
         f" {len(compositor.pages)} caption pages, {len(compositor.cutaways)} full-screen pictures,"

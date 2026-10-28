@@ -60,7 +60,7 @@ from ..services import Services, valid_key
 
 log = logging.getLogger(__name__)
 STATIC = Path(__file__).resolve().parent / "static"
-MEDIA_PREFIXES = ("uploads/", "refs/", "assets/", "renders/")
+MEDIA_PREFIXES = ("uploads/", "refs/", "assets/", "renders/", "part/")
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 UPLOAD_SUFFIXES = ("/clips", "/take")
 KEY_HEADER = "x-model-api-key"

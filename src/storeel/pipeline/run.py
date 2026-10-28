@@ -9,8 +9,10 @@ from .assets import make_anchors, make_pictures
 from .compose import compose
 from .detect import find_faces, references
 from .ingest import ingest
+from .part import find_part_faces, make_part_pictures
 from .script import write_script
 from .story import write_story
+from .story_compose import PartCompositor
 from .transcribe import transcribe
 
 
@@ -52,6 +54,25 @@ def _pictures(ctx: JobContext, project: Project, analysis: Analysis, only: set[s
     make_pictures(ctx, analysis, style, only)
 
 
+def _part_pictures(ctx: JobContext) -> None:
+    """A novel part: its pictures come from its script (no planner), plus the face per take."""
+    ctx.step("Drawing the part's pictures", 0.35, 0.95)
+    make_part_pictures(ctx)
+    ctx.flush_usage()
+    ctx.check()
+    if ctx.project().style.speaker_behind == "auto":
+        ctx.step("Finding the face", 0.95, 1.0)
+        find_part_faces(ctx)
+
+    def done(p: Project) -> None:  # the reel is processed: an empty plan marks it (no moments)
+        title = p.title
+        p.analysis = Analysis(
+            title=title, summary="", language=_language(p), entities=[], moments=[], digest="part"
+        )
+
+    ctx.update(done)
+
+
 def handle_script(ctx: JobContext) -> None:
     ctx.step("Writing the script", 0.0, 1.0)
     write_script(ctx)
@@ -81,6 +102,9 @@ def handle_process(ctx: JobContext) -> None:
     transcript = transcribe(ctx, source, _language(project), _keywords(project))
     ctx.flush_usage()
     ctx.check()
+    if project.path == "novel":
+        _part_pictures(ctx)
+        return
     ctx.step("Planning the pictures", 0.35, 0.55)
     analysis = analyze(ctx, source, transcript)
     ctx.flush_usage()
@@ -111,7 +135,22 @@ def handle_render(ctx: JobContext) -> None:
     if project.transcript is None or project.analysis is None:
         raise PipelineError("process the clips before rendering")
     fit = ctx.params.get("fit_mb")
-    compose(ctx, project, fit_mb=int(fit) if fit else None)
+    compositor = None
+    if project.path == "novel":
+        if project.style.speaker_behind == "auto" and not project.part_faces:
+            find_part_faces(ctx)  # chosen after processing: check the face now
+            project = ctx.project()
+        slots: dict[str, str] = {}
+        novel_files = None
+        if project.novel_id:
+            novel_files = ctx.services.novel_files(project.novel_id)
+            try:
+                novel = ctx.services.db.get_novel(project.novel_id)
+                slots = {cid: c.slot for cid, c in novel.bible.characters.items()}
+            except LookupError:
+                pass
+        compositor = PartCompositor(project, ctx.files, novel_files, slots)
+    compose(ctx, project, fit_mb=int(fit) if fit else None, compositor=compositor)
 
 
 HANDLERS: dict[str, Handler] = {

@@ -296,13 +296,16 @@ function render() {
   } else {
     main.append(clipsSection(project));
   }
-  if (project.analysis || project.transcript) {
+  if (project.path === "novel" && project.part_pictures) {
+    append(main, [partPicturesSection(project), transcriptSection(project)]);
+  } else if (project.analysis || project.transcript) {
     append(main, [picturesSection(project), transcriptSection(project)]);
   }
   const inputsReady = project.path === "video" ? project.clips.length > 0 : project.script && project.script.scenes.every((s) => s.take);
   side.append(styleSection(project));
-  // A novel part's pictures and layout come from its script (the next step of this feature).
-  if ((inputsReady || project.analysis) && project.path !== "novel") side.append(processSection(project));
+  if (project.path === "novel") {
+    if (inputsReady || project.part_pictures) side.append(partProcessSection(project));
+  } else if (inputsReady || project.analysis) side.append(processSection(project));
   if (project.analysis) side.append(renderSection(project));
   side.append(usageSection(project));
   if (stage === "processing" || stage === "rendering") body.classList.add("dim");
@@ -941,6 +944,51 @@ function storySection(project) {
       ...list("Objects and scenes", story.props, (p) => `${p.id}${p.recurring ? " (recurring)" : ""}: ${p.description}`),
       ...list("Photos", story.photos, (p) => `${p.id} “${p.title}”: ${p.description}`),
       ...list("Notes for the bible", story.bible_notes, (x) => `${x.id}: ${x.note}`),
+    ),
+  );
+}
+
+// ---- a novel part: processing and its pictures ------------------------------------------------
+
+function partProcessSection(project) {
+  const processed = Boolean(project.part_pictures);
+  return section(
+    processed ? "Pictures" : "Process",
+    el(
+      "p",
+      { class: "muted small" },
+      processed
+        ? "Update after a retake or a script change: only what changed is made again."
+        : "Transcribes your takes, then draws the part's pictures with Muse Image: characters from the bible (cut out by SAM, the same faces as in earlier parts), objects, places and photos.",
+    ),
+    el("button", { class: "btn primary", onclick: () => act(() => api.post(`/api/projects/${project.id}/process`, { fresh: false }), processed ? "Updating…" : "Processing started") }, processed ? "Update" : "Process the part"),
+  );
+}
+
+function partPicturesSection(project) {
+  const pictures = Object.values(project.part_pictures || {});
+  const url = (p) => (p.scope === "novel" && project.novel ? novelMediaUrl(project.novel.id, p.key) : mediaUrl(project.id, p.key));
+  const how = { standing: "stands at the bottom", object: "cut-out object", card: "card" };
+  return section(
+    "The part's pictures",
+    el("p", { class: "muted small" }, "Characters come from the novel's bible; a returning character is redrawn in this part's outfit from their earlier portrait."),
+    el(
+      "div",
+      { class: "bible" },
+      pictures.map((p) =>
+        el(
+          "div",
+          { class: "bible-card" },
+          p.key ? el("a", { href: url(p), target: "_blank", rel: "noopener" }, el("img", { src: url(p), alt: p.id, loading: "lazy" })) : el("div", { class: "thumb-empty" }, "!"),
+          el(
+            "div",
+            {},
+            el("strong", {}, p.id),
+            el("small", { class: "muted" }, ` ${p.kind} · ${how[p.display] || p.display}${p.display !== "card" && !p.cutout && p.key ? " (not cut out: shown framed)" : ""}`),
+            p.error ? el("p", { class: "banner error small" }, p.error) : null,
+          ),
+        ),
+      ),
     ),
   );
 }

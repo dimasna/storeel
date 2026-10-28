@@ -321,6 +321,22 @@ class Story(Strict):
     problems: list[str] = Field(default_factory=list)  # what the checks still found
 
 
+class PartPicture(Strict):
+    """A picture a novel part shows: a character standing (from the bible), an object cut out,
+    or a card (a photo, a scene, a place). `scope` says whose files hold it."""
+
+    id: str
+    kind: Literal["character", "variant", "prop", "photo"]
+    display: Literal["standing", "object", "card"]
+    scope: Literal["novel", "project"]
+    key: str | None = None
+    cutout: bool = False
+    width: int = 0
+    height: int = 0
+    prompt: str = ""
+    error: str | None = None
+
+
 # ---- what the pipeline produces ------------------------------------------------------------
 
 
@@ -538,6 +554,8 @@ class Project(Strict):
     novel_id: str | None = None  # path C: the novel and chapter this reel tells
     chapter: int | None = None
     story: Story | None = None  # path C: the part's script
+    part_pictures: dict[str, PartPicture] | None = None  # path C: what the part shows, by id
+    part_faces: dict[str, list[Region]] = Field(default_factory=dict)  # path C: face boxes per take
     source: Source | None = None
     transcript: Transcript | None = None
     analysis: Analysis | None = None
@@ -556,3 +574,4 @@ class Project(Strict):
         self.source = None
         self.transcript = None
         self.analysis = None
+        self.part_faces = {}
