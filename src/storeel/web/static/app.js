@@ -1,0 +1,820 @@
+// Storeel Studio: a single-page UI over the backend's actions. The backend owns the flow
+// (stages, jobs, validation); this file only shows the project and calls the actions.
+
+import { api, upload, mediaUrl, ApiError } from "./api.js";
+import { el, append, clear, toast, seconds, megabytes, ago } from "./dom.js";
+import { Recorder } from "./recorder.js";
+
+const app = document.getElementById("app");
+const state = { config: null, project: null, poll: null, busy: false, uploads: [] };
+
+const LABELS = {
+  visual_style: {
+    cinematic: "Cinematic photo",
+    illustration: "Illustration",
+    "3d": "3D animation",
+    anime: "Anime",
+    watercolor: "Watercolour",
+    comic: "Comic",
+  },
+  visuals: { off: "No pictures", few: "A few", balanced: "Balanced", many: "Many" },
+  captions: { pill: "Highlight pill", karaoke: "Coloured word", clean: "Plain", off: "No captions" },
+  caption_position: { lower: "Lower third", middle: "Middle" },
+  caption_case: { original: "As spoken", upper: "UPPERCASE" },
+  watermark_position: { center: "Centre", top: "Top", bottom: "Bottom" },
+  language: { auto: "Detect", id: "Indonesian (+ English)", en: "English" },
+  format: { storytime: "Storytime", explainer: "Explainer", tips: "Tips", review: "Review", opinion: "Opinion" },
+  tone: { casual: "Casual", energetic: "Energetic", calm: "Calm", funny: "Funny", dramatic: "Dramatic" },
+  idea_language: { id: "Indonesian", en: "English" },
+  display: { none: "Speaker only", cutaway: "Full screen", overlay: "Card beside the speaker" },
+};
+
+const STAGES = {
+  video: [
+    ["upload", "Upload"],
+    ["ready", "Style"],
+    ["processing", "Process"],
+    ["review", "Review"],
+    ["done", "Render"],
+  ],
+  idea: [
+    ["idea", "Idea"],
+    ["record", "Script & record"],
+    ["ready", "Style"],
+    ["processing", "Process"],
+    ["review", "Review"],
+    ["done", "Render"],
+  ],
+};
+
+const JOB_NAMES = {
+  script: "Writing the script",
+  process: "Processing",
+  regenerate: "Regenerating a picture",
+  render: "Rendering the reel",
+};
+
+// ---- small helpers ------------------------------------------------------------------------
+
+function options(field, values, current, labels = LABELS[field]) {
+  return values.map((value) =>
+    el("option", { value, selected: value === current }, (labels && labels[value]) || value),
+  );
+}
+
+function enumOf(schema, field) {
+  return schema.properties[field].enum;
+}
+
+function jobActive(project) {
+  return Boolean(project.job && ["queued", "running"].includes(project.job.status));
+}
+
+async function act(promise, success) {
+  if (state.busy) return null;
+  state.busy = true;
+  document.body.classList.add("busy");
+  try {
+    const result = await promise();
+    if (result && result.id && result.stage) {
+      state.project = result;
+      render();
+      watch();
+    }
+    if (success) toast(success, "ok");
+    return result;
+  } catch (error) {
+    toast(error.message || String(error), "error");
+    if (error instanceof ApiError && error.status === 409) refresh();
+    return null;
+  } finally {
+    state.busy = false;
+    document.body.classList.remove("busy");
+  }
+}
+
+function section(title, ...children) {
+  return el("section", { class: "card" }, title ? el("h2", {}, title) : null, ...children);
+}
+
+function field(label, control, hint) {
+  return el("label", { class: "field" }, el("span", { class: "field-label" }, label), control, hint ? el("small", {}, hint) : null);
+}
+
+// ---- routing -------------------------------------------------------------------------------
+
+function route() {
+  const match = location.hash.match(/^#\/p\/([0-9a-f]{32})/);
+  return match ? { page: "project", id: match[1] } : { page: "home" };
+}
+
+window.addEventListener("hashchange", () => start());
+
+async function start() {
+  stopWatching();
+  state.project = null;
+  const where = route();
+  if (where.page === "home") return renderHome();
+  clear(app).append(el("p", { class: "muted" }, "Loading…"));
+  try {
+    state.project = await api.get(`/api/projects/${where.id}`);
+  } catch (error) {
+    clear(app).append(section("Project not found", el("p", {}, error.message), el("a", { href: "#/", class: "btn" }, "Back")));
+    return;
+  }
+  render();
+  watch();
+}
+
+// ---- polling while a job runs -------------------------------------------------------------
+
+function stopWatching() {
+  clearTimeout(state.poll);
+  state.poll = null;
+}
+
+function watch() {
+  stopWatching();
+  if (!state.project || !jobActive(state.project)) return;
+  state.poll = setTimeout(pollOnce, 1500);
+}
+
+async function pollOnce() {
+  const before = state.project;
+  if (!before) return;
+  let after;
+  try {
+    after = await api.get(`/api/projects/${before.id}`);
+  } catch {
+    state.poll = setTimeout(pollOnce, 4000);
+    return;
+  }
+  if (route().id !== before.id) return;
+  state.project = after;
+  const changed = after.job?.id !== before.job?.id || after.job?.status !== before.job?.status;
+  if (changed) {
+    render();
+    const job = after.job;
+    if (job && job.status === "done") toast(`${JOB_NAMES[job.kind] || job.kind}: done`, "ok");
+    if (job && job.status === "failed") toast(`${JOB_NAMES[job.kind] || job.kind} failed`, "error");
+  } else {
+    updateJobPanel(after.job);
+  }
+  watch();
+}
+
+// ---- home ------------------------------------------------------------------------------------
+
+async function renderHome() {
+  clear(app);
+  const create = (path) =>
+    act(async () => {
+      const project = await api.post("/api/projects", { path });
+      location.hash = `#/p/${project.id}`;
+      return null;
+    });
+  app.append(
+    el(
+      "section",
+      { class: "hero" },
+      el("h1", {}, "Create a reel"),
+      el("p", { class: "muted" }, "Captions, pictures and a watermark on your talking-head video, made with Meta's Muse models."),
+      el(
+        "div",
+        { class: "choices" },
+        el(
+          "button",
+          { class: "choice", onclick: () => create("video") },
+          el("strong", {}, "I have a video"),
+          el("span", {}, "Upload one or more clips. They are transcribed, pictures are planned and drawn, and the reel is compiled."),
+        ),
+        el(
+          "button",
+          { class: "choice", onclick: () => create("idea") },
+          el("strong", {}, "Not yet: start from an idea"),
+          el("span", {}, "Describe the idea. Muse Spark writes a scene script; you record it scene by scene with a teleprompter."),
+        ),
+      ),
+    ),
+  );
+  const list = el("div", { class: "project-list" }, el("p", { class: "muted" }, "Loading projects…"));
+  app.append(section("Recent reels", list));
+  try {
+    const projects = await api.get("/api/projects");
+    clear(list);
+    if (!projects.length) list.append(el("p", { class: "muted" }, "No reels yet."));
+    for (const p of projects) {
+      list.append(
+        el(
+          "a",
+          { class: "project-row", href: `#/p/${p.id}` },
+          p.cover ? el("img", { src: mediaUrl(p.id, p.cover), alt: "" }) : el("div", { class: "thumb-empty" }, p.path === "idea" ? "✎" : "▶"),
+          el("div", {}, el("strong", {}, p.title), el("small", { class: "muted" }, `${p.path === "idea" ? "From an idea" : "From a video"} · ${p.stage} · ${p.input_seconds ? seconds(p.input_seconds) + " · " : ""}${ago(p.updated_at)}`)),
+          p.renders ? el("span", { class: "pill ok" }, `${p.renders} render${p.renders > 1 ? "s" : ""}`) : null,
+        ),
+      );
+    }
+  } catch (error) {
+    clear(list).append(el("p", { class: "banner error" }, error.message));
+  }
+}
+
+// ---- project page ------------------------------------------------------------------------
+
+function render() {
+  const project = state.project;
+  if (!project) return;
+  clear(app);
+  app.append(header(project));
+  if (!state.config.api_key) {
+    app.append(
+      el("p", { class: "banner warn" }, "MODEL_API_KEY is not set. Copy .env.example to .env, add your Model API key and restart `storeel serve`."),
+    );
+  }
+  if (project.error && !jobActive(project)) app.append(el("p", { class: "banner error" }, `Last job failed: ${project.error}`));
+  if (project.job && (jobActive(project) || project.job.status === "failed")) app.append(jobPanel(project));
+
+  const locked = jobActive(project);
+  const body = el("div", { class: `layout${locked ? " locked" : ""}` });
+  const main = el("div", { class: "main" });
+  const side = el("div", { class: "side" });
+  body.append(main, side);
+  app.append(body);
+
+  const stage = project.stage;
+  if (project.path === "idea") {
+    main.append(ideaSection(project));
+    if (project.script) main.append(scriptSection(project));
+  } else {
+    main.append(clipsSection(project));
+  }
+  if (project.analysis || project.transcript) {
+    append(main, [picturesSection(project), transcriptSection(project)]);
+  }
+  const inputsReady = project.path === "video" ? project.clips.length > 0 : project.script && project.script.scenes.every((s) => s.take);
+  side.append(styleSection(project));
+  if (inputsReady || project.analysis) side.append(processSection(project));
+  if (project.analysis) side.append(renderSection(project));
+  side.append(usageSection(project));
+  if (stage === "processing" || stage === "rendering") body.classList.add("dim");
+}
+
+function header(project) {
+  const title = el("input", {
+    class: "title-input",
+    value: project.title,
+    maxlength: 120,
+    "aria-label": "Reel title",
+    onchange: (event) => {
+      const value = event.target.value.trim();
+      if (value && value !== project.title) act(() => api.patch(`/api/projects/${project.id}`, { title: value }));
+    },
+  });
+  const steps = STAGES[project.path];
+  const order = steps.map(([key]) => key);
+  const aliases = { scripting: "idea", regenerating: "review", rendering: "done" };
+  const current = aliases[project.stage] || project.stage;
+  const position = Math.max(0, order.indexOf(current));
+  return el(
+    "div",
+    { class: "project-head" },
+    el("a", { href: "#/", class: "back" }, "← All reels"),
+    title,
+    el(
+      "ol",
+      { class: "stepper" },
+      steps.map(([key, label], i) => el("li", { class: i < position ? "done" : i === position ? "now" : "" }, label)),
+    ),
+  );
+}
+
+function jobPanel(project) {
+  const job = project.job;
+  const panel = el("section", { class: `card job ${job.status}`, id: "job-panel" });
+  const bar = el("div", { class: "bar-fill", style: `width:${Math.round((job.progress || 0) * 100)}%` });
+  const log = el("pre", { class: "log" }, job.log || "");
+  append(panel, [
+    el(
+      "div",
+      { class: "job-head" },
+      el("strong", { class: "job-title" }, JOB_NAMES[job.kind] || job.kind),
+      el("span", { class: "job-step muted" }, job.status === "queued" ? "waiting for a worker…" : job.step || ""),
+      jobActive(project)
+        ? el("button", { class: "btn small", disabled: job.cancel_requested, onclick: () => act(() => api.post(`/api/jobs/${job.id}/cancel`), "Cancelling…") }, job.cancel_requested ? "Cancelling…" : "Cancel")
+        : null,
+    ),
+    el("div", { class: "bar" }, bar),
+    job.status === "failed" ? el("p", { class: "banner error" }, job.error || "failed") : null,
+    el("details", { open: job.status === "failed" }, el("summary", {}, "Log"), log),
+  ]);
+  return panel;
+}
+
+function updateJobPanel(job) {
+  const panel = document.getElementById("job-panel");
+  if (!panel || !job) return;
+  panel.querySelector(".bar-fill").style.width = `${Math.round((job.progress || 0) * 100)}%`;
+  panel.querySelector(".job-step").textContent = job.status === "queued" ? "waiting for a worker…" : job.step || "";
+  const log = panel.querySelector(".log");
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+  log.textContent = job.log || "";
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+// ---- path A: clips --------------------------------------------------------------------------
+
+function clipsSection(project) {
+  const list = el("ol", { class: "clip-list" });
+  project.clips.forEach((clip, index) => {
+    const move = (delta) => {
+      const ids = project.clips.map((c) => c.id);
+      const [moved] = ids.splice(index, 1);
+      ids.splice(index + delta, 0, moved);
+      act(() => api.put(`/api/projects/${project.id}/clips/order`, { ids }));
+    };
+    list.append(
+      el(
+        "li",
+        { class: "clip" },
+        el("video", { src: mediaUrl(project.id, clip.key), preload: "metadata", muted: true, playsinline: true, controls: true }),
+        el(
+          "div",
+          { class: "clip-info" },
+          el("strong", {}, clip.name),
+          el("small", { class: "muted" }, `${seconds(clip.duration)} · ${clip.width}×${clip.height} · ${Math.round(clip.fps)} fps${clip.has_audio ? "" : " · no sound"}${clip.hdr ? " · HDR" : ""} · ${megabytes(clip.size)}`),
+        ),
+        el(
+          "div",
+          { class: "row-actions" },
+          el("button", { class: "icon-btn", title: "Move up", disabled: index === 0, onclick: () => move(-1) }, "↑"),
+          el("button", { class: "icon-btn", title: "Move down", disabled: index === project.clips.length - 1, onclick: () => move(1) }, "↓"),
+          el("button", { class: "icon-btn", title: "Remove", onclick: () => confirm(`Remove ${clip.name}?`) && act(() => api.del(`/api/projects/${project.id}/clips/${clip.id}`)) }, "✕"),
+        ),
+      ),
+    );
+  });
+  const picker = el("input", { type: "file", accept: "video/*", multiple: true, hidden: true, onchange: (event) => uploadClips(project, [...event.target.files]) });
+  const drop = el(
+    "div",
+    {
+      class: "dropzone",
+      tabindex: 0,
+      role: "button",
+      onclick: () => picker.click(),
+      onkeydown: (event) => (event.key === "Enter" || event.key === " ") && picker.click(),
+      ondragover: (event) => {
+        event.preventDefault();
+        drop.classList.add("over");
+      },
+      ondragleave: () => drop.classList.remove("over"),
+      ondrop: (event) => {
+        event.preventDefault();
+        drop.classList.remove("over");
+        uploadClips(project, [...event.dataTransfer.files].filter((f) => f.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|mkv)$/i.test(f.name)));
+      },
+    },
+    el("strong", {}, "Drop video clips here, or click to choose"),
+    el("small", { class: "muted" }, `MP4, MOV or WebM · up to ${state.config.max_input_seconds}s in total · clips play in this order`),
+    picker,
+  );
+  const progress = el("div", { id: "upload-progress" });
+  const body = [
+    project.clips.length ? list : null,
+    el("p", { class: "muted small" }, project.clips.length ? `Total ${seconds(project.input_seconds)} of ${state.config.max_input_seconds}s.` : "Portrait (9:16) works best; other shapes are centre-cropped."),
+    drop,
+    progress,
+  ];
+  if (project.analysis) {
+    const count = `${project.clips.length} clip${project.clips.length === 1 ? "" : "s"} · ${seconds(project.input_seconds)}`;
+    return section(null, el("details", {}, el("summary", {}, el("strong", {}, "Your video: "), count, " (changing clips means processing again)"), ...body));
+  }
+  return section("Your video", ...body);
+}
+
+async function uploadClips(project, files) {
+  if (!files.length) return;
+  const box = document.getElementById("upload-progress");
+  for (const file of files) {
+    const bar = el("div", { class: "bar-fill" });
+    const row = el("div", { class: "upload-row" }, el("span", {}, file.name), el("div", { class: "bar" }, bar));
+    box?.append(row);
+    try {
+      state.project = await upload(`/api/projects/${project.id}/clips`, file, file.name, (f) => (bar.style.width = `${Math.round(f * 100)}%`));
+      toast(`Added ${file.name}`, "ok");
+    } catch (error) {
+      toast(`${file.name}: ${error.message}`, "error");
+    } finally {
+      row.remove();
+    }
+  }
+  render();
+}
+
+// ---- path B: idea, script, recording ------------------------------------------------------
+
+function ideaSection(project) {
+  const schema = state.config.idea;
+  const idea = project.idea || { text: "", format: "storytime", tone: "casual", length: 30, language: "id" };
+  const text = el("textarea", { rows: 4, maxlength: 2000, placeholder: "What is the reel about? A story, a tip, an opinion…" }, idea.text);
+  const format = el("select", {}, options("format", enumOf(schema, "format"), idea.format));
+  const tone = el("select", {}, options("tone", enumOf(schema, "tone"), idea.tone));
+  const language = el("select", {}, options("idea_language", ["id", "en"], idea.language));
+  const length = el("input", { type: "range", min: 15, max: 90, step: 5, value: idea.length });
+  const lengthLabel = el("output", {}, `${idea.length}s`);
+  length.addEventListener("input", () => (lengthLabel.textContent = `${length.value}s`));
+  const write = () => {
+    if (text.value.trim().length < 3) return toast("Describe the idea first", "error");
+    const takes = project.script ? project.script.scenes.filter((s) => s.take).length : 0;
+    if (takes && !confirm(`A new script replaces the current one and deletes ${takes} recorded take(s). Continue?`)) return;
+    act(
+      () => api.put(`/api/projects/${project.id}/idea`, { text: text.value.trim(), format: format.value, tone: tone.value, length: Number(length.value), language: language.value }),
+      "Muse Spark is writing the script…",
+    );
+  };
+  const open = !project.script;
+  const body = el(
+    "div",
+    { class: "form" },
+    field("Idea or topic", text),
+    el("div", { class: "grid3" }, field("Format", format), field("Tone", tone), field("Language", language)),
+    field("Length", el("div", { class: "range" }, length, lengthLabel)),
+    el("button", { class: "btn primary", onclick: write }, project.script ? "Write a new script" : "Write the script"),
+  );
+  if (open) return section("Your idea", body);
+  return section(null, el("details", {}, el("summary", {}, el("strong", {}, "Your idea: "), idea.text.slice(0, 90), idea.text.length > 90 ? "…" : ""), body));
+}
+
+function scriptSection(project) {
+  const script = structuredClone(project.script);
+  let dirty = false;
+  const save = el("button", { class: "btn", disabled: true }, "Save script");
+  const markDirty = () => {
+    dirty = true;
+    save.disabled = false;
+  };
+  const payload = () => ({
+    title: titleInput.value.trim() || "Untitled",
+    language: script.language,
+    entities: script.entities,
+    scenes: script.scenes.map(({ take, ...scene }) => scene),
+  });
+  save.addEventListener("click", () => act(() => api.put(`/api/projects/${project.id}/script`, payload()), "Script saved"));
+  const titleInput = el("input", { value: script.title, maxlength: 120, oninput: markDirty });
+  const list = el("ol", { class: "scenes" });
+  const redraw = () => {
+    clear(list);
+    script.scenes.forEach((scene, index) => list.append(sceneCard(project, script, scene, index, markDirty, redraw, () => dirty)));
+  };
+  redraw();
+  const add = el(
+    "button",
+    {
+      class: "btn small",
+      onclick: () => {
+        const used = new Set(script.scenes.map((s) => s.id));
+        let n = script.scenes.length + 1;
+        while (used.has(`s${n}`)) n += 1;
+        script.scenes.push({ id: `s${n}`, purpose: "story", lines: "…", direction: "", display: "none", visual: "", entities: [], take: null });
+        markDirty();
+        redraw();
+      },
+    },
+    "+ Add scene",
+  );
+  const recorded = script.scenes.filter((s) => s.take).length;
+  const content = [
+    el("p", { class: "muted small" }, `${script.scenes.length} scenes · ${recorded} recorded · about ${script.scenes.reduce((n, s) => n + s.lines.split(/\s+/).length, 0)} words. Record each scene in one take; edit the lines first if they don't sound like you.`),
+    field("Title", titleInput),
+    list,
+    el("div", { class: "row" }, add, save),
+  ];
+  if (project.analysis) {
+    return section(null, el("details", {}, el("summary", {}, el("strong", {}, "Script and takes: "), `${script.scenes.length} scenes recorded (a new take means processing again)`), ...content));
+  }
+  return section("Script", ...content);
+}
+
+function sceneCard(project, script, scene, index, markDirty, redraw, isDirty) {
+  const lines = el("textarea", { rows: 2, maxlength: 600, oninput: (e) => ((scene.lines = e.target.value), markDirty()) }, scene.lines);
+  const direction = el("input", { value: scene.direction, maxlength: 300, placeholder: "delivery note", oninput: (e) => ((scene.direction = e.target.value), markDirty()) });
+  const visual = el("textarea", { rows: 2, maxlength: 800, placeholder: "English: the picture shown while this scene is spoken", oninput: (e) => ((scene.visual = e.target.value), markDirty()) }, scene.visual);
+  const display = el(
+    "select",
+    {
+      onchange: (e) => {
+        scene.display = e.target.value;
+        visualField.hidden = scene.display === "none";
+        markDirty();
+      },
+    },
+    options("display", ["none", "cutaway", "overlay"], scene.display),
+  );
+  const visualField = field("Picture", visual);
+  visualField.hidden = scene.display === "none";
+  const move = (delta) => {
+    const [item] = script.scenes.splice(index, 1);
+    script.scenes.splice(index + delta, 0, item);
+    markDirty();
+    redraw();
+  };
+  const remove = () => {
+    if (scene.take && !confirm("This scene has a recorded take. Delete the scene and its take when you save?")) return;
+    script.scenes.splice(index, 1);
+    markDirty();
+    redraw();
+  };
+  const record = () => {
+    if (isDirty()) return toast("Save the script before recording", "error");
+    const recorder = new Recorder({
+      scene,
+      index,
+      total: script.scenes.length,
+      onTake: async (blob, name, progress) => {
+        state.project = await upload(`/api/projects/${project.id}/scenes/${scene.id}/take`, blob, name, progress);
+        toast(`Scene ${index + 1} recorded`, "ok");
+      },
+      onClose: () => render(),
+    });
+    recorder.open();
+  };
+  const filePicker = el("input", {
+    type: "file",
+    accept: "video/*",
+    hidden: true,
+    onchange: async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      if (isDirty()) return toast("Save the script before adding takes", "error");
+      await act(() => upload(`/api/projects/${project.id}/scenes/${scene.id}/take`, file, file.name), `Scene ${index + 1}: take added`);
+    },
+  });
+  const take = scene.take
+    ? el(
+        "div",
+        { class: "take-row" },
+        el("video", { src: mediaUrl(project.id, scene.take.key), controls: true, playsinline: true, preload: "metadata" }),
+        el("span", { class: "pill ok" }, `recorded · ${seconds(scene.take.duration)}`),
+        el("button", { class: "btn small", onclick: record }, "Retake"),
+        el("button", { class: "icon-btn", title: "Delete take", onclick: () => confirm("Delete this take?") && act(() => api.del(`/api/projects/${project.id}/scenes/${scene.id}/take`)) }, "✕"),
+      )
+    : el(
+        "div",
+        { class: "take-row" },
+        el("button", { class: "btn primary small", onclick: record }, "● Record"),
+        el("button", { class: "btn small", onclick: () => filePicker.click() }, "Upload a take"),
+        filePicker,
+      );
+  return el(
+    "li",
+    { class: `scene${scene.take ? " recorded" : ""}` },
+    el(
+      "div",
+      { class: "scene-head" },
+      el("span", { class: "scene-n" }, String(index + 1)),
+      el("span", { class: "muted small" }, scene.purpose || ""),
+      el(
+        "div",
+        { class: "row-actions" },
+        el("button", { class: "icon-btn", title: "Move up", disabled: index === 0, onclick: () => move(-1) }, "↑"),
+        el("button", { class: "icon-btn", title: "Move down", disabled: index === script.scenes.length - 1, onclick: () => move(1) }, "↓"),
+        el("button", { class: "icon-btn", title: "Delete scene", disabled: script.scenes.length === 1, onclick: remove }, "✕"),
+      ),
+    ),
+    field("Lines", lines),
+    el("div", { class: "grid2" }, field("Delivery", direction), field("While spoken", display)),
+    visualField,
+    take,
+  );
+}
+
+// ---- style --------------------------------------------------------------------------------
+
+function styleSection(project) {
+  const schema = state.config.style;
+  const style = { ...project.style };
+  let timer = null;
+  // Saved quietly: re-rendering the page here would take the cursor out of the field.
+  const save = async () => {
+    try {
+      state.project = await api.put(`/api/projects/${project.id}/style`, style);
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  };
+  const later = () => {
+    clearTimeout(timer);
+    timer = setTimeout(save, 600);
+  };
+  const select = (name, label, hint) =>
+    field(label, el("select", { onchange: (e) => ((style[name] = e.target.value), save()) }, options(name, enumOf(schema, name), style[name])), hint);
+  const color = el("input", { type: "color", value: style.caption_color, onchange: (e) => ((style.caption_color = e.target.value.toUpperCase()), save()) });
+  const watermark = el("input", { value: style.watermark, maxlength: 60, placeholder: "@yourname", oninput: (e) => ((style.watermark = e.target.value), later()) });
+  const pictures = project.analysis ? "Picture changes apply when you update the pictures." : null;
+  return section(
+    "Style",
+    el(
+      "div",
+      { class: "form" },
+      el("h3", {}, "Pictures"),
+      select("visual_style", "Look", pictures),
+      select("visuals", "How many"),
+      project.path === "video" ? select("language", "Spoken language") : null,
+      el("h3", {}, "Captions"),
+      select("captions", "Style"),
+      el("div", { class: "grid2" }, field("Highlight", color), select("caption_case", "Case")),
+      select("caption_position", "Position"),
+      el("h3", {}, "Watermark"),
+      field("Text", watermark),
+      select("watermark_position", "Position"),
+    ),
+  );
+}
+
+// ---- processing ----------------------------------------------------------------------------
+
+function processSection(project) {
+  const processed = Boolean(project.analysis);
+  const run = (fresh) =>
+    act(() => api.post(`/api/projects/${project.id}/process`, { fresh }), processed ? "Updating the pictures…" : "Processing started");
+  return section(
+    processed ? "Pictures" : "Process",
+    el(
+      "p",
+      { class: "muted small" },
+      processed
+        ? "Update applies style changes and redoes only what changed. Redo makes a new picture for every moment."
+        : "Transcribes the speech (Muse Voice Transcribe), plans the pictures (Muse Spark), finds faces and references (SAM 3.1) and draws the pictures (Muse Image).",
+    ),
+    el(
+      "div",
+      { class: "row" },
+      el("button", { class: "btn primary", onclick: () => run(false) }, processed ? "Update pictures" : "Process the video"),
+      processed
+        ? el("button", { class: "btn", onclick: () => confirm("Make a new picture for every moment? Each picture costs about $0.01.") && run(true) }, "Redo all pictures")
+        : null,
+    ),
+  );
+}
+
+function picturesSection(project) {
+  const analysis = project.analysis;
+  if (!analysis) return section("Pictures", el("p", { class: "muted" }, "Not planned yet."));
+  const entities = analysis.entities.length
+    ? el(
+        "div",
+        { class: "entities" },
+        analysis.entities.map((entity) =>
+          el(
+            "div",
+            { class: "entity", title: entity.description },
+            entity.ref_key ? el("img", { src: mediaUrl(project.id, entity.ref_key), alt: "" }) : el("div", { class: "thumb-empty" }, entity.kind[0].toUpperCase()),
+            el("div", {}, el("strong", {}, entity.name), el("small", { class: "muted" }, entity.ref_source === "video" ? "from your video" : entity.ref_source === "generated" ? "reference drawn" : entity.kind)),
+          ),
+        ),
+      )
+    : null;
+  const moments = analysis.moments.length
+    ? el("ol", { class: "moments" }, analysis.moments.map((moment) => momentCard(project, moment)))
+    : el("p", { class: "muted" }, project.style.visuals === "off" ? "Pictures are off for this reel." : "No moments were planned.");
+  return section(
+    "Pictures",
+    analysis.summary ? el("p", { class: "muted small" }, analysis.summary) : null,
+    entities,
+    moments,
+  );
+}
+
+function momentCard(project, moment) {
+  const prompt = el("textarea", { rows: 3, maxlength: 1200 }, moment.prompt);
+  const display = el(
+    "select",
+    {
+      onchange: (e) => act(() => api.patch(`/api/projects/${project.id}/moments/${moment.id}`, { display: e.target.value }), "Making a picture in the new shape…"),
+    },
+    options("display", ["cutaway", "overlay"], moment.display),
+  );
+  const enabled = el("input", {
+    type: "checkbox",
+    checked: moment.enabled,
+    onchange: (e) => act(() => api.patch(`/api/projects/${project.id}/moments/${moment.id}`, { enabled: e.target.checked })),
+  });
+  const regenerate = () => {
+    const text = prompt.value.trim();
+    act(
+      () => api.post(`/api/projects/${project.id}/moments/${moment.id}/regenerate`, text && text !== moment.prompt ? { prompt: text } : {}),
+      "Regenerating the picture…",
+    );
+  };
+  const picture = moment.asset
+    ? el("a", { href: mediaUrl(project.id, moment.asset.key), target: "_blank", rel: "noopener" }, el("img", { src: mediaUrl(project.id, moment.asset.key), alt: moment.prompt, loading: "lazy" }))
+    : el("div", { class: "thumb-empty big" }, moment.error ? "!" : "…");
+  return el(
+    "li",
+    { class: `moment${moment.enabled ? "" : " off"}` },
+    el("div", { class: `moment-picture ${moment.display}` }, picture),
+    el(
+      "div",
+      { class: "moment-body" },
+      el("div", { class: "moment-head" }, el("span", { class: "time" }, `${seconds(moment.start)} – ${seconds(moment.end)}`), el("label", { class: "toggle" }, enabled, " show")),
+      el("p", { class: "quote" }, "“", moment.quote, "”"),
+      moment.note ? el("p", { class: "note" }, moment.note) : null,
+      moment.error ? el("p", { class: "banner error small" }, moment.error) : null,
+      field("Shown as", display),
+      el("details", {}, el("summary", {}, "Picture prompt"), prompt, el("button", { class: "btn small", onclick: regenerate }, "Regenerate")),
+    ),
+  );
+}
+
+function transcriptSection(project) {
+  const transcript = project.transcript;
+  if (!transcript) return null;
+  if (!transcript.turns.length) return section("Captions", el("p", { class: "muted" }, "No speech was recognised, so the reel has no captions."));
+  return section(
+    "Captions",
+    el("p", { class: "muted small" }, "Fix any word Muse Voice Transcribe misheard. Words are re-timed over the same speech."),
+    el(
+      "ol",
+      { class: "turns" },
+      transcript.turns.map((turn) => {
+        const text = el("textarea", {
+          rows: Math.min(5, Math.ceil(turn.text.length / 60)),
+          maxlength: 2000,
+          onchange: (e) => {
+            const value = e.target.value.trim();
+            if (value && value !== turn.text) act(() => api.put(`/api/projects/${project.id}/turns/${turn.id}`, { text: value }), "Caption updated");
+          },
+        }, turn.text);
+        return el("li", { class: "turn" }, el("span", { class: "time" }, seconds(turn.start)), text, turn.text !== turn.original ? el("small", { class: "muted" }, "heard: ", turn.original) : null);
+      }),
+    ),
+  );
+}
+
+// ---- rendering -----------------------------------------------------------------------------
+
+function renderSection(project) {
+  const fit = el("input", { type: "checkbox" });
+  const go = () => act(() => api.post(`/api/projects/${project.id}/render`, { fit_mb: fit.checked ? 25 : null }), "Rendering…");
+  const renders = [...project.renders].reverse();
+  return section(
+    "Reel",
+    el("label", { class: "toggle" }, fit, " Keep under 25 MB (for Messenger and Instagram DMs)"),
+    el("button", { class: "btn primary wide", onclick: go }, renders.length ? "Render again" : "Render the reel"),
+    renders.map((r, i) =>
+      el(
+        "div",
+        { class: "render" },
+        i === 0 ? el("video", { src: mediaUrl(project.id, r.key), controls: true, playsinline: true, preload: "metadata" }) : null,
+        el(
+          "div",
+          { class: "render-info" },
+          el("span", {}, `${seconds(r.duration)} · ${megabytes(r.size)}${r.fit_mb ? ` · ≤${r.fit_mb} MB` : ""}`),
+          el("small", { class: "muted" }, ago(r.created_at)),
+          el("a", { class: "btn small", href: mediaUrl(project.id, r.key, { download: true }) }, "Download"),
+        ),
+      ),
+    ),
+  );
+}
+
+function usageSection(project) {
+  const u = project.usage;
+  const rows = [
+    ["Muse Spark", `${u.spark_input_tokens.toLocaleString()} in · ${u.spark_output_tokens.toLocaleString()} out tokens`],
+    ["Muse Image", `${u.images} image${u.images === 1 ? "" : "s"}`],
+    ["SAM 3.1", `${u.sam_images} image${u.sam_images === 1 ? "" : "s"}`],
+    ["Voice Transcribe", seconds(u.asr_seconds)],
+  ];
+  return section(
+    "Model API usage",
+    el("dl", { class: "usage" }, rows.map(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])),
+    el("p", { class: "muted small" }, `About $${u.estimated_usd.toFixed(3)} at list prices (estimate).`),
+    el(
+      "button",
+      { class: "btn danger small", onclick: () => confirm("Delete this reel and all its files?") && act(async () => {
+          await api.del(`/api/projects/${project.id}`);
+          location.hash = "#/";
+          return null;
+        }, "Deleted") },
+      "Delete reel",
+    ),
+  );
+}
+
+// ---- start --------------------------------------------------------------------------------
+
+async function boot() {
+  try {
+    state.config = await api.get("/api/config");
+  } catch (error) {
+    clear(app).append(el("p", { class: "banner error" }, error.message));
+    return;
+  }
+  const status = document.getElementById("api-status");
+  status.hidden = false;
+  status.textContent = state.config.api_key ? `${state.config.models.spark} · ${state.config.models.image}` : "no API key";
+  status.className = `api-status ${state.config.api_key ? "ok" : "warn"}`;
+  start();
+}
+
+boot();
