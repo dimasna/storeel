@@ -247,8 +247,10 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
     variants = {v.id: v for v in story.variants}
     used_props = {b.show.prop for b in story.beats} | {b.switch.show.prop for b in story.beats if b.switch}
     used_props |= {p.id for p in story.props if not p.refs}  # the end card shows the key object
+    used_props.discard("")
     used_photos = {b.show.photo for b in story.beats}
     used_photos |= {b.switch.show.photo for b in story.beats if b.switch}
+    used_photos.discard("")
 
     first: list[Job] = []  # nothing to wait for
     second: list[Job] = []  # drawn from a picture made in the first round
@@ -327,7 +329,11 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
                 Request([_text(text)], size, False, []),
                 refs=list(prop.refs),
             )
-            (second if prop.refs else first).append(job)
+            if prop.refs:
+                second.append(job)  # its key depends on the portraits drawn first
+            else:
+                job.key = painter.key(scope, prop.id, text)
+                first.append(job)
     for prop_id in sorted(used_props - {p.id for p in story.props}):
         bp = bible.props.get(prop_id)  # a bible prop from an earlier chapter, shown again
         if bp and bp.image:

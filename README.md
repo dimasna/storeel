@@ -8,7 +8,8 @@ watermark.
 ```
             ┌─ I have a video ───────► upload clips ──────────────────────┐
 Create reel ┤                                                             ├─► transcribe ─► analyze ─► generate ─► compile
-            └─ Not yet ─► idea ─► scene script ─► record scene by scene ──┘
+            ├─ Not yet ─► idea ─► scene script ─► record scene by scene ──┤
+            └─ A novel ─► chapter ─► part script ─► record take by take ──┘ (pictures from the script and the bible)
 ```
 
 | Step | Model | What it does |
@@ -157,6 +158,35 @@ src/storeel/
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
 (`feat(scope): …`, `fix(scope): …`).
+
+## Novels
+
+A novel is told as a series: one reel per chapter, called a
+"part", and you are the storyteller.
+
+- **A novel** has a title, a synopsis, a language (Indonesian or English), a narration style
+  (casual, warm, dramatic or funny: it sets the voice and how part one opens, e.g. "Gue baru
+  baca part satu novel X..." or "Aku baru baca..."), a picture look and a watermark. Paste
+  each chapter's text.
+- **The part script** (Muse Spark): a hook on camera with a fixed opening, the story in beats
+  (part one's setup or a bridge from the previous part, rises, the turn, a cliffhanger), a
+  poll and a call to action ("... lengkapnya ada di link bio"). Each beat says what the screen
+  shows. The script is checked against the format and sent back for up to two fixes; anything
+  left is shown. Edit the words freely: edits keep your takes.
+- **Recording**: the part is split into a few takes (the hook, one per act, then the poll and
+  call to action) to record with the teleprompter, or upload one video of the whole part.
+- **The character bible** grows chapter by chapter. A new character is drawn full body and
+  cut out by SAM; in a later part they are redrawn from that portrait in the new outfit, so
+  the face stays the same. Recurring objects are kept too, and notes (a death, a secret)
+  carry into later scripts. Part N sees only what earlier parts added.
+- **On screen**: a "Part N" badge from the first frame, the hook on the sharp speaker, then
+  the speaker blurred behind each beat's red tag, its photo card, scene, cut-out object, note
+  or chat bubbles, and up to two characters standing at the bottom. Then the poll screen and
+  the end card. Pictures follow your recording: each take's words are shared out among its
+  beats.
+- **Cost** (October 2026, list prices): a 110-second part cost about $0.25 on the real API:
+  $0.13 for the script (Muse Spark at max effort), eight to nine pictures and five SAM
+  cut-outs, and the transcription. Later parts reuse the bible's pictures.
 
 ## Later: Messenger and Instagram
 
