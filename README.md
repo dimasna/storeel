@@ -26,7 +26,7 @@ Needs Python 3.12 with [uv](https://docs.astral.sh/uv/) and ffmpeg (`brew instal
 
 ```bash
 uv sync
-uv run storeel serve        # http://127.0.0.1:8000
+uv run storeel serve        # http://127.0.0.1:8000, or the next free port if 8000 is taken
 ```
 
 Each user brings their own Meta Model API key (create one in the Model API dashboard at

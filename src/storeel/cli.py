@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import shutil
+import socket
 import sys
 import uuid
 from pathlib import Path
@@ -19,10 +20,23 @@ from .projects import create_project, import_clip
 from .services import Services
 
 STYLE_CHOICES = Style.model_json_schema()["properties"]
+DEFAULT_PORT = 8000
 
 
 def _choices(field: str) -> list[str]:
     return list(STYLE_CHOICES[field]["enum"])
+
+
+def _port_free(host: str, port: int) -> bool:
+    """Whether the server could listen there (checked the way uvicorn binds)."""
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind((host, port))
+        except OSError:
+            return False
+    return True
 
 
 def serve(args: argparse.Namespace) -> int:
@@ -30,13 +44,28 @@ def serve(args: argparse.Namespace) -> int:
 
     from .web.app import create_app
 
+    if args.port is not None:
+        port = args.port
+        if not _port_free(args.host, port):
+            print(f"error: port {port} is already in use; pick another with --port", file=sys.stderr)
+            return 2
+    else:  # like most dev servers: take the next free port when the usual one is busy
+        port = next((p for p in range(DEFAULT_PORT, DEFAULT_PORT + 20) if _port_free(args.host, p)), 0)
+        if not port:
+            print(
+                f"error: ports {DEFAULT_PORT}-{DEFAULT_PORT + 19} are all in use; use --port", file=sys.stderr
+            )
+            return 2
+        if port != DEFAULT_PORT:
+            print(f"port {DEFAULT_PORT} is in use by another app, so the studio uses {port}", file=sys.stderr)
     if args.host not in ("127.0.0.1", "localhost"):
         print(
-            "warning: the studio has no login and spends your Model API credits; only expose it on a"
-            " network you trust",
+            "warning: the studio has no login, so anyone who can reach it can see and change the reels"
+            " on this machine; only expose it on a network you trust",
             file=sys.stderr,
         )
-    uvicorn.run(create_app(), host=args.host, port=args.port, log_level="info")
+    print(f"Storeel Studio: http://{args.host}:{port}", file=sys.stderr)
+    uvicorn.run(create_app(), host=args.host, port=port, log_level="info")
     return 0
 
 
@@ -87,9 +116,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="storeel", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
 
-    run = commands.add_parser("serve", help="start the studio at http://127.0.0.1:8000")
+    run = commands.add_parser(
+        "serve", help="start the studio at http://127.0.0.1:8000 (or the next free port)"
+    )
     run.add_argument("--host", default="127.0.0.1")
-    run.add_argument("--port", type=int, default=8000)
+    run.add_argument("--port", type=int, help=f"default: {DEFAULT_PORT}, or the next free port")
     run.set_defaults(handler=serve)
 
     reel = commands.add_parser("make", help="make a reel from video files, without the web UI")
