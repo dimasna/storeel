@@ -26,6 +26,9 @@ log = logging.getLogger(__name__)
 WIDTH, HEIGHT = 1080, 1920
 STANDARD_FPS = (24, 25, 30, 50, 60)
 HDR_TRANSFERS = frozenset({"arib-std-b67", "smpte2084"})  # HLG, PQ
+# Recent ffmpeg takes colour tags from the frames, not from -color_* output options: set them
+# on the frames, or players guess (and guess differently).
+TAG_BT709 = "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"
 
 
 class FFmpegError(RuntimeError):
@@ -254,6 +257,7 @@ def normalize_clip(
         f"crop={WIDTH}:{HEIGHT}",
         "setsar=1",
         "format=yuv420p",
+        TAG_BT709,
     ]
     cmd = [*_base_cmd(), "-i", str(src)]
     if not info.has_audio:

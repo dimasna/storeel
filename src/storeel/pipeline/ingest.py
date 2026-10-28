@@ -9,7 +9,7 @@ from ..jobs import JobContext, PipelineError
 from ..media import ffmpeg as ff
 from ..models import Project, Segment, Source
 
-VERSION = 1
+VERSION = 2  # 2: frames tagged BT.709
 
 
 def _scene_of(project: Project) -> dict[str, str]:

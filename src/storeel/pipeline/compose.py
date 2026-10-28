@@ -283,7 +283,7 @@ def encode(
     ]
     audio = ",".join([audio_filter, *fades] if audio_filter else fades)
     layer = "[1:v]scale=out_color_matrix=bt709:out_range=tv,format=yuva420p[layer]"
-    blend = "[0:v][layer]overlay=x=0:y=0:format=yuv420:eof_action=repeat,format=yuv420p[v]"
+    blend = f"[0:v][layer]overlay=x=0:y=0:format=yuv420:eof_action=repeat,format=yuv420p,{ff.TAG_BT709}[v]"
     cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-i", str(master)]
     cmd += ["-f", "rawvideo", "-pix_fmt", "rgba", "-video_size", f"{W}x{H}"]
     cmd += ["-framerate", str(compositor.overlay_fps), "-i", "pipe:0"]
