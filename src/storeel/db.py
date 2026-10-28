@@ -193,9 +193,12 @@ class Database:
 
     # ---- jobs -------------------------------------------------------------------------------
 
-    def enqueue(self, project_id: str, kind: str, params: dict[str, Any] | None = None) -> Job:
-        """Queue a job; at most one job per project can be queued or running."""
-        job_id = uuid.uuid4().hex
+    def enqueue(
+        self, project_id: str, kind: str, params: dict[str, Any] | None = None, *, job_id: str | None = None
+    ) -> Job:
+        """Queue a job; at most one job per project can be queued or running. Pass `job_id` to
+        prepare things the job needs (its API key) before a worker can pick it up."""
+        job_id = job_id or uuid.uuid4().hex
         with self._transaction() as conn:
             if conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is None:
                 raise NotFound(f"no project {project_id}")
@@ -288,13 +291,20 @@ class Database:
         return bool(row and row["cancel_requested"])
 
     def fail_interrupted(self) -> int:
-        """Jobs left 'running' by a previous process: mark them failed (retrying is cheap, each
-        stage reuses what it already made, and an automatic restart could repeat a failure)."""
+        """Jobs a previous process left running or queued: mark them failed. Their users' API
+        keys were only in that process's memory, and retrying is cheap (each stage reuses
+        what it already made), while an automatic restart could repeat a failure."""
         with self._transaction() as conn:
-            cursor = conn.execute(
+            running = conn.execute(
                 "UPDATE jobs SET status = 'failed', finished_at = ?,"
-                " error = 'interrupted: the server stopped while this job was running'"
+                " error = 'interrupted: the server stopped while this job was running; start it again'"
                 " WHERE status = 'running'",
                 (now_iso(),),
-            )
-        return cursor.rowcount
+            ).rowcount
+            queued = conn.execute(
+                "UPDATE jobs SET status = 'failed', finished_at = ?,"
+                " error = 'the server restarted before this job started; start it again'"
+                " WHERE status = 'queued'",
+                (now_iso(),),
+            ).rowcount
+        return running + queued

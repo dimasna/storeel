@@ -6,6 +6,7 @@ import argparse
 import logging
 import shutil
 import sys
+import uuid
 from pathlib import Path
 
 from .common import slug
@@ -42,7 +43,7 @@ def serve(args: argparse.Namespace) -> int:
 def make(args: argparse.Namespace) -> int:
     """Upload -> process -> render in this process: a quick end-to-end check of the pipeline."""
     settings = get_settings()
-    settings.require_api_key()
+    key = settings.require_api_key()  # your own key, from MODEL_API_KEY or .env
     ff.require_ffmpeg()
     services = Services.create(settings)
     style = Style(
@@ -59,7 +60,9 @@ def make(args: argparse.Namespace) -> int:
         services.db.update_project(project.id, lambda p, c=clip: p.clips.append(c))
         print(f"  {video.name}: {clip.width}x{clip.height}, {clip.fps:g} fps, {clip.duration:.1f}s")
     for kind, params in (("process", {}), ("render", {"fit_mb": args.fit_mb})):
-        job = services.db.claim(services.db.enqueue(project.id, kind, params).id)
+        job_id = uuid.uuid4().hex
+        services.keys.put(job_id, key)
+        job = services.db.claim(services.db.enqueue(project.id, kind, params, job_id=job_id).id)
         assert job is not None
         status = execute(services, job, HANDLERS)
         if status != "done":
@@ -77,7 +80,6 @@ def make(args: argparse.Namespace) -> int:
         f" (about ${usage.estimated_usd:.3f} at list prices)"
     )
     print(f"open the project in the studio to review it: storeel serve, then /#/p/{project.id}")
-    services.close()
     return 0
 
 

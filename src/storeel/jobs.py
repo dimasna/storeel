@@ -50,10 +50,28 @@ class JobContext:
         self._cancelled = False
         self._progress_written = 0.0
         self._progress_range = (0.0, 1.0)
+        self._client: MetaClient | None = None
+        self._client_lock = threading.Lock()
 
     @property
     def client(self) -> MetaClient:
-        return self.services.client
+        """A Model API client with the key of the user who started the job."""
+        with self._client_lock:
+            if self._client is None:
+                key = self.services.keys.get(self.job.id)
+                if key is None:
+                    raise PipelineError(
+                        "this job has no Model API key (the server restarted?):"
+                        " add your key and start it again"
+                    )
+                self._client = self.services.client(key)
+            return self._client
+
+    def close(self) -> None:
+        with self._client_lock:
+            if self._client is not None:
+                self._client.close()
+                self._client = None
 
     # ---- feedback ---------------------------------------------------------------------------
 
@@ -149,6 +167,8 @@ def execute(services: Services, job: Job, handlers: dict[str, Handler]) -> str:
         log.exception("job %s (%s) failed", job.id, job.kind)
         ctx.log(f"failed: {error}")
     finally:
+        services.keys.drop(job.id)  # the user's key is not kept past their job
+        ctx.close()
         try:
             ctx.flush_usage()
         except Exception:

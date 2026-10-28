@@ -1,7 +1,7 @@
 // Storeel Studio: a single-page UI over the backend's actions. The backend owns the flow
 // (stages, jobs, validation); this file only shows the project and calls the actions.
 
-import { api, upload, mediaUrl, ApiError } from "./api.js";
+import { api, apiKey, upload, mediaUrl, ApiError } from "./api.js";
 import { el, append, clear, toast, seconds, megabytes, ago } from "./dom.js";
 import { Recorder } from "./recorder.js";
 
@@ -84,6 +84,10 @@ async function act(promise, success) {
     if (success) toast(success, "ok");
     return result;
   } catch (error) {
+    if (error instanceof ApiError && error.code === "api_key_required") {
+      openKeyDialog(apiKey.get() ? "That key does not look right. Paste your Meta Model API key." : "Add your Meta Model API key to continue.");
+      return null;
+    }
     toast(error.message || String(error), "error");
     if (error instanceof ApiError && error.status === 409) refresh();
     return null;
@@ -226,12 +230,27 @@ function render() {
   if (!project) return;
   clear(app);
   app.append(header(project));
-  if (!state.config.api_key) {
+  if (!apiKey.get()) {
     app.append(
-      el("p", { class: "banner warn" }, "MODEL_API_KEY is not set. Copy .env.example to .env, add your Model API key and restart `storeel serve`."),
+      el(
+        "p",
+        { class: "banner warn" },
+        "Add your Meta Model API key to transcribe, plan and draw pictures. Rendering works without it. ",
+        el("button", { class: "btn small", onclick: () => openKeyDialog() }, "Add API key"),
+      ),
     );
   }
-  if (project.error && !jobActive(project)) app.append(el("p", { class: "banner error" }, `Last job failed: ${project.error}`));
+  if (project.error && !jobActive(project)) {
+    const keyProblem = /\b(401|403)\b|authentication|API key/i.test(project.error);
+    app.append(
+      el(
+        "p",
+        { class: "banner error" },
+        `Last job failed: ${project.error} `,
+        keyProblem ? el("button", { class: "btn small", onclick: () => openKeyDialog() }, "Update API key") : null,
+      ),
+    );
+  }
   if (project.job && (jobActive(project) || project.job.status === "failed")) app.append(jobPanel(project));
 
   const locked = jobActive(project);
@@ -801,6 +820,85 @@ function usageSection(project) {
   );
 }
 
+// ---- your Model API key ---------------------------------------------------------------------
+
+function updateKeyButton() {
+  const button = document.getElementById("key-button");
+  button.hidden = false;
+  const hint = apiKey.hint();
+  button.textContent = hint ? `API key ${hint}` : "Add API key";
+  button.className = `key-button ${hint ? "ok" : "warn"}`;
+}
+
+function openKeyDialog(reason) {
+  if (document.querySelector(".modal.key-dialog")) return;
+  const root = document.getElementById("modal-root");
+  const input = el("input", { type: "password", autocomplete: "off", spellcheck: "false", placeholder: "LLM|…", "aria-label": "Model API key" });
+  const status = el("div", { class: "key-status", "aria-live": "polite" });
+  const save = el("button", { class: "btn primary" }, "Check and save");
+  const close = () => {
+    document.removeEventListener("keydown", onKey);
+    modal.remove();
+  };
+  const onKey = (event) => event.key === "Escape" && close();
+  const check = async () => {
+    const key = input.value.trim();
+    if (!key) return input.focus();
+    save.disabled = true;
+    clear(status).append(el("span", { class: "muted" }, "Asking Meta which models this key can use…"));
+    try {
+      const result = await api.checkKey(key);
+      apiKey.set(key);
+      updateKeyButton();
+      clear(status).append(
+        el("p", { class: "ok-text" }, `Key saved in this browser. It can use ${result.models.length} models.`),
+        result.missing.length ? el("p", { class: "banner warn small" }, `Not listed for this key: ${result.missing.join(", ")}. Jobs that need them may fail.`) : null,
+      );
+      toast("API key saved", "ok");
+      if (state.project) render();
+      setTimeout(close, result.missing.length ? 4000 : 900);
+    } catch (error) {
+      clear(status).append(el("p", { class: "banner error small" }, error.message));
+    } finally {
+      save.disabled = false;
+    }
+  };
+  save.addEventListener("click", check);
+  input.addEventListener("keydown", (event) => event.key === "Enter" && check());
+  const forget = apiKey.get()
+    ? el("button", {
+        class: "btn danger small",
+        onclick: () => {
+          apiKey.clear();
+          updateKeyButton();
+          toast("API key removed from this browser", "ok");
+          close();
+          if (state.project) render();
+        },
+      }, "Forget key")
+    : null;
+  const modal = el(
+    "div",
+    { class: "modal key-dialog", role: "dialog", "aria-modal": "true", "aria-label": "Model API key" },
+    el(
+      "div",
+      { class: "modal-card" },
+      el("div", { class: "modal-head" }, el("h2", {}, "Your Meta Model API key"), el("button", { class: "icon-btn", "aria-label": "Close", onclick: close }, "✕")),
+      reason ? el("p", { class: "banner warn small" }, reason) : null,
+      el("p", { class: "muted small" }, "Each person uses their own key, and the Model API usage is billed to it. Create one in the ", el("a", { href: "https://dev.meta.ai/", target: "_blank", rel: "noopener" }, "Model API dashboard"), "."),
+      apiKey.get() ? el("p", { class: "small" }, `Saved key: ${apiKey.hint()}`) : null,
+      field("API key", input),
+      status,
+      el("div", { class: "row" }, save, forget),
+      el("p", { class: "muted small" }, "The key stays in this browser. It is sent to the studio's server only with actions that start a job, held in memory until that job ends, and never written to disk or logs."),
+    ),
+  );
+  modal.addEventListener("click", (event) => event.target === modal && close());
+  document.addEventListener("keydown", onKey);
+  root.append(modal);
+  input.focus();
+}
+
 // ---- start --------------------------------------------------------------------------------
 
 async function boot() {
@@ -810,10 +908,8 @@ async function boot() {
     clear(app).append(el("p", { class: "banner error" }, error.message));
     return;
   }
-  const status = document.getElementById("api-status");
-  status.hidden = false;
-  status.textContent = state.config.api_key ? `${state.config.models.spark} · ${state.config.models.image}` : "no API key";
-  status.className = `api-status ${state.config.api_key ? "ok" : "warn"}`;
+  document.getElementById("key-button").addEventListener("click", () => openKeyDialog());
+  updateKeyButton();
   start();
 }
 

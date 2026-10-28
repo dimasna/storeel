@@ -1,9 +1,11 @@
 """HTTP API for the studio, plus the static single-page UI.
 
-The server holds the Model API key and spends money on the user's behalf, but has no login
-yet: it is meant for this machine only. It binds to 127.0.0.1 by default, accepts only known
-Host headers (blocking DNS-rebinding), and refuses state-changing requests sent by other web
-sites (Origin / Sec-Fetch-Site checks). Uploads are size-checked before they are read.
+Each user brings their own Model API key: the browser sends it with the requests that start
+a job, and the server keeps it in memory only until that job ends (see services.KeyVault).
+There is no login yet, so the studio is meant for this machine only. It binds to 127.0.0.1
+by default, accepts only known Host headers (blocking DNS-rebinding), and refuses
+state-changing requests sent by other web sites (Origin / Sec-Fetch-Site checks). Uploads
+are size-checked before they are read.
 
 Each step of the flow is an action on the backend; the UI only calls them. While a job runs,
 a project accepts no edits except cancelling, so a job never works on data that changes
@@ -14,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -30,18 +33,25 @@ from ..config import ConfigError, Settings, get_settings
 from ..db import Conflict, NotFound
 from ..jobs import PipelineError, Workers
 from ..media import ffmpeg as ff
+from ..meta import MetaAPIError
 from ..models import DEFAULT_TITLE, Display, Idea, Project, Scene, Script, ScriptEdit, Style
 from ..pipeline.render import FONT_FILE
 from ..pipeline.run import HANDLERS
 from ..pipeline.transcribe import retime
 from ..projects import create_project, import_clip, summary, view
-from ..services import Services
+from ..services import Services, valid_key
 
 log = logging.getLogger(__name__)
 STATIC = Path(__file__).resolve().parent / "static"
 MEDIA_PREFIXES = ("uploads/", "refs/", "assets/", "renders/")
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 UPLOAD_SUFFIXES = ("/clips", "/take")
+KEY_HEADER = "x-model-api-key"
+KEYED_JOBS = frozenset({"script", "process", "regenerate"})  # the jobs that call the Model API
+
+
+class KeyRequired(Exception):
+    """The request needs the user's Model API key and did not carry a usable one."""
 
 
 class Body(BaseModel):
@@ -98,14 +108,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         ff.require_ffmpeg()
-        if not settings.has_api_key:
-            log.warning("MODEL_API_KEY is not set: the studio opens, but jobs will fail until it is")
+        if settings.has_api_key:
+            log.info("MODEL_API_KEY is only used by `storeel make`; the studio asks each user for theirs")
         workers.start()
         try:
             yield
         finally:
             workers.stop()
-            services.close()
 
     app = FastAPI(
         title="Storeel Studio",
@@ -151,6 +160,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def bad_input(_: Request, exc: PipelineError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=400)
 
+    @app.exception_handler(KeyRequired)
+    async def key_required(_: Request, exc: KeyRequired) -> JSONResponse:
+        message = str(exc) or "add your Meta Model API key first"
+        return JSONResponse({"detail": message, "code": "api_key_required"}, status_code=401)
+
     @app.exception_handler(ConfigError)
     async def misconfigured(_: Request, exc: ConfigError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=503)
@@ -176,9 +190,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         project, _ = db.update_project(project_id, change)
         return view(services, project)
 
-    def start(project_id: str, kind: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        settings.require_api_key()
-        db.enqueue(project_id, kind, params)
+    def user_key(request: Request) -> str:
+        raw = request.headers.get(KEY_HEADER)
+        key = valid_key(raw)
+        if key is None:
+            raise KeyRequired("" if raw is None else "that does not look like a Model API key")
+        return key
+
+    def start(
+        project_id: str, kind: str, params: dict[str, Any] | None = None, key: str | None = None
+    ) -> dict[str, Any]:
+        job_id = uuid.uuid4().hex
+        if kind in KEYED_JOBS:
+            if key is None:
+                raise KeyRequired()
+            services.keys.put(job_id, key)  # before the job exists, so no worker can run it keyless
+        try:
+            db.enqueue(project_id, kind, params, job_id=job_id)
+        except BaseException:
+            services.keys.drop(job_id)
+            raise
         return view(services, load(project_id))
 
     def scene(project: Project, scene_id: str) -> Scene:
@@ -194,7 +225,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/config")
     def config() -> dict[str, Any]:
         return {
-            "api_key": settings.has_api_key,
+            "bring_your_own_key": True,
             "max_input_seconds": settings.max_input_seconds,
             "max_upload_mb": settings.max_upload_mb,
             "models": {
@@ -206,6 +237,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "style": Style.model_json_schema(),
             "idea": Idea.model_json_schema(),
         }
+
+    @app.post("/api/key/check")
+    def check_key(request: Request) -> JSONResponse:
+        """Ask Meta which models the user's key can use (nothing is stored)."""
+        key = user_key(request)
+        client = services.client(key, max_attempts=2)
+        try:
+            models = client.list_models()
+        except MetaAPIError as exc:
+            status = 401 if exc.status in (401, 403) else 502
+            return JSONResponse({"detail": f"Meta did not accept the key: {exc}"}, status_code=status)
+        finally:
+            client.close()
+        needed = [settings.spark_model, settings.image_model, settings.asr_model, settings.sam_model]
+        return JSONResponse({"ok": True, "models": models, "missing": [m for m in needed if m not in models]})
 
     @app.get("/api/projects")
     def list_projects() -> list[dict[str, Any]]:
@@ -289,11 +335,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ---- path B: idea, script and takes -----------------------------------------------------
 
     @app.put("/api/projects/{project_id}/idea")
-    def set_idea(project_id: str, body: Idea) -> dict[str, Any]:
+    def set_idea(project_id: str, body: Idea, request: Request) -> dict[str, Any]:
         project = load(project_id)
         if project.path != "idea":
             raise PipelineError("this project starts from a video")
-        settings.require_api_key()
+        key = user_key(request)  # before anything changes, so a missing key loses nothing
         old_takes: list[str] = []
 
         def save(p: Project) -> None:
@@ -303,9 +349,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             p.invalidate_media()
 
         edit(project_id, save)
-        for key in old_takes:
-            services.files(project_id).delete(key)
-        return start(project_id, "script")
+        for take in old_takes:
+            services.files(project_id).delete(take)
+        return start(project_id, "script", key=key)
 
     @app.put("/api/projects/{project_id}/script")
     def set_script(project_id: str, body: ScriptEdit) -> dict[str, Any]:
@@ -378,11 +424,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ---- processing and review --------------------------------------------------------------
 
     @app.post("/api/projects/{project_id}/process")
-    def process(project_id: str, body: ProcessRequest) -> dict[str, Any]:
+    def process(project_id: str, body: ProcessRequest, request: Request) -> dict[str, Any]:
         project = load(project_id)
         if not project.inputs():
             raise PipelineError("add a video first" if project.path == "video" else "record the scenes first")
-        return start(project_id, "process", {"fresh": body.fresh})
+        return start(project_id, "process", {"fresh": body.fresh}, key=user_key(request))
 
     @app.put("/api/projects/{project_id}/turns/{turn_id}")
     def edit_turn(project_id: str, turn_id: int, body: TurnEdit) -> dict[str, Any]:
@@ -398,9 +444,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return edit(project_id, save)
 
     @app.patch("/api/projects/{project_id}/moments/{moment_id}")
-    def edit_moment(project_id: str, moment_id: str, body: MomentEdit) -> dict[str, Any]:
-        if body.display is not None:
-            settings.require_api_key()  # a new shape needs a new picture
+    def edit_moment(project_id: str, moment_id: str, body: MomentEdit, request: Request) -> dict[str, Any]:
+        key = user_key(request) if body.display is not None else None  # a new shape needs a new picture
         changed_display: list[bool] = []
 
         def save(p: Project) -> None:
@@ -416,11 +461,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         result = edit(project_id, save)
         if changed_display:  # a card and a full-screen picture have different shapes
-            return start(project_id, "regenerate", {"moment_id": moment_id, "new_take": False})
+            return start(project_id, "regenerate", {"moment_id": moment_id, "new_take": False}, key=key)
         return result
 
     @app.post("/api/projects/{project_id}/moments/{moment_id}/regenerate")
-    def regenerate(project_id: str, moment_id: str, body: Regenerate) -> dict[str, Any]:
+    def regenerate(project_id: str, moment_id: str, body: Regenerate, request: Request) -> dict[str, Any]:
         def save(p: Project) -> None:
             moment = next((m for m in (p.analysis.moments if p.analysis else []) if m.id == moment_id), None)
             if moment is None:
@@ -428,17 +473,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if body.prompt:
                 moment.prompt = " ".join(body.prompt.split())
 
-        settings.require_api_key()
+        key = user_key(request)
         edit(project_id, save)
-        return start(project_id, "regenerate", {"moment_id": moment_id, "new_take": True})
+        return start(project_id, "regenerate", {"moment_id": moment_id, "new_take": True}, key=key)
 
     @app.post("/api/projects/{project_id}/render")
     def render(project_id: str, body: RenderRequest) -> dict[str, Any]:
         project = load(project_id)
         if project.analysis is None or project.transcript is None:
             raise PipelineError("process the video first")
-        db.enqueue(project_id, "render", {"fit_mb": body.fit_mb})  # no Model API calls
-        return view(services, load(project_id))
+        return start(project_id, "render", {"fit_mb": body.fit_mb})  # no Model API calls, so no key
 
     @app.post("/api/jobs/{job_id}/cancel")
     def cancel(job_id: str) -> dict[str, Any]:

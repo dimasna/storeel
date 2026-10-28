@@ -1,11 +1,26 @@
 // Thin wrappers around the studio's HTTP API.
 
 export class ApiError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code = null) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
+
+// Each user brings their own Meta Model API key. It is kept in this browser only and sent to
+// the studio's server with requests that change something; the server holds it in memory for
+// the job it starts and never stores it.
+const KEY_STORAGE = "storeel.modelApiKey";
+export const apiKey = {
+  get: () => localStorage.getItem(KEY_STORAGE) || "",
+  set: (value) => localStorage.setItem(KEY_STORAGE, value.trim()),
+  clear: () => localStorage.removeItem(KEY_STORAGE),
+  hint: () => {
+    const key = localStorage.getItem(KEY_STORAGE) || "";
+    return key ? `…${key.slice(-4)}` : "";
+  },
+};
 
 function detailText(data) {
   if (!data) return "";
@@ -18,8 +33,9 @@ function detailText(data) {
   return "";
 }
 
-async function request(method, path, body) {
+async function request(method, path, body, key = apiKey.get()) {
   const options = { method, headers: { Accept: "application/json" } };
+  if (method !== "GET" && key) options.headers["X-Model-Api-Key"] = key;
   if (body !== undefined) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
@@ -37,7 +53,7 @@ async function request(method, path, body) {
   } catch {
     data = null;
   }
-  if (!response.ok) throw new ApiError(response.status, detailText(data) || response.statusText);
+  if (!response.ok) throw new ApiError(response.status, detailText(data) || response.statusText, data?.code || null);
   return data;
 }
 
@@ -47,6 +63,7 @@ export const api = {
   put: (path, body) => request("PUT", path, body),
   patch: (path, body) => request("PATCH", path, body),
   del: (path) => request("DELETE", path),
+  checkKey: (key) => request("POST", "/api/key/check", {}, key),
 };
 
 // Multipart upload with progress (fetch cannot report upload progress).

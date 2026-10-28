@@ -38,9 +38,13 @@ h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid var(--border); background: rgb(14 16 20 / 85%); position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px); }
 .brand { font-weight: 800; text-decoration: none; font-size: 1.1rem; }
 .brand span { color: var(--accent); }
-.api-status { font-size: 0.78rem; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
-.api-status.ok::before { content: "● "; color: var(--ok); }
-.api-status.warn { color: var(--warn); border-color: var(--warn); }
+.key-button { font: inherit; font-size: 0.8rem; font-weight: 600; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
+.key-button:hover { color: var(--text); border-color: #4a5263; }
+.key-button.ok::before { content: "● "; color: var(--ok); }
+.key-button.warn { color: var(--warn); border-color: rgb(245 165 36 / 60%); }
+.key-status:empty { display: none; }
+.ok-text { color: var(--ok); margin: 0; }
+.banner .btn { margin-left: 8px; }
 
 .page { max-width: 1240px; margin: 0 auto; padding: 24px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }

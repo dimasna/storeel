@@ -25,16 +25,19 @@ Create reel ┤                                                             ├�
 Needs Python 3.12 with [uv](https://docs.astral.sh/uv/) and ffmpeg (`brew install ffmpeg`).
 
 ```bash
-cp .env.example .env        # then set MODEL_API_KEY (Model API dashboard at https://dev.meta.ai)
 uv sync
 uv run storeel serve        # http://127.0.0.1:8000
 ```
 
+Each user brings their own Meta Model API key (create one in the Model API dashboard at
+https://dev.meta.ai). Add it with **Add API key** at the top right of the studio; **Check
+and save** asks Meta which models it can use. Usage is billed to that key.
+
 Quick end-to-end check without the UI (upload, process and render one clip, then print the
-Model API usage):
+Model API usage), with your own key in the environment or in `.env`:
 
 ```bash
-uv run storeel make path/to/clip.mp4 --language id --watermark @yourname
+MODEL_API_KEY='LLM|...' uv run storeel make path/to/clip.mp4 --language id --watermark @yourname
 ```
 
 Every option is documented in `.env.example`. Projects, uploads and renders are stored in
@@ -76,6 +79,11 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
 
 ## Privacy and cost
 
+- **API keys**: the key stays in the user's browser. It is sent to the studio's server only
+  with actions that start a job (writing a script, processing, regenerating a picture),
+  held in memory until that job ends, and never written to the database, disk or logs. A
+  restart forgets every key; jobs that were waiting are marked failed and can be started
+  again. Rendering needs no key.
 - Every Model API request is sent with `store: false`. The video sent to Muse Spark is a
   small silent copy, uploaded with a one-hour expiry and deleted right after the call.
 - The default models run in Standard mode. The cheaper `-contributor` Muse Spark models let
@@ -89,9 +97,10 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
 ## Not verified yet
 
 The pipeline has been run end to end against a simulated Model API (request shapes checked
-against the docs), on synthetic clips. Still to confirm on a real key and real footage:
-Muse Image's actual output resolution, Muse Spark's token use for video, SAM on real faces
-and objects, and how well the estimated word timing tracks real speech.
+against the docs), on synthetic clips. Against the real API, only the authentication path
+is confirmed (an invalid key gets `401 invalid_api_key`). Still to confirm with a real key
+and real footage: Muse Image's actual output resolution, Muse Spark's token use for video,
+SAM on real faces and objects, and how well the estimated word timing tracks real speech.
 
 ## Development
 

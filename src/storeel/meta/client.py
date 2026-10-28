@@ -8,6 +8,7 @@ One client covers every model the studio uses:
   and reasoning can be slow before the first token.
 * `upload_file()` / `delete_file()` wrap the Files API, for videos sent to Muse Spark.
 * `transcribe()` wraps Muse Voice Transcribe's file endpoint, `POST /v1/asr/transcribe`.
+* `list_models()` reads `GET /v1/models`, to check a user's key.
 
 Requests are retried with exponential backoff and jitter on 429 and transient 5xx errors,
 honouring `Retry-After`; other client errors are raised immediately (they need a fix, not a
@@ -356,6 +357,13 @@ class MetaClient:
                 elif kind == "error":
                     raise _stream_error(event, "stream error")
         raise MetaAPIError("the stream ended before the response completed", retryable=True)
+
+    # ---- Models API -------------------------------------------------------------------------
+
+    def list_models(self) -> list[str]:
+        """The ids of the models this key can use (also a cheap way to check a key)."""
+        data = self._request("GET", "/models").json().get("data") or []
+        return sorted(str(m["id"]) for m in data if isinstance(m, dict) and m.get("id"))
 
     # ---- Files API --------------------------------------------------------------------------
 
