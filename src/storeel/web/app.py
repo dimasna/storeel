@@ -478,6 +478,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 moment.enabled = body.enabled
             if body.display is not None and body.display != moment.display:
                 moment.display = body.display
+                moment.chosen = True  # the layout setting no longer overrides this picture
                 moment.note = None
                 changed_display.append(True)
 

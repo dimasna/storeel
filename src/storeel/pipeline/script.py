@@ -45,7 +45,9 @@ class SceneOut(BaseModel):
     direction: str = Field(
         "", description="a short delivery note (emotion, gesture, pace), in the script's language"
     )
-    display: Literal["none", "cutaway", "overlay"] = Field(
+    # The prompt offers overlay and cutout; "cutaway" (full screen) is still read, so an
+    # answer that uses it is not thrown away.
+    display: Literal["none", "overlay", "cutout", "cutaway"] = Field(
         "none", description="how a picture is shown during the scene"
     )
     visual: str = Field("", description="English: the one picture to show, or empty when display is none")

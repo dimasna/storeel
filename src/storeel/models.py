@@ -13,7 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
 DEFAULT_TITLE = "Untitled reel"
 Kind = Literal["character", "object", "place"]
-Display = Literal["cutaway", "overlay"]
+# How a picture is shown. The stored names predate the labels: "overlay" is a picture card in
+# the upper part of the frame, "cutout" is the subject alone with its background removed (SAM),
+# "cutaway" fills the screen.
+Display = Literal["overlay", "cutout", "cutaway"]
 
 
 class Strict(BaseModel):
@@ -30,6 +33,10 @@ def _one_line(value: str) -> str:
 class Style(Strict):
     visual_style: Literal["cinematic", "illustration", "3d", "anime", "watercolor", "comic"] = "cinematic"
     visuals: Literal["off", "few", "balanced", "many"] = "balanced"
+    # "cards": pictures float over the speaker as cards and cut-outs; "full": they fill the screen.
+    picture_layout: Literal["cards", "full"] = "cards"
+    # What the speaker looks like behind a card or cut-out: "auto" blurs only when it covers the face.
+    speaker_behind: Literal["blur", "sharp", "auto"] = "blur"
     captions: Literal["pill", "karaoke", "clean", "off"] = "pill"
     caption_color: str = Field("#E50914", pattern=HEX_COLOR)
     caption_position: Literal["lower", "middle"] = "lower"
@@ -82,7 +89,7 @@ class SceneEdit(Strict):
     purpose: str = Field("", max_length=40)
     lines: str = Field(min_length=1, max_length=600)
     direction: str = Field("", max_length=300)
-    display: Literal["none", "cutaway", "overlay"] = "none"
+    display: Literal["none", "overlay", "cutout", "cutaway"] = "none"
     visual: str = Field("", max_length=800)
     entities: list[str] = Field(default_factory=list, max_length=8)
 
@@ -191,6 +198,7 @@ class Asset(Strict):
     prompt: str
     references: list[str] = Field(default_factory=list)
     seconds: float = 0.0
+    cutout: bool = False  # an RGBA picture of the subject alone, cut out by SAM
 
 
 class Moment(Strict):
@@ -201,11 +209,14 @@ class Moment(Strict):
     end: float
     quote: str
     display: Display
+    planned: Display | None = None  # what the planner chose; `display` follows the layout setting
+    chosen: bool = False  # the user picked `display` in Review: the layout setting leaves it alone
     entities: list[str] = Field(default_factory=list)
     prompt: str
+    subject: str = ""  # the noun phrase SAM looks for when it is a cut-out, e.g. "orange cat"
     enabled: bool = True
     faces: list[Region] | None = None  # face boxes while it is on screen (None: not looked for yet)
-    note: str | None = None  # e.g. why an overlay is shown full screen
+    note: str | None = None  # e.g. why a cut-out is shown as a card
     asset: Asset | None = None
     error: str | None = None
     take: int = 0  # bumped by "regenerate" so the next image is a new one
@@ -218,6 +229,22 @@ class Analysis(Strict):
     entities: list[Entity]
     moments: list[Moment]
     digest: str = ""
+
+    def apply_layout(self, layout: str) -> list[str]:
+        """Set each picture's display from the layout setting (unless the user chose one).
+        Returns the ids of the moments whose display changed."""
+        changed = []
+        for moment in self.moments:
+            if moment.chosen:
+                continue
+            # Plans from before cut-outs existed only knew "cutaway" (full screen) and "overlay".
+            planned = moment.planned or ("overlay" if moment.display == "cutaway" else moment.display)
+            moment.planned = planned
+            wanted = "cutaway" if layout == "full" else planned
+            if moment.display != wanted:
+                moment.display = wanted
+                changed.append(moment.id)
+        return changed
 
 
 class Render(Strict):

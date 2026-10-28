@@ -12,7 +12,11 @@ ENTITIES
 MOMENTS
 - A moment shows one generated picture while particular words are spoken. "quote" copies those words exactly from one transcript turn: 3 to 15 consecutive words. The picture appears when the quote starts and stays about as long as it takes to say it.
 - The picture follows the words: it shows what is being said at that moment, never something that is only said later.
-- display "cutaway": the picture fills the screen, like b-roll. Use it for places, scenes and actions in the story. display "overlay": a picture card while the speaker stays visible. Use it for an object, a person or a detail the speaker points to, or when the speaker's reaction matters.
+- The speaker always stays on screen; pictures float over the video. Choose how each picture is shown:
+  - display "overlay": a photo card in the upper part of the frame. Use it for scenes, places, actions and anything that needs its setting.
+  - display "cutout": one character or one object alone, cut out of its background, standing or floating over the video. Use it when the picture is about that one thing (the pet, the product, a person) and needs no setting.
+  - display "cutaway" fills the whole screen. Use it only where the speaker's script plan below asks for it.
+- subject: for every moment, a short English noun phrase naming the main thing the picture shows, for a segmentation model: one concrete noun with at most two adjectives ("orange cat", "red sneaker", "young woman"). It is used to cut that thing out of the picture.
 - Keep the first seconds (the hook) on the speaker. Leave the speaker on screen for opinions, emotions, jokes and punchlines. Do not illustrate filler.
 - Moments never overlap and are spread over the video.
 - prompt: English, one image for an image model: the subject and what happens, the setting, the framing and the light, consistent with the transcript and the entity descriptions. Name the entities it shows. Never ask for readable text, captions, logos, signs with words or watermarks. Never depict real public figures; describe a generic person instead.

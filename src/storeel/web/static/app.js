@@ -26,7 +26,9 @@ const LABELS = {
   format: { storytime: "Storytime", explainer: "Explainer", tips: "Tips", review: "Review", opinion: "Opinion" },
   tone: { casual: "Casual", energetic: "Energetic", calm: "Calm", funny: "Funny", dramatic: "Dramatic" },
   idea_language: { id: "Indonesian", en: "English" },
-  display: { none: "Speaker only", cutaway: "Full screen", overlay: "Card beside the speaker" },
+  picture_layout: { cards: "Cards and cut-outs over the speaker", full: "Full screen" },
+  speaker_behind: { blur: "Blur the speaker", sharp: "Keep the speaker sharp", auto: "Blur only when the face is covered" },
+  display: { none: "Speaker only", overlay: "Card", cutout: "Cut-out", cutaway: "Full screen" },
 };
 
 const STAGES = {
@@ -526,7 +528,7 @@ function sceneCard(project, script, scene, index, markDirty, redraw, isDirty) {
         markDirty();
       },
     },
-    options("display", ["none", "cutaway", "overlay"], scene.display),
+    options("display", ["none", "overlay", "cutout", "cutaway"], scene.display),
   );
   const visualField = field("Picture", visual);
   visualField.hidden = scene.display === "none";
@@ -637,6 +639,8 @@ function styleSection(project) {
       el("h3", {}, "Pictures"),
       select("visual_style", "Look", pictures),
       select("visuals", "How many"),
+      select("picture_layout", "Layout", "Each picture can also be changed in Review."),
+      select("speaker_behind", "Speaker behind a card or cut-out", "Applies when you render. “Blur only when the face is covered” checks the face, so update the pictures after choosing it."),
       project.path === "video" ? select("language", "Spoken language") : null,
       el("h3", {}, "Captions"),
       select("captions", "Style"),
@@ -710,7 +714,7 @@ function momentCard(project, moment) {
     {
       onchange: (e) => act(() => api.patch(`/api/projects/${project.id}/moments/${moment.id}`, { display: e.target.value }), "Making a picture in the new shape…"),
     },
-    options("display", ["cutaway", "overlay"], moment.display),
+    options("display", ["overlay", "cutout", "cutaway"], moment.display),
   );
   const enabled = el("input", {
     type: "checkbox",

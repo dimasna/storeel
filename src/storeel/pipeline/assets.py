@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import base64
 import io
-import math
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -20,12 +19,11 @@ from PIL import Image
 
 from ..common import digest
 from ..jobs import JobContext, PipelineError
-from ..media.ffmpeg import HEIGHT, WIDTH
 from ..meta import MetaAPIError
 from ..models import Analysis, Asset, Entity, Moment, Project, Style
-from .compose import shown_region
+from .detect import cut_out
 
-VERSION = 1
+VERSION = 2  # 2: cards in 3:2, cut-outs on a plain background, cut by SAM
 STYLES = {
     "cinematic": "cinematic photograph, natural light, realistic detail, shallow depth of field",
     "illustration": "clean modern digital illustration, soft shading, rich colours",
@@ -38,10 +36,14 @@ NO_TEXT = "No text, letters, captions, logos or watermarks anywhere in the image
 # The Responses API's image_generation tool takes only these sizes ("auto" aside) and rejects
 # any other "WxH" with "unknown value", even though the guide describes free-form sizes.
 LANDSCAPE, SQUARE, PORTRAIT = "1536x1024", "1024x1024", "1024x1536"
-CARD_SIZES = [(3 / 2, LANDSCAPE), (1.0, SQUARE), (2 / 3, PORTRAIT)]
-# Full-screen pictures are asked for in the tallest shape, 2:3, and centre-cropped to 9:16
-# (about a sixth of the width is lost on each side).
-FULL_SIZE = PORTRAIT
+# Cards are 3:2 photos, the nearest allowed shape to a 16:9 card. Full-screen pictures
+# are asked for in the tallest shape, 2:3, and centre-cropped to 9:16. Cut-outs: a standing
+# character is tall, anything else square.
+CARD_SIZE, FULL_SIZE = LANDSCAPE, PORTRAIT
+CUTOUT_BACKGROUND = (
+    "Show only {subject}, whole and uncropped, centred with space around it, on a plain flat light grey"
+    " background with nothing else in the picture: no other objects, no floor, no shadow on the ground."
+)
 MAX_REFERENCES = 4
 ANCHOR = {
     "character": (
@@ -64,7 +66,12 @@ class Request:
     size: str
     image_search: bool
     references: list[str]  # entity ids whose reference image is included
-    full_screen: bool = False
+    display: str = "overlay"
+    subject: str = ""  # for a cut-out: what SAM cuts out
+
+    @property
+    def full_screen(self) -> bool:
+        return self.display == "cutaway"
 
     def fingerprint(self) -> list:
         """Everything that changes the image, with image parts reduced to their hashes."""
@@ -74,16 +81,27 @@ class Request:
                 parts.append(digest(part["image_url"]))
             else:
                 parts.append(part["text"])
-        return [parts, self.size, self.image_search, self.full_screen]
+        return [parts, self.size, self.image_search, self.display, self.subject]
 
 
-def card_size(moment: Moment, style: Style) -> str | None:
-    """The size to ask for a card, or None when the picture fills the screen."""
-    region = shown_region(moment, style.caption_position, style.captions != "off")
-    if region is None:
-        return None
-    aspect = (region.width * WIDTH) / (region.height * HEIGHT)
-    return min(CARD_SIZES, key=lambda option: abs(math.log(aspect / option[0])))[1]
+def cutout_subject(moment: Moment, entities: dict[str, Entity]) -> str:
+    """The noun phrase SAM looks for: the planner's, else the main entity's."""
+    if moment.subject.strip():
+        return " ".join(moment.subject.split())[:60]
+    for entity_id in moment.entities:
+        entity = entities.get(entity_id)
+        if entity is not None:
+            return entity.segment_prompt or entity.name
+    return ""
+
+
+def picture_size(moment: Moment, entities: dict[str, Entity]) -> str:
+    if moment.display == "cutaway":
+        return FULL_SIZE
+    if moment.display == "cutout":
+        main = next((entities[e] for e in moment.entities if e in entities), None)
+        return PORTRAIT if main is not None and main.kind == "character" else SQUARE
+    return CARD_SIZE
 
 
 def _image_part(ctx: JobContext, key: str) -> dict:
@@ -119,28 +137,31 @@ def moment_request(
             }
         )
         content.append(_image_part(ctx, entity.ref_key or ""))
-    card = card_size(moment, style)
-    full_screen = card is None
+    display = moment.display
+    subject = cutout_subject(moment, entities) if display == "cutout" else ""
+    if display == "cutout" and not subject:
+        display = "overlay"  # nothing to cut out by name: a card instead
     text = f"Create one new image: {moment.prompt.rstrip('.')}."
     for entity in shown:
         if entity not in with_refs and entity.description:
             text += f" {entity.name} looks like this: {entity.description.rstrip('.')}."
     text += f" Style: {STYLES[style.visual_style]}."
-    if full_screen:
+    if display == "cutaway":
         text += (
             " Vertical frame, cropped to 9:16 at the sides: keep the main subject centred and in the upper"
             " two thirds; the bottom third sits under captions, so keep it simple."
         )
+    elif display == "cutout":
+        text += " " + CUTOUT_BACKGROUND.format(subject=subject)
     else:
-        text += " The subject is centred and fills the frame."
+        text += " A horizontal photo: the subject is centred and fills the frame."
     text += f" {NO_TEXT}"
     if with_refs:
         text += " Draw a new scene: do not copy the reference images or their plain backgrounds."
     content.append({"type": "input_text", "text": text})
     image_search = any(entity.real_world for entity in shown)
-    return Request(
-        content, card or FULL_SIZE, image_search, [e.id for e in with_refs], full_screen=full_screen
-    )
+    size = picture_size(moment, entities) if display == moment.display else CARD_SIZE
+    return Request(content, size, image_search, [e.id for e in with_refs], display=display, subject=subject)
 
 
 def generate(ctx: JobContext, request: Request) -> tuple[bytes, int, int, float]:
@@ -251,9 +272,15 @@ def make_pictures(ctx: JobContext, analysis: Analysis, style: Style, only: set[s
             else:  # made by an earlier run that stopped before saving it
                 with Image.open(ctx.files.path(key)) as image:
                     width, height = image.size
+                    cut = image.mode == "RGBA"
                 prompt = " ".join(p["text"] for p in request.content if p["type"] == "input_text")
                 asset = Asset(
-                    key=key, width=width, height=height, digest=key.rsplit("-", 1)[-1][:-4], prompt=prompt
+                    key=key,
+                    width=width,
+                    height=height,
+                    digest=key.rsplit("-", 1)[-1][:-4],
+                    prompt=prompt,
+                    cutout=cut,
                 )
             done["reused"] += 1
         else:
@@ -266,6 +293,16 @@ def make_pictures(ctx: JobContext, analysis: Analysis, style: Style, only: set[s
                     ctx.log(f"Muse Image refused {moment.id} with references; trying from words only")
                     request = moment_request(ctx, moment, entities, style, use_references=False)
                     png, width, height, seconds = generate(ctx, request)
+                cut = False
+                if request.display == "cutout":
+                    try:
+                        made = cut_out(ctx, png, request.subject)
+                    except MetaAPIError as exc:
+                        made = None
+                        ctx.log(f"SAM: cutting out {moment.id} failed ({exc}); shown as a card")
+                    if made is not None:
+                        png, width, height = made
+                        cut = True
                 ctx.files.write_bytes(key, png)
                 prompt = " ".join(p["text"] for p in request.content if p["type"] == "input_text")
                 asset = Asset(
@@ -276,14 +313,23 @@ def make_pictures(ctx: JobContext, analysis: Analysis, style: Style, only: set[s
                     prompt=prompt,
                     references=request.references,
                     seconds=round(seconds, 1),
+                    cutout=cut,
                 )
                 done["made"] += 1
-                ctx.log(f"Muse Image: {moment.id} {width}x{height} ({request.size} asked) in {seconds:.1f}s")
+                shape = f"cut out {width}x{height}" if cut else f"{width}x{height} ({request.size} asked)"
+                ctx.log(f"Muse Image: {moment.id} {shape} in {seconds:.1f}s")
             except MetaAPIError as exc:
                 error = str(exc)
                 done["failed"] += 1
                 ctx.log(f"Muse Image: {moment.id} failed: {exc}")
         old_key = moment.asset.key if moment.asset else None
+        note = None
+        if asset is not None and moment.display == "cutout" and not asset.cutout:
+            note = (
+                f"SAM could not find {request.subject!r} in the picture, so it is shown as a card"
+                if request.display == "cutout"
+                else "no subject to cut out, so it is shown as a card"
+            )
 
         def save(project: Project) -> None:
             if project.analysis is None:
@@ -292,11 +338,7 @@ def make_pictures(ctx: JobContext, analysis: Analysis, style: Style, only: set[s
                 if stored.id == moment.id:
                     stored.asset = asset if asset is not None else stored.asset
                     stored.error = error
-                    stored.note = (
-                        "no room beside the face, so it is shown full screen"
-                        if stored.display == "overlay" and request.full_screen
-                        else None
-                    )
+                    stored.note = note
 
         ctx.update(save)
         if asset is not None and old_key and old_key != asset.key:

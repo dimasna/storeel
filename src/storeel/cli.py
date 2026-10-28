@@ -79,6 +79,8 @@ def make(args: argparse.Namespace) -> int:
         language=args.language,
         visual_style=args.visual_style,
         visuals=args.visuals,
+        picture_layout=args.picture_layout,
+        speaker_behind=args.speaker_behind,
         captions=args.captions,
         watermark=args.watermark,
     )
@@ -129,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
     reel.add_argument("--language", choices=_choices("language"), default="auto")
     reel.add_argument("--visual-style", choices=_choices("visual_style"), default="cinematic")
     reel.add_argument("--visuals", choices=_choices("visuals"), default="balanced")
+    reel.add_argument("--picture-layout", choices=_choices("picture_layout"), default="cards")
+    reel.add_argument("--speaker-behind", choices=_choices("speaker_behind"), default="blur")
     reel.add_argument("--captions", choices=_choices("captions"), default="pill")
     reel.add_argument("--watermark", default="")
     reel.add_argument("--fit-mb", type=int, help="keep the file under this size (e.g. 25 for DMs)")

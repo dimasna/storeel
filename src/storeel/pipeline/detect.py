@@ -17,12 +17,13 @@ from ..common import digest
 from ..jobs import JobContext
 from ..media import ffmpeg as ff
 from ..meta.sam import Detection, segment_image
-from ..models import Analysis, Entity, Moment, Region, Source
+from ..models import Analysis, Entity, Moment, Region, Source, Style
 
 VERSION = 1
 MIN_CONFIDENCE = 0.35
 FACE_CONFIDENCE = 0.3
 MIN_AREA = 0.003  # of the frame
+CUTOUT_MIN_AREA = 0.02  # of a generated picture: the subject is meant to be large
 REF_SIDE = 1024
 REF_BACKGROUND = (238, 238, 238)
 PARALLEL = 4
@@ -79,6 +80,42 @@ def cutout(frame: Image.Image, detection: Detection) -> Image.Image:
     crop = plate.crop(box)
     crop.thumbnail((REF_SIDE, REF_SIDE), Image.LANCZOS)
     return crop
+
+
+def transparent_cutout(image: Image.Image, detection: Detection) -> Image.Image:
+    """The detected subject alone (RGBA, soft 1 px edge), cropped to it with a little room."""
+    mask = detection.full_mask(image.width, image.height)
+    alpha = Image.fromarray(mask.astype(np.uint8) * 255).filter(ImageFilter.GaussianBlur(1.0))
+    rgba = image.convert("RGB").convert("RGBA")
+    rgba.putalpha(alpha)
+    bbox = alpha.point(lambda v: 255 if v > 12 else 0).getbbox()
+    if bbox is None:
+        return rgba
+    pad = round(max(bbox[2] - bbox[0], bbox[3] - bbox[1]) * 0.02)
+    return rgba.crop(
+        (
+            max(0, bbox[0] - pad),
+            max(0, bbox[1] - pad),
+            min(image.width, bbox[2] + pad),
+            min(image.height, bbox[3] + pad),
+        )
+    )
+
+
+def cut_out(ctx: JobContext, png: bytes, subject: str) -> tuple[bytes, int, int] | None:
+    """`subject` cut out of a generated picture by SAM, as an RGBA PNG; None when not found."""
+    with Image.open(io.BytesIO(png)) as opened:
+        picture = opened.convert("RGB")
+    found = [
+        d
+        for d in _segment(ctx, picture, subject)
+        if d.confidence >= MIN_CONFIDENCE and d.box_area >= CUTOUT_MIN_AREA * picture.width * picture.height
+    ]
+    if not found:
+        return None
+    best = max(found, key=lambda d: d.score)  # only this one's mask gets decoded
+    cut = transparent_cutout(picture, best)
+    return _png(cut), cut.width, cut.height
 
 
 def _times(entity: Entity, duration: float) -> list[float]:
@@ -160,20 +197,25 @@ def _faces(ctx: JobContext, source: Source, moment: Moment) -> list[Region]:
     return faces
 
 
-def find_faces(ctx: JobContext, source: Source, analysis: Analysis, only: set[str] | None = None) -> None:
-    """Face boxes for each picture card's time on screen, so the card can go beside the face."""
-    wanted = [
-        m
-        for m in analysis.moments
-        if m.display == "overlay" and m.faces is None and m.enabled and (only is None or m.id in only)
-    ]
+def find_faces(
+    ctx: JobContext, source: Source, analysis: Analysis, style: Style, only: set[str] | None = None
+) -> None:
+    """Face boxes while each card or cut-out is on screen: for "blur only when the face is
+    covered", and so a standing cut-out stands on the side away from the face."""
+
+    def needs(m: Moment) -> bool:
+        if m.display == "cutaway" or m.faces is not None or not m.enabled:
+            return False
+        return style.speaker_behind == "auto" or m.display == "cutout"
+
+    wanted = [m for m in analysis.moments if needs(m) and (only is None or m.id in only)]
     if not wanted:
         return
     with ThreadPoolExecutor(PARALLEL) as pool:
         results = dict(
             zip((m.id for m in wanted), pool.map(lambda m: _faces(ctx, source, m), wanted), strict=True)
         )
-    ctx.log(f"SAM: looked for faces at {len(results)} card moment(s)")
+    ctx.log(f"SAM: looked for faces at {len(results)} moment(s)")
 
     def save(project) -> None:
         if project.analysis is None:

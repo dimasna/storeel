@@ -139,25 +139,42 @@ def _rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
     return mask
 
 
-def card(picture: Image.Image, max_width: int, max_height: int) -> Image.Image:
-    """The picture with rounded corners, a white border and a soft drop shadow, within the box."""
-    unit = min(max_width, max_height)
-    border = max(4, round(unit * 0.014))
-    margin = max(8, round(unit * 0.05))  # room for the shadow
-    inner = (max(16, max_width - 2 * (border + margin)), max(16, max_height - 2 * (border + margin)))
-    photo = ImageOps.contain(picture.convert("RGB"), inner, Image.LANCZOS)
-    radius = max(6, round(min(photo.size) * 0.06))
-    framed_size = (photo.width + 2 * border, photo.height + 2 * border)
-    framed = Image.new("RGBA", framed_size, (255, 255, 255, 0))
-    framed.paste((255, 255, 255, 255), (0, 0, *framed_size), _rounded_mask(framed_size, radius + border))
-    framed.paste(photo, (border, border), _rounded_mask(photo.size, radius))
-    out = Image.new("RGBA", (framed_size[0] + 2 * margin, framed_size[1] + 2 * margin), (0, 0, 0, 0))
-    shadow = Image.new("RGBA", framed_size, (0, 0, 0, 0))
-    shadow.paste((0, 0, 0, 110), (0, 0, *framed_size), _rounded_mask(framed_size, radius + border))
-    out.alpha_composite(shadow, (margin, margin + round(margin * 0.35)))
-    out = out.filter(ImageFilter.GaussianBlur(margin / 2.5))
-    out.alpha_composite(framed, (margin, margin))
+def _shadowed(image: Image.Image, blur: int, offset: int, opacity: float) -> Image.Image:
+    """`image` (RGBA) on a soft drop shadow of its own shape, with room around it."""
+    pad = blur * 2 + offset
+    out = Image.new("RGBA", (image.width + 2 * pad, image.height + 2 * pad), (0, 0, 0, 0))
+    shadow = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    shadow.putalpha(image.getchannel("A").point(lambda v: round(v * opacity)))
+    out.alpha_composite(shadow, (pad, pad + offset))
+    out = out.filter(ImageFilter.GaussianBlur(blur))
+    out.alpha_composite(image, (pad, pad))
     return out
+
+
+def card(picture: Image.Image, max_width: int, max_height: int) -> Image.Image:
+    """The photo card: the whole picture (no crop) in a dark rounded
+    frame with a soft drop shadow, as wide as `max_width` allows within `max_height`."""
+    unit = max(1, max_width)
+    pad = max(6, round(unit * 0.0165))  # the frame around the photo
+    radius = max(10, round(unit * 0.036))
+    inner = (max(16, max_width - 2 * pad), max(16, max_height - 2 * pad))
+    photo = ImageOps.contain(picture.convert("RGB"), inner, Image.LANCZOS)
+    size = (photo.width + 2 * pad, photo.height + 2 * pad)
+    framed = Image.new("RGBA", size, (0, 0, 0, 0))
+    framed.paste((32, 33, 36, 245), (0, 0, *size), _rounded_mask(size, radius))
+    framed.paste(photo, (pad, pad), _rounded_mask(photo.size, max(4, radius - round(pad * 0.8))))
+    return _shadowed(framed, blur=max(6, round(unit * 0.02)), offset=max(4, round(unit * 0.015)), opacity=0.3)
+
+
+def cutout_sprite(picture: Image.Image, max_width: int, max_height: int) -> Image.Image:
+    """A cut-out (RGBA) scaled to fit the box, with a faint shadow so it reads on any background."""
+    image = ImageOps.contain(
+        picture.convert("RGBA"), (max(16, max_width), max(16, max_height)), Image.LANCZOS
+    )
+    unit = max(image.size)
+    return _shadowed(
+        image, blur=max(4, round(unit * 0.012)), offset=max(2, round(unit * 0.006)), opacity=0.35
+    )
 
 
 def watermark(text: str, size: int, max_width: int, opacity: float = 0.45) -> Image.Image:

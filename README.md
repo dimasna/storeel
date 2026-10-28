@@ -18,7 +18,7 @@ Create reel ┤                                                             ├�
 | Analyze | Muse Wonder 1.0, max effort (video) | Lists the characters, objects and places, and picks the moments that get a picture |
 | Analyze | SAM 3.1 | Cuts those seen in the video out as reference images; finds the face so cards go beside it |
 | Generate assets | Muse Image | Reference pictures for recurring entities, then one picture per moment |
-| Compile | ffmpeg + Pillow | Your video, full-screen cutaways or picture cards, word-highlighted captions, watermark, loudness-normalised audio |
+| Compile | ffmpeg + Pillow | Your video with the pictures floating over it (cards, SAM cut-outs, or full screen), word-highlighted captions, watermark, loudness-normalised audio |
 
 Each text step has its own model and effort (`STOREEL_SCRIPT_*`, `STOREEL_PLAN_*`; see
 `.env.example`). The defaults come from a comparison on the real API (October 2026; 3
@@ -67,10 +67,12 @@ Every option is documented in `.env.example`. Projects, uploads and renders are 
 - **Start from an idea**: describe the idea, pick format, tone, length and language, and
   edit the script the script model writes. Record each scene in the browser (camera with the
   lines as a teleprompter, countdown, review, retake) or upload a take per scene.
-- **Style**: picture look and how many pictures, caption style, colour, case and position,
-  watermark text and position.
-- **Review**: fix misheard caption words, hide a picture, switch it between full screen and
-  a card, or edit its prompt and regenerate it. "Update pictures" applies style changes and
+- **Style**: picture look, how many pictures, the layout (cards and cut-outs over the speaker,
+  or full screen), what the speaker looks like behind a picture (blurred, sharp, or blurred
+  only when the picture covers the face), caption style, colour, case and position, watermark
+  text and position.
+- **Review**: fix misheard caption words, hide a picture, show it as a card, a cut-out or full
+  screen, or edit its prompt and regenerate it. "Update pictures" applies style changes and
   redoes only what changed.
 - **Render**: optionally keep the file under 25 MB (the Messenger and Instagram DM limit).
 
@@ -88,6 +90,17 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   syllables. Edited captions are re-timed over the same speech.
 - **Pictures follow the words**: the plan model quotes the words each picture illustrates, and
   the quote is located in the timed transcript, so a picture starts on its word.
+- **How pictures are shown**: your video always fills the
+  frame and pictures float over it. A card is the whole picture (3:2) in a dark rounded frame
+  in the upper part of the frame. A cut-out is the subject alone: Muse Image draws it on a
+  plain background and SAM cuts it out (one more SAM call, $0.0025); a character stands at
+  the bottom on the side away from the face, an object floats in the upper middle. If SAM
+  cannot find the subject, the picture is shown as a card. Pictures pop in with a short fade
+  and rise. Behind them, the speaker is blurred and dimmed by default (fading over half a
+  second), kept sharp, or blurred only when the picture covers the face (SAM checks the face
+  while each picture is up). Full screen, with a slow zoom, is a layout setting and a choice
+  per picture. The planner suggests a card or a cut-out for each picture; switching the
+  layout redraws the pictures without planning them again.
 - **Consistency** comes from reference images: what the video shows is cut out by SAM;
   what recurs but is not in the video gets a generated reference first.
 - **Jobs** run on background threads, one at a time per project, with progress, a log and

@@ -30,12 +30,21 @@ def _pictures(ctx: JobContext, project: Project, analysis: Analysis, only: set[s
     source = project.source
     if source is None:
         raise PipelineError("process the clips first")
+    style = ctx.project().style
+    changed = analysis.apply_layout(style.picture_layout)
+    if changed:
+
+        def relayout(p: Project) -> None:
+            if p.analysis is not None:
+                p.analysis.apply_layout(style.picture_layout)
+
+        ctx.update(relayout)
+        ctx.log(f"layout {style.picture_layout}: {len(changed)} picture(s) change shape")
     ctx.step("Finding faces and references", 0.55, 0.65)
     references(ctx, source, analysis)
-    find_faces(ctx, source, analysis, only)
+    find_faces(ctx, source, analysis, style, only)
     ctx.flush_usage()
     ctx.step("Generating pictures", 0.65, 1.0)
-    style = ctx.project().style
     make_anchors(ctx, analysis, style, only)
     make_pictures(ctx, analysis, style, only)
 

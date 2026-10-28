@@ -152,6 +152,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; marg
 .moment.off { opacity: 0.5; }
 .moment-picture img { width: 100%; border-radius: 9px; display: block; background: #000; }
 .moment-picture.cutaway img { aspect-ratio: 9 / 16; object-fit: cover; }
+.moment-picture.cutout img { background: repeating-conic-gradient(#3a3a3e 0% 25%, #2a2a2e 0% 50%) 50% / 16px 16px; object-fit: contain; }
 .moment-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .moment-head { display: flex; align-items: center; justify-content: space-between; }
 .time { font-variant-numeric: tabular-nums; font-size: 0.8rem; color: var(--accent-2); font-weight: 700; }

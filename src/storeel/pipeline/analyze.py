@@ -33,10 +33,10 @@ from ..models import (
 )
 from ..prompts import load_prompt
 
-VERSION = 1
+VERSION = 2  # 2: pictures are cards or cut-outs (with a subject for SAM)
 SECONDS_PER_MOMENT = {"few": 12.0, "balanced": 7.0, "many": 4.5}
-MIN_LENGTH = {"cutaway": 1.5, "overlay": 2.0}
-MAX_LENGTH = {"cutaway": 6.0, "overlay": 8.0}
+MIN_LENGTH = {"cutaway": 1.5, "overlay": 2.0, "cutout": 2.0}
+MAX_LENGTH = {"cutaway": 6.0, "overlay": 8.0, "cutout": 8.0}
 HOOK = 1.0  # keep the first second (the platforms' cover frame) on the speaker
 GAP = 0.3
 
@@ -62,7 +62,10 @@ class EntityOut(BaseModel):
 
 class MomentOut(BaseModel):
     quote: str = Field("", description="3-15 consecutive words copied exactly from one transcript turn")
-    display: Literal["cutaway", "overlay"] = "cutaway"
+    display: Literal["overlay", "cutout", "cutaway"] = "overlay"
+    subject: str = Field(
+        "", description="a short English noun phrase naming the main thing the picture shows"
+    )
     entities: list[str] = Field(default_factory=list, description="ids of the entities the picture shows")
     prompt: str = Field("", description="English: the one picture to show, for an image model")
 
@@ -150,8 +153,12 @@ def _prompt(project: Project, transcript: Transcript, source: Source, count: int
     return "\n".join(parts)
 
 
-def normalize(out: AnalysisOut, transcript: Transcript, duration: float, count: int) -> Analysis:
-    """Keep only what can be used: unique ids, known references, moments placed on the words."""
+def normalize(
+    out: AnalysisOut, transcript: Transcript, duration: float, count: int, allow_full: bool = False
+) -> Analysis:
+    """Keep only what can be used: unique ids, known references, moments placed on the words.
+    Full-screen pictures are kept only when the script plan asked for them (`allow_full`);
+    otherwise a planned cutaway becomes a card, since pictures float over the speaker."""
     entities: list[Entity] = []
     for item in out.entities:
         entity_id = slug(item.id or item.name, "entity")
@@ -179,11 +186,12 @@ def normalize(out: AnalysisOut, transcript: Transcript, duration: float, count: 
         prompt = " ".join(item.prompt.split())
         if span is None or not prompt:
             continue
+        display = item.display if item.display != "cutaway" or allow_full else "overlay"
         first, last = words[span[0]], words[span[1]]
         start = max(HOOK, first.start - 0.1)
-        end = max(last.end + 0.25, start + MIN_LENGTH[item.display])
-        end = min(end, start + MAX_LENGTH[item.display], duration)
-        if end - start < MIN_LENGTH[item.display] * 0.8:
+        end = max(last.end + 0.25, start + MIN_LENGTH[display])
+        end = min(end, start + MAX_LENGTH[display], duration)
+        if end - start < MIN_LENGTH[display] * 0.8:
             continue
         placed.append(
             Moment(
@@ -191,7 +199,9 @@ def normalize(out: AnalysisOut, transcript: Transcript, duration: float, count: 
                 start=round(start, 3),
                 end=round(end, 3),
                 quote=" ".join(w.text for w in words[span[0] : span[1] + 1]),
-                display=item.display,
+                display=display,
+                planned=display,
+                subject=" ".join(item.subject.split())[:60],
                 entities=[e for e in dict.fromkeys(slug(x) for x in item.entities) if e in known][:4],
                 prompt=prompt[:1200],
             )
@@ -297,7 +307,8 @@ def analyze(ctx: JobContext, source: Source, transcript: Transcript) -> Analysis
         ) from exc
     if missing:
         ctx.log(f"{name} left out: {', '.join(missing)} (filled in)")
-    analysis = normalize(out, transcript, source.duration, count)
+    allow_full = project.script is not None and any(s.display == "cutaway" for s in project.script.scenes)
+    analysis = normalize(out, transcript, source.duration, count, allow_full)
     analysis.digest = key
     dropped = len(out.moments) - len(analysis.moments)
     ctx.log(
