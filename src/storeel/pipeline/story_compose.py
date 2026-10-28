@@ -107,26 +107,45 @@ def _switch_time(beat: Beat, words: list[Word], start: float, end: float) -> flo
     return at if start + MIN_LINE <= at <= end - MIN_LINE else None
 
 
+def _whole_video_takes(project: Project) -> dict[str, tuple[float, float]]:
+    """One video of the whole part (no takes): each take's stretch, from the words spoken."""
+    source, script = project.source, project.script
+    if source is None or script is None:
+        return {}
+    words = _segment_words(project, 0.0, source.duration)
+    spans = split_by_text([s.lines for s in script.scenes], words, 0.0, source.duration)
+    return {scene.id: (a, b) for scene, (a, b, _) in zip(script.scenes, spans, strict=True)}
+
+
+def take_spans(project: Project) -> dict[str, tuple[float, float]]:
+    """Where each take is on the reel's timeline: its recording, or its share of one video."""
+    source = project.source
+    if source is None:
+        return {}
+    spans = {seg.scene_id: (seg.start, seg.end) for seg in source.segments if seg.scene_id}
+    return spans or _whole_video_takes(project)
+
+
 def timeline(project: Project) -> list[Line]:
     """Every line of the part placed on the reel's timeline."""
     story, source, script = project.story, project.source, project.script
     if story is None or source is None or script is None:
         return []
-    segments = {seg.scene_id: seg for seg in source.segments if seg.scene_id}
+    takes = take_spans(project)
     ids = [s.id for s in script.scenes]
     lines: list[Line] = []
-    hook = segments.get(ids[0])
+    hook = takes.get(ids[0])
     if hook is not None:
-        lines.append(Line("hook", hook.start, hook.end, ids[0]))
+        lines.append(Line("hook", hook[0], hook[1], ids[0]))
     for take in ids[1:-1]:
-        seg = segments.get(take)
+        span = takes.get(take)
         beats = [b for b in story.beats if b.take == take]
-        if seg is None or not beats:
+        if span is None or not beats:
             continue
-        words = _segment_words(project, seg.start, seg.end)
-        for beat, (t0, t1, own) in zip(
-            beats, split_by_text([b.text for b in beats], words, seg.start, seg.end), strict=True
-        ):
+        start, end = span
+        words = _segment_words(project, start, end)
+        shares = split_by_text([b.text for b in beats], words, start, end)
+        for beat, (t0, t1, own) in zip(beats, shares, strict=True):
             at = _switch_time(beat, own, t0, t1)
             if at is None:
                 lines.append(Line("beat", t0, t1, take, beat.show, beat))
@@ -134,10 +153,10 @@ def timeline(project: Project) -> list[Line]:
                 assert beat.switch is not None
                 lines.append(Line("beat", t0, at, take, beat.show, beat))
                 lines.append(Line("beat", at, t1, take, beat.switch.show, beat))
-    outro = segments.get(ids[-1])
+    outro = takes.get(ids[-1])
     if outro is not None:
-        words = _segment_words(project, outro.start, outro.end)
-        parts = split_by_text([story.poll.text, story.cta], words, outro.start, outro.end)
+        words = _segment_words(project, outro[0], outro[1])
+        parts = split_by_text([story.poll.text, story.cta], words, outro[0], outro[1])
         lines.append(Line("poll", parts[0][0], parts[0][1], ids[-1]))
         lines.append(Line("cta", parts[1][0], parts[1][1], ids[-1]))
     return lines
@@ -156,6 +175,7 @@ CHAT_Y, CHAT_STEP, CHAT_W = 0.22, 0.135, 0.80
 SLOT_X = {"left": 0.24, "right": 0.76}
 STAND_H, STAND_BOTTOM = 0.52, 1.02
 BADGE_XY = (0.04, 0.035)
+BADGE_SIZE = 0.026  # of the height: small enough to sit above the platforms' top bar
 POLL_Y = (0.17, 0.265, 0.345)
 END_TOP, END_PROP_Y, END_PILL_Y = 0.115, 0.465, 0.635
 WORDS = {
@@ -346,7 +366,7 @@ class PartCompositor(Compositor):
                 spans.append((line.start, line.end))
         if lines:
             part = f"Part {story.part}"
-            mark = badge(part, story.chapter_title, round(0.04 * H), round(0.86 * W))
+            mark = badge(part, story.chapter_title, round(BADGE_SIZE * H), round(0.86 * W))
             end = next((x.start for x in lines if x.kind == "cta"), self.duration)
             add(mark, (round(BADGE_XY[0] * W), round(BADGE_XY[1] * H)), 0.0, end, animate=False)
         return spans

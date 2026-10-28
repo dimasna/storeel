@@ -378,7 +378,12 @@ def badge(part: str, title: str, size: int, max_width: int) -> Image.Image:
     tag_img = pill(part, size)
     title_font = font(round(size * 0.78), 700)
     stroke = max(2, round(size * 0.08))
-    lines = _wrap(title, title_font, max_width - tag_img.width - round(size * 0.4))[:2]
+    lines = _wrap(title, title_font, max_width - tag_img.width - round(size * 0.4))
+    if len(lines) > 2:  # two lines at most, the second one ending on an ellipsis
+        second = lines[1]
+        while second and title_font.getlength(second + "…") > max_width - tag_img.width - round(size * 0.4):
+            second = second.rsplit(" ", 1)[0] if " " in second else second[:-1]
+        lines = [lines[0], second.rstrip(" ,.;:") + "…"]
     ascent, descent = title_font.getmetrics()
     line_h = ascent + descent
     text_w = max((int(title_font.getlength(x)) for x in lines), default=0)

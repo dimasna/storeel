@@ -104,12 +104,13 @@ h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field-label { font-size: 0.8rem; color: var(--muted); font-weight: 600; }
 .field small { color: var(--muted); font-size: 0.78rem; }
-input:not([type]), input[type="text"], textarea, select { font: inherit; font-size: 0.92rem; width: 100%; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+input:not([type]), input[type="text"], input[type="number"], textarea, select { font: inherit; font-size: 0.92rem; width: 100%; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
 textarea { resize: vertical; line-height: 1.45; }
 input:focus, textarea:focus, select:focus { outline: 2px solid rgb(255 59 92 / 45%); border-color: var(--accent); }
 input[type="color"] { width: 100%; height: 38px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); padding: 3px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.side .grid3 { grid-template-columns: 1fr; }
 @media (max-width: 640px) { .grid3, .grid2 { grid-template-columns: 1fr; } }
 .range { display: flex; align-items: center; gap: 10px; }
 .range input { flex: 1; accent-color: var(--accent); }

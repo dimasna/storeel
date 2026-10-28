@@ -38,6 +38,7 @@ from ..models import (
 )
 from .assets import LANDSCAPE, NO_TEXT, PORTRAIT, SQUARE, STYLES, Request, generate
 from .detect import _frame, _segment, cut_out
+from .story_compose import take_spans
 
 VERSION = 1
 FACE_CONFIDENCE = 0.3
@@ -421,14 +422,14 @@ def find_part_faces(ctx: JobContext) -> None:
     source = project.source
     if source is None:
         return
-    wanted = [seg for seg in source.segments if seg.scene_id and seg.scene_id not in project.part_faces]
+    wanted = [(take, span) for take, span in take_spans(project).items() if take not in project.part_faces]
     if not wanted:
         return
     found: dict[str, list[Region]] = {}
-    for seg in wanted:
+    for take, (start, end) in wanted:
         ctx.check()
-        frame = _frame(ctx, source, (seg.start + seg.end) / 2)
-        found[seg.scene_id or ""] = [
+        frame = _frame(ctx, source, (start + end) / 2)
+        found[take] = [
             Region(
                 x0=d.left / frame.width,
                 y0=d.top / frame.height,

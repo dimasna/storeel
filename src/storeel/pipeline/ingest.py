@@ -25,6 +25,7 @@ def ingest(ctx: JobContext) -> Source:
         raise PipelineError("add a video (or record every scene) first")
     if (
         project.path in ("idea", "novel")
+        and not (project.path == "novel" and project.clips)  # one video of the whole part
         and project.script
         and any(s.take is None for s in project.script.scenes)
     ):

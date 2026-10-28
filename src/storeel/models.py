@@ -565,6 +565,8 @@ class Project(Strict):
 
     def inputs(self) -> list[Clip]:
         """The clips that make up the reel, in order."""
+        if self.path == "novel" and self.clips:  # one video of the whole part, instead of takes
+            return list(self.clips)
         if self.path in ("idea", "novel"):
             return [scene.take for scene in (self.script.scenes if self.script else []) if scene.take]
         return list(self.clips)

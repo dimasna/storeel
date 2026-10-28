@@ -122,7 +122,9 @@ def stage(project: Project, job: Job | None) -> str:
     if project.path == "novel":
         if project.story is None:
             return "story"
-        if project.script is None or any(scene.take is None for scene in project.script.scenes):
+        if not project.clips and (
+            project.script is None or any(scene.take is None for scene in project.script.scenes)
+        ):
             return "record"
     elif project.path == "idea":
         if project.script is None:

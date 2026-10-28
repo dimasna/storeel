@@ -301,7 +301,7 @@ function render() {
   } else if (project.analysis || project.transcript) {
     append(main, [picturesSection(project), transcriptSection(project)]);
   }
-  const inputsReady = project.path === "video" ? project.clips.length > 0 : project.script && project.script.scenes.every((s) => s.take);
+  const inputsReady = project.path === "video" ? project.clips.length > 0 : project.path === "novel" && project.clips.length ? true : project.script && project.script.scenes.every((s) => s.take);
   side.append(styleSection(project));
   if (project.path === "novel") {
     if (inputsReady || project.part_pictures) side.append(partProcessSection(project));
@@ -996,10 +996,32 @@ function partPicturesSection(project) {
 function takesSection(project) {
   const scenes = project.script ? project.script.scenes : [];
   const recorded = scenes.filter((s) => s.take).length;
+  const whole = project.clips[0];
+  const picker = el("input", {
+    type: "file",
+    accept: "video/*",
+    hidden: true,
+    onchange: async (event) => {
+      const file = event.target.files[0];
+      if (file) await act(() => upload(`/api/projects/${project.id}/clips`, file, file.name), "Video added");
+    },
+  });
+  const wholeVideo = whole
+    ? el(
+        "div",
+        { class: "take-row" },
+        el("video", { src: mediaUrl(project.id, whole.key), controls: true, playsinline: true, preload: "metadata" }),
+        el("span", { class: "pill ok" }, `one video · ${seconds(whole.duration)}`),
+        el("button", { class: "icon-btn", title: "Remove the video", onclick: () => confirm("Remove this video? The takes (if any) are used again.") && act(() => api.del(`/api/projects/${project.id}/clips/${whole.id}`)) }, "✕"),
+      )
+    : el("div", { class: "take-row" }, el("button", { class: "btn small", onclick: () => picker.click() }, "Upload one video of the whole part"), picker);
   return section(
     "Record the part",
-    el("p", { class: "muted small" }, `${scenes.length} takes · ${recorded} recorded. Read each take from the teleprompter in one go; the delivery notes show under the lines.`),
-    el("ol", { class: "scenes" }, scenes.map((scene, index) => takeCard(project, scenes, scene, index))),
+    el("p", { class: "muted small" }, whole
+      ? "This video is used instead of the takes. Its words are matched to the script to time the pictures."
+      : `${scenes.length} takes · ${recorded} recorded. Read each take from the teleprompter in one go; the delivery notes show under the lines. Or record the whole part elsewhere and upload it as one video.`),
+    wholeVideo,
+    whole ? null : el("ol", { class: "scenes" }, scenes.map((scene, index) => takeCard(project, scenes, scene, index))),
   );
 }
 

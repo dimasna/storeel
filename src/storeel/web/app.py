@@ -351,8 +351,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/projects/{project_id}/clips")
     def upload_clip(project_id: str, file: Annotated[UploadFile, File()]) -> dict[str, Any]:
         project = load(project_id)
-        if project.path != "video":
+        if project.path == "idea":
             raise PipelineError("this project records scenes; upload clips to a video project")
+        if project.path == "novel" and project.story is None:
+            raise PipelineError("write the part first, then record it or upload a video of it")
+        if project.path == "novel" and project.clips:
+            raise PipelineError("a part takes one video: remove the current one first")
         idle(project_id)
         clip = import_clip(services, project, file.file, file.filename)
 
