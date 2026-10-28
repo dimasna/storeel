@@ -9,6 +9,7 @@ project when the job ends, whether it succeeded or not, so the cost estimate sta
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -112,17 +113,22 @@ class JobContext:
             self.update(lambda p: p.usage.add(usage))
 
 
+ABSOLUTE_PATH = re.compile(r"(?:/[\w.@~+-]+)+/([\w.@~+-]+)")
+
+
 def describe_error(exc: BaseException) -> str:
-    """A one-line message for the user."""
+    """A one-line message for the user, with file paths shortened to their file names."""
     if isinstance(exc, PipelineError | ConfigError | FFmpegError):
-        return str(exc)
-    if isinstance(exc, MetaAPIError):
-        return f"Model API: {exc}"
-    if isinstance(exc, ValidationError):
+        message = str(exc)
+    elif isinstance(exc, MetaAPIError):
+        message = f"Model API: {exc}"
+    elif isinstance(exc, ValidationError):
         first = exc.errors()[0] if exc.errors() else {}
         where = ".".join(str(x) for x in first.get("loc", ()))
-        return f"unexpected data ({where}: {first.get('msg', 'invalid')})"
-    return f"{type(exc).__name__}: {exc}"
+        message = f"unexpected data ({where}: {first.get('msg', 'invalid')})"
+    else:
+        message = f"{type(exc).__name__}: {exc}"
+    return ABSOLUTE_PATH.sub(r"\1", message)
 
 
 def execute(services: Services, job: Job, handlers: dict[str, Handler]) -> str:

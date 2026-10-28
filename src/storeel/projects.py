@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -16,6 +17,7 @@ from .media import ffmpeg as ff
 from .models import DEFAULT_TITLE, Clip, Project, Style
 from .services import Services
 
+log = logging.getLogger(__name__)
 VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".3gp"})
 ACTIVE_STAGE = {
     "script": "scripting",
@@ -85,7 +87,8 @@ def import_clip(
         try:
             info = ff.probe(tmp)
         except ff.FFmpegError as exc:
-            raise PipelineError(f"this file can't be used as video: {exc}") from exc
+            log.info("rejected upload %r: %s", filename, exc)
+            raise PipelineError("this file can't be used: it is not a video ffmpeg can read") from exc
         if info.duration < 0.5:
             raise PipelineError("the video is too short")
         used = sum(c.duration for c in project.inputs() if replacing is None or c.id != replacing.id)
