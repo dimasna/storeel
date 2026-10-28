@@ -193,3 +193,29 @@ details summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; marg
 .toast.ok { border-color: rgb(60 207 145 / 50%); }
 .toast.error { border-color: rgb(255 93 93 / 60%); }
 .toast.leaving { opacity: 0; transform: translateY(6px); }
+
+/* novels */
+table.chapters { width: 100%; border-collapse: collapse; }
+table.chapters th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 6px 8px; }
+table.chapters td { padding: 8px; border-top: 1px solid var(--border); vertical-align: middle; }
+table.chapters .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.chapter-text { white-space: pre-wrap; max-height: 320px; overflow: auto; margin-top: 10px; padding: 12px; border-radius: 10px; background: var(--surface-2); font-size: 0.88rem; line-height: 1.55; }
+.bible { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.bible-card { display: grid; grid-template-columns: 84px 1fr; gap: 12px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.bible-card img, .bible-card .thumb-empty { width: 84px; height: 126px; object-fit: contain; border-radius: 8px; background: repeating-conic-gradient(#3a3a3e 0% 25%, #2a2a2e 0% 50%) 50% / 14px 14px; }
+.bible-card p { margin: 6px 0 0; }
+.looks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.look { display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; color: var(--muted); }
+.look img { width: 22px; height: 33px; object-fit: contain; border-radius: 4px; background: #2a2a2e; }
+ol.beats { list-style: none; padding: 0; margin: 10px 0; display: flex; flex-direction: column; gap: 10px; }
+.beat { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.beat.hook { border-color: rgb(255 59 92 / 45%); }
+.beat textarea, .beat input { width: 100%; }
+.beat input.direction { font-size: 0.82rem; color: var(--muted); }
+.tags { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.tag { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); }
+.tag.c { border-color: rgb(60 207 145 / 50%); }
+.tag.p, .tag.ph { border-color: rgb(255 210 63 / 45%); }
+.tag.t { background: #e50914; border-color: #e50914; color: #fff; font-weight: 700; }
+ul.plain { padding-left: 18px; margin: 0 0 8px; }
+.take-lines { margin: 4px 0; line-height: 1.5; }

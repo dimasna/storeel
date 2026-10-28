@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from .common import now_iso
-from .models import Project
+from .models import Novel, Project
 
 T = TypeVar("T")
 
@@ -46,6 +46,12 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS jobs_queue ON jobs (status, created_at);
 CREATE INDEX IF NOT EXISTS jobs_project ON jobs (project_id, created_at);
+CREATE TABLE IF NOT EXISTS novels (
+    id TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 MAX_LOG_CHARS = 200_000
@@ -190,6 +196,47 @@ class Database:
     def delete_project(self, project_id: str) -> None:
         with self._transaction() as conn:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+
+    # ---- novels -----------------------------------------------------------------------------
+
+    def create_novel(self, novel: Novel) -> None:
+        with self._transaction() as conn:
+            conn.execute(
+                "INSERT INTO novels (id, data, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (novel.id, novel.model_dump_json(), novel.created_at, novel.updated_at),
+            )
+
+    def get_novel(self, novel_id: str) -> Novel:
+        with self._connection() as conn:
+            row = conn.execute("SELECT data FROM novels WHERE id = ?", (novel_id,)).fetchone()
+        if row is None:
+            raise NotFound(f"no novel {novel_id}")
+        return Novel.model_validate_json(row["data"])
+
+    def list_novels(self) -> list[Novel]:
+        with self._connection() as conn:
+            rows = conn.execute("SELECT data FROM novels ORDER BY updated_at DESC").fetchall()
+        return [Novel.model_validate_json(row["data"]) for row in rows]
+
+    def update_novel(self, novel_id: str, change: Callable[[Novel], T]) -> tuple[Novel, T]:
+        """Apply `change` to the stored novel atomically; an exception leaves it untouched."""
+        with self._transaction() as conn:
+            row = conn.execute("SELECT data FROM novels WHERE id = ?", (novel_id,)).fetchone()
+            if row is None:
+                raise NotFound(f"no novel {novel_id}")
+            novel = Novel.model_validate_json(row["data"])
+            result = change(novel)
+            novel.updated_at = now_iso()
+            novel = Novel.model_validate(novel.model_dump())
+            conn.execute(
+                "UPDATE novels SET data = ?, updated_at = ? WHERE id = ?",
+                (novel.model_dump_json(), novel.updated_at, novel_id),
+            )
+        return novel, result
+
+    def delete_novel(self, novel_id: str) -> None:
+        with self._transaction() as conn:
+            conn.execute("DELETE FROM novels WHERE id = ?", (novel_id,))
 
     # ---- jobs -------------------------------------------------------------------------------
 

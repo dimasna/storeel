@@ -14,6 +14,7 @@ under it.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import mimetypes
 import uuid
@@ -38,15 +39,21 @@ from ..models import (
     DEFAULT_TITLE,
     Display,
     Idea,
+    Narration,
+    Novel,
+    Poll,
     Project,
     Scene,
     Script,
     ScriptEdit,
     Style,
+    VisualStyle,
     text_model_name,
 )
+from ..novels import add_chapter, create_novel, novel_summary, novel_view, open_chapter
 from ..pipeline.render import FONT_FILE
 from ..pipeline.run import HANDLERS
+from ..pipeline.story import apply_edit, narration_options
 from ..pipeline.transcribe import retime
 from ..projects import create_project, import_clip, summary, view
 from ..services import Services, valid_key
@@ -57,7 +64,7 @@ MEDIA_PREFIXES = ("uploads/", "refs/", "assets/", "renders/")
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 UPLOAD_SUFFIXES = ("/clips", "/take")
 KEY_HEADER = "x-model-api-key"
-KEYED_JOBS = frozenset({"script", "process", "regenerate"})  # the jobs that call the Model API
+KEYED_JOBS = frozenset({"script", "story", "process", "regenerate"})  # the jobs that call the Model API
 
 
 class KeyRequired(Exception):
@@ -100,6 +107,40 @@ class Regenerate(Body):
 
 class RenderRequest(Body):
     fit_mb: int | None = Field(None, ge=5, le=500)
+
+
+class NovelFields(Body):
+    title: str = Field(min_length=1, max_length=120)
+    synopsis: str = Field("", max_length=4000)
+    language: Literal["id", "en"] = "id"
+    narration: Narration = "casual"
+    visual_style: VisualStyle = "cinematic"
+    watermark: str = Field("", max_length=60)
+
+
+class NewChapter(Body):
+    text: str = Field(min_length=1, max_length=200_000)
+    title: str = Field("", max_length=160)
+    number: int | None = Field(None, ge=1, le=999)
+
+
+class ChapterEdit(Body):
+    text: str = Field(min_length=1, max_length=200_000)
+    title: str = Field("", max_length=160)
+
+
+class BeatEdit(Body):
+    text: str = Field(min_length=1, max_length=400)
+    direction: str = Field("", max_length=200)
+
+
+class StoryEdit(Body):
+    chapter_title: str = Field(min_length=1, max_length=120)
+    hook: str = Field(min_length=1, max_length=400)
+    hook_direction: str = Field("", max_length=200)
+    beats: list[BeatEdit] = Field(min_length=1, max_length=40)
+    poll: Poll
+    cta: str = Field(min_length=1, max_length=400)
 
 
 def _same_site(request: Request) -> bool:
@@ -251,6 +292,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
             "style": Style.model_json_schema(),
             "idea": Idea.model_json_schema(),
+            "novel": Novel.model_json_schema(),
+            "narration": narration_options(),
         }
 
     @app.post("/api/key/check")
@@ -386,6 +429,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         def save(p: Project) -> None:
             if p.script is None:
                 raise PipelineError("write the script first")
+            if p.path == "novel":
+                raise PipelineError("edit a novel part's words in the part script")
             takes = {s.id: s.take for s in p.script.scenes if s.take}
             scenes = [
                 Scene(
@@ -499,6 +544,138 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         key = user_key(request)
         edit(project_id, save)
         return start(project_id, "regenerate", {"moment_id": moment_id, "new_take": True}, key=key)
+
+    # ---- path C: novels, chapters and parts ---------------------------------------------------
+
+    def load_novel(novel_id: str) -> Novel:
+        services.novel_files(novel_id)  # validates the id's shape
+        return db.get_novel(novel_id)
+
+    @app.get("/api/novels")
+    def list_novels() -> list[dict[str, Any]]:
+        return [novel_summary(n) for n in db.list_novels()]
+
+    @app.post("/api/novels", status_code=201)
+    def new_novel(body: NovelFields) -> dict[str, Any]:
+        return novel_view(services, create_novel(services, **body.model_dump()))
+
+    @app.get("/api/novels/{novel_id}")
+    def get_novel(novel_id: str) -> dict[str, Any]:
+        return novel_view(services, load_novel(novel_id))
+
+    @app.put("/api/novels/{novel_id}")
+    def edit_novel(novel_id: str, body: NovelFields) -> dict[str, Any]:
+        load_novel(novel_id)
+
+        def save(n: Novel) -> None:
+            for name, value in body.model_dump().items():
+                setattr(n, name, value)
+
+        novel, _ = db.update_novel(novel_id, save)
+        return novel_view(services, novel)
+
+    @app.delete("/api/novels/{novel_id}", status_code=204)
+    def delete_novel(novel_id: str) -> Response:
+        novel = load_novel(novel_id)
+        reels = [c.project_id for c in novel.chapters if c.project_id]
+        for project_id in reels:
+            with contextlib.suppress(NotFound):
+                idle(project_id)
+        for project_id in reels:
+            with contextlib.suppress(NotFound):
+                db.delete_project(project_id)
+            services.files(project_id).remove_all()
+        db.delete_novel(novel_id)
+        services.novel_files(novel_id).remove_all()
+        return Response(status_code=204)
+
+    @app.post("/api/novels/{novel_id}/chapters", status_code=201)
+    def new_chapter(novel_id: str, body: NewChapter) -> dict[str, Any]:
+        load_novel(novel_id)
+        return novel_view(services, add_chapter(services, novel_id, body.text, body.title, body.number))
+
+    @app.put("/api/novels/{novel_id}/chapters/{number}")
+    def edit_chapter(novel_id: str, number: int, body: ChapterEdit) -> dict[str, Any]:
+        load_novel(novel_id)
+        if len(body.text.strip()) < 200:
+            raise PipelineError("paste the whole chapter text (at least a few paragraphs)")
+
+        def save(n: Novel) -> None:
+            chapter = n.chapter(number)
+            if chapter is None:
+                raise NotFound(f"no chapter {number}")
+            chapter.text, chapter.title = body.text.strip(), " ".join(body.title.split())
+
+        novel, _ = db.update_novel(novel_id, save)
+        return novel_view(services, novel)
+
+    @app.delete("/api/novels/{novel_id}/chapters/{number}")
+    def delete_chapter(novel_id: str, number: int) -> dict[str, Any]:
+        novel = load_novel(novel_id)
+        chapter = novel.chapter(number)
+        if chapter is None:
+            raise NotFound(f"no chapter {number}")
+        if chapter.project_id:
+            with contextlib.suppress(NotFound):
+                idle(chapter.project_id)
+                db.delete_project(chapter.project_id)
+            services.files(chapter.project_id).remove_all()
+
+        def drop(n: Novel) -> None:
+            n.chapters = [c for c in n.chapters if c.number != number]
+            # What this chapter added to the bible goes with it.
+            n.bible.characters = {k: c for k, c in n.bible.characters.items() if c.created_in != number}
+            n.bible.props = {k: p for k, p in n.bible.props.items() if p.created_in != number}
+            for c in n.bible.characters.values():
+                c.notes = [x for x in c.notes if x.chapter != number]
+                c.looks = [x for x in c.looks if x.chapter != number]
+
+        novel, _ = db.update_novel(novel_id, drop)
+        return novel_view(services, novel)
+
+    @app.post("/api/novels/{novel_id}/chapters/{number}/reel")
+    def chapter_reel(novel_id: str, number: int) -> dict[str, Any]:
+        load_novel(novel_id)
+        return view(services, open_chapter(services, novel_id, number))
+
+    @app.get("/api/novels/{novel_id}/media/{key:path}")
+    def novel_media(novel_id: str, key: str) -> FileResponse:
+        load_novel(novel_id)
+        if not key.startswith("bible/"):
+            raise NotFound("no such file")
+        path = services.novel_files(novel_id).path(key)
+        if not path.is_file():
+            raise NotFound("no such file")
+        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=3600"})
+
+    @app.post("/api/projects/{project_id}/story")
+    def write_part(project_id: str, request: Request) -> dict[str, Any]:
+        project = load(project_id)
+        if project.path != "novel":
+            raise PipelineError("this reel is not a novel chapter")
+        return start(project_id, "story", key=user_key(request))
+
+    @app.put("/api/projects/{project_id}/story")
+    def edit_part(project_id: str, body: StoryEdit) -> dict[str, Any]:
+        project = load(project_id)
+        if project.novel_id is None:
+            raise PipelineError("this reel is not a novel chapter")
+        novel = load_novel(project.novel_id)
+
+        def save(p: Project) -> None:
+            apply_edit(
+                p,
+                novel,
+                chapter_title=body.chapter_title,
+                hook=body.hook,
+                hook_direction=body.hook_direction,
+                beats=[(b.text, b.direction) for b in body.beats],
+                poll=body.poll,
+                cta=body.cta,
+            )
+
+        return edit(project_id, save)
 
     @app.post("/api/projects/{project_id}/render")
     def render(project_id: str, body: RenderRequest) -> dict[str, Any]:

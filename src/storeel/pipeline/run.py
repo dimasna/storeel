@@ -10,17 +10,20 @@ from .compose import compose
 from .detect import find_faces, references
 from .ingest import ingest
 from .script import write_script
+from .story import write_story
 from .transcribe import transcribe
 
 
 def _language(project: Project) -> str:
-    if project.path == "idea" and project.script is not None:
+    if project.path in ("idea", "novel") and project.script is not None:
         return project.script.language
     return project.style.language
 
 
 def _keywords(project: Project) -> list[str]:
     """Names from the script, so the transcription spells them the way the script does."""
+    if project.story is not None:
+        return [c.name for c in project.story.characters if c.name]
     if project.script is None:
         return []
     return [e.name for e in project.script.entities if e.name]
@@ -52,6 +55,11 @@ def _pictures(ctx: JobContext, project: Project, analysis: Analysis, only: set[s
 def handle_script(ctx: JobContext) -> None:
     ctx.step("Writing the script", 0.0, 1.0)
     write_script(ctx)
+
+
+def handle_story(ctx: JobContext) -> None:
+    ctx.step("Writing the part", 0.0, 1.0)
+    write_story(ctx)
 
 
 def handle_process(ctx: JobContext) -> None:
@@ -108,6 +116,7 @@ def handle_render(ctx: JobContext) -> None:
 
 HANDLERS: dict[str, Handler] = {
     "script": handle_script,
+    "story": handle_story,
     "process": handle_process,
     "regenerate": handle_regenerate,
     "render": handle_render,

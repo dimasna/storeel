@@ -17,10 +17,14 @@ KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}(/[A-Za-z0-9][A-Za-z0-9._-]{
 
 
 class ProjectFiles:
-    def __init__(self, data_dir: Path, project_id: str) -> None:
+    """A project's (or, with `area="novels"`, a novel's) folder of media."""
+
+    def __init__(self, data_dir: Path, project_id: str, area: str = "projects") -> None:
         if not PROJECT_ID.match(project_id):
             raise ValueError(f"invalid project id {project_id!r}")
-        self.root = (data_dir / "projects" / project_id).resolve()
+        if area not in ("projects", "novels"):
+            raise ValueError(f"invalid storage area {area!r}")
+        self.root = (data_dir / area / project_id).resolve()
 
     def path(self, key: str) -> Path:
         """The file for `key`; rejects anything that could point outside the project folder."""

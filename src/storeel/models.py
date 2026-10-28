@@ -112,6 +112,215 @@ class Script(Strict):
     entities: list[ScriptEntity] = Field(default_factory=list)
 
 
+# ---- path C: novels ---------------------------------------------------------------------------
+#
+# A novel is told as a series, one reel per chapter (a "part").
+# Each part is a teaser: the hook on camera, the story in beats over pictures, a poll and a
+# call to action. The narrator is the user, recording the part take by take. A character bible
+# grows chapter by chapter, so every part shows the same people; chapter N sees only what the
+# chapters before it added, so writing a chapter again redesigns only its own additions.
+
+Narration = Literal["casual", "warm", "dramatic", "funny"]
+VisualStyle = Literal["cinematic", "illustration", "3d", "anime", "watercolor", "comic"]
+Act = Literal["hook", "bridge", "setup", "rise", "turn", "cliffhanger", "outro"]
+
+
+class BibleNote(Strict):
+    chapter: int
+    note: str
+
+
+class BibleLook(Strict):
+    """What a character wears in one chapter, and their portrait in it (a novel file key)."""
+
+    chapter: int
+    outfit: str
+    image: str | None = None
+
+
+class BibleCharacter(Strict):
+    id: str
+    name: str
+    label: str  # what viewers call them on screen, lowercase
+    role: str = ""
+    description: str  # who they are (age, build, face, hair), never their clothes
+    subject: str = "person"  # what SAM cuts out of their portrait: "woman", "old man", "cat"
+    slot: Literal["left", "right"] = "left"
+    created_in: int
+    notes: list[BibleNote] = Field(default_factory=list)
+    looks: list[BibleLook] = Field(default_factory=list)
+
+
+class BibleProp(Strict):
+    """An object that recurs across chapters, drawn once."""
+
+    id: str
+    description: str
+    subject: str = ""
+    shape: Literal["wide", "tall", "square"] = "square"
+    created_in: int
+    image: str | None = None
+
+
+class Bible(Strict):
+    characters: dict[str, BibleCharacter] = Field(default_factory=dict)
+    props: dict[str, BibleProp] = Field(default_factory=dict)
+
+    def before(self, chapter: int) -> Bible:
+        """What the chapters before `chapter` designed: the bible that chapter is written with."""
+        characters = {}
+        for cid, c in self.characters.items():
+            if c.created_in < chapter:
+                characters[cid] = c.model_copy(
+                    update={
+                        "notes": [n for n in c.notes if n.chapter < chapter],
+                        "looks": [x for x in c.looks if x.chapter < chapter],
+                    }
+                )
+        props = {pid: p for pid, p in self.props.items() if p.created_in < chapter}
+        return Bible(characters=characters, props=props)
+
+
+class Chapter(Strict):
+    number: int = Field(ge=1, le=999)
+    title: str = Field("", max_length=160)
+    text: str = Field(min_length=200, max_length=200_000)
+    created_at: str
+    project_id: str | None = None  # its reel, once opened
+
+
+class Novel(Strict):
+    id: str
+    title: str = Field(min_length=1, max_length=120)
+    synopsis: str = Field("", max_length=4000)
+    language: Literal["id", "en"] = "id"
+    narration: Narration = "casual"
+    visual_style: VisualStyle = "cinematic"
+    watermark: str = Field("", max_length=60)
+    created_at: str
+    updated_at: str
+    chapters: list[Chapter] = Field(default_factory=list)
+    bible: Bible = Field(default_factory=Bible)
+
+    _clean_watermark = field_validator("watermark")(_one_line)
+
+    def chapter(self, number: int) -> Chapter | None:
+        return next((c for c in self.chapters if c.number == number), None)
+
+
+class StoryNote(Strict):
+    """Writing the viewer must read (an image model cannot write): drawn as text."""
+
+    text: str = ""
+    style: Literal["paper", "sign", "screen"] = "paper"
+
+
+class ChatMessage(Strict):
+    sender: str
+    text: str
+
+
+class StoryShow(Strict):
+    """What the screen shows while a beat is spoken: up to two characters standing at the bottom,
+    at most one of prop / photo / chat / note, and an optional red tag."""
+
+    characters: list[str] = Field(default_factory=list)
+    prop: str = ""
+    photo: str = ""
+    chat: list[ChatMessage] = Field(default_factory=list)
+    note: StoryNote = Field(default_factory=StoryNote)
+    tag: str = ""
+
+
+class StorySwitch(Strict):
+    at: str  # words of the beat where the picture changes
+    show: StoryShow
+
+
+class Beat(Strict):
+    act: Act
+    text: str  # spoken
+    speaker: str = "narrator"  # or the id of the character being quoted
+    see: str = ""  # English: who and what the viewer should see
+    direction: str = ""  # a delivery note for the narrator
+    show: StoryShow = Field(default_factory=StoryShow)
+    switch: StorySwitch | None = None
+    take: str = ""  # the scene (take) this beat is recorded in
+
+
+class StoryCharacter(Strict):
+    id: str
+    name: str
+    label: str
+    role: str = ""
+    description: str
+    outfit: str
+    subject: str = "person"
+    slot: Literal["left", "right"] = "left"
+
+
+class StoryLook(Strict):
+    id: str
+    outfit: str
+
+
+class StoryVariant(Strict):
+    id: str
+    base: str
+    change: str
+    persistent: bool = False
+
+
+class StoryProp(Strict):
+    id: str
+    description: str
+    subject: str = ""
+    shape: Literal["wide", "tall", "square"] = "square"
+    size: Literal["small", "medium", "large"] = "medium"
+    refs: list[str] = Field(default_factory=list)
+    people: int = 0
+    framing: Literal["full", "close-up"] = "full"
+    backdrop: bool = False
+    recurring: bool = False
+
+
+class StoryPhoto(Strict):
+    id: str
+    description: str
+    title: str = ""
+
+
+class StoryBibleNote(Strict):
+    id: str
+    note: str
+
+
+class Poll(Strict):
+    text: str
+    a: str
+    b: str
+
+
+class Story(Strict):
+    """One part's script, for the user to record."""
+
+    part: int
+    continuing: bool  # an earlier part exists: the hook continues, beat 1 bridges from it
+    chapter_title: str
+    hook: str
+    hook_direction: str = ""
+    beats: list[Beat]
+    poll: Poll
+    cta: str
+    characters: list[StoryCharacter] = Field(default_factory=list)
+    looks: list[StoryLook] = Field(default_factory=list)
+    variants: list[StoryVariant] = Field(default_factory=list)
+    props: list[StoryProp] = Field(default_factory=list)
+    photos: list[StoryPhoto] = Field(default_factory=list)
+    bible_notes: list[StoryBibleNote] = Field(default_factory=list)
+    problems: list[str] = Field(default_factory=list)  # what the checks still found
+
+
 # ---- what the pipeline produces ------------------------------------------------------------
 
 
@@ -319,13 +528,16 @@ class Usage(Strict):
 class Project(Strict):
     id: str
     title: str = Field(max_length=120)
-    path: Literal["video", "idea"]
+    path: Literal["video", "idea", "novel"]
     created_at: str
     updated_at: str
     style: Style = Field(default_factory=Style)
     clips: list[Clip] = Field(default_factory=list)  # path A, in reel order
     idea: Idea | None = None  # path B
-    script: Script | None = None  # path B
+    script: Script | None = None  # paths B and C: the scenes (takes) to record
+    novel_id: str | None = None  # path C: the novel and chapter this reel tells
+    chapter: int | None = None
+    story: Story | None = None  # path C: the part's script
     source: Source | None = None
     transcript: Transcript | None = None
     analysis: Analysis | None = None
@@ -335,7 +547,7 @@ class Project(Strict):
 
     def inputs(self) -> list[Clip]:
         """The clips that make up the reel, in order."""
-        if self.path == "idea":
+        if self.path in ("idea", "novel"):
             return [scene.take for scene in (self.script.scenes if self.script else []) if scene.take]
         return list(self.clips)
 

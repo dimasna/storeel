@@ -23,7 +23,11 @@ def ingest(ctx: JobContext) -> Source:
     clips = project.inputs()
     if not clips:
         raise PipelineError("add a video (or record every scene) first")
-    if project.path == "idea" and project.script and any(s.take is None for s in project.script.scenes):
+    if (
+        project.path in ("idea", "novel")
+        and project.script
+        and any(s.take is None for s in project.script.scenes)
+    ):
         raise PipelineError("record every scene first")
     total = sum(c.duration for c in clips)
     limit = ctx.settings.max_input_seconds

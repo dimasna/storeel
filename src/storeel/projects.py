@@ -15,12 +15,14 @@ from .db import Job
 from .jobs import PipelineError
 from .media import ffmpeg as ff
 from .models import DEFAULT_TITLE, Clip, Project, Style
+from .pipeline.story import hook_opening
 from .services import Services
 
 log = logging.getLogger(__name__)
 VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".3gp"})
 ACTIVE_STAGE = {
     "script": "scripting",
+    "story": "scripting",
     "process": "processing",
     "regenerate": "regenerating",
     "render": "rendering",
@@ -117,7 +119,12 @@ def stage(project: Project, job: Job | None) -> str:
     """Where the project is in the flow, derived from its data (never stored)."""
     if job is not None and job.active:
         return ACTIVE_STAGE.get(job.kind, "working")
-    if project.path == "idea":
+    if project.path == "novel":
+        if project.story is None:
+            return "story"
+        if project.script is None or any(scene.take is None for scene in project.script.scenes):
+            return "record"
+    elif project.path == "idea":
         if project.script is None:
             return "idea"
         if any(scene.take is None for scene in project.script.scenes):
@@ -137,7 +144,28 @@ def view(services: Services, project: Project) -> dict[str, Any]:
     data["job"] = job.view() if job else None
     data["usage"]["estimated_usd"] = project.usage.estimated_usd
     data["input_seconds"] = round(sum(c.duration for c in project.inputs()), 2)
+    if project.path == "novel" and project.novel_id:
+        data["novel"] = _novel_part(services, project)
     return data
+
+
+def _novel_part(services: Services, project: Project) -> dict[str, Any] | None:
+    """What a chapter reel's page needs from its novel."""
+    try:
+        novel = services.db.get_novel(project.novel_id or "")
+    except LookupError:
+        return None
+    number = project.chapter or 1
+    chapter = novel.chapter(number)
+    return {
+        "id": novel.id,
+        "title": novel.title,
+        "language": novel.language,
+        "narration": novel.narration,
+        "chapter_title": chapter.title if chapter else "",
+        "chapter_text": chapter.text if chapter else "",
+        "opening": hook_opening(novel, number, any(c.number < number for c in novel.chapters)),
+    }
 
 
 def summary(services: Services, project: Project) -> dict[str, Any]:

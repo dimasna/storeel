@@ -62,6 +62,10 @@ class Services:
     def files(self, project_id: str) -> ProjectFiles:
         return ProjectFiles(self.settings.data_dir, project_id)
 
+    def novel_files(self, novel_id: str) -> ProjectFiles:
+        """A novel's own media: the character bible's portraits and recurring props."""
+        return ProjectFiles(self.settings.data_dir, novel_id, area="novels")
+
     def client(self, api_key: str, *, max_attempts: int = 4) -> MetaClient:
         """A Model API client for one user's key (the caller closes it)."""
         base = self.settings.api_base

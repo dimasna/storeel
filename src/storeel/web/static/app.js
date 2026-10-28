@@ -29,6 +29,9 @@ const LABELS = {
   picture_layout: { cards: "Cards and cut-outs over the speaker", full: "Full screen" },
   speaker_behind: { blur: "Blur the speaker", sharp: "Keep the speaker sharp", auto: "Blur only when the face is covered" },
   display: { none: "Speaker only", overlay: "Card", cutout: "Cut-out", cutaway: "Full screen" },
+  novel_language: { id: "Indonesian", en: "English" },
+  narration: { casual: "Casual, like telling a friend", warm: "Warm and gentle", dramatic: "Dramatic narrator", funny: "Funny gossip" },
+  act: { bridge: "Bridge", setup: "Setup", rise: "Rise", turn: "Turn", cliffhanger: "Cliffhanger" },
 };
 
 const STAGES = {
@@ -47,10 +50,19 @@ const STAGES = {
     ["review", "Review"],
     ["done", "Render"],
   ],
+  novel: [
+    ["story", "Part script"],
+    ["record", "Record"],
+    ["ready", "Style"],
+    ["processing", "Process"],
+    ["review", "Review"],
+    ["done", "Render"],
+  ],
 };
 
 const JOB_NAMES = {
   script: "Writing the script",
+  story: "Writing the part",
   process: "Processing",
   regenerate: "Regenerating a picture",
   render: "Rendering the reel",
@@ -111,8 +123,11 @@ function field(label, control, hint) {
 // ---- routing -------------------------------------------------------------------------------
 
 function route() {
-  const match = location.hash.match(/^#\/p\/([0-9a-f]{32})/);
-  return match ? { page: "project", id: match[1] } : { page: "home" };
+  const project = location.hash.match(/^#\/p\/([0-9a-f]{32})/);
+  if (project) return { page: "project", id: project[1] };
+  const novel = location.hash.match(/^#\/n\/([0-9a-f]{32})/);
+  if (novel) return { page: "novel", id: novel[1] };
+  return { page: "home" };
 }
 
 window.addEventListener("hashchange", () => start());
@@ -122,6 +137,7 @@ async function start() {
   state.project = null;
   const where = route();
   if (where.page === "home") return renderHome();
+  if (where.page === "novel") return renderNovel(where.id);
   clear(app).append(el("p", { class: "muted" }, "Loading…"));
   try {
     state.project = await api.get(`/api/projects/${where.id}`);
@@ -201,9 +217,16 @@ async function renderHome() {
           el("strong", {}, "Not yet: start from an idea"),
           el("span", {}, `Describe the idea. ${state.config.models.script_name} writes a scene script; you record it scene by scene with a teleprompter.`),
         ),
+        el(
+          "button",
+          { class: "choice", onclick: () => { const form = document.getElementById("new-novel"); if (form) { form.open = true; form.scrollIntoView({ behavior: "smooth" }); } } },
+          el("strong", {}, "From a novel"),
+          el("span", {}, "Paste a novel chapter by chapter. Each chapter becomes one part of a series: you record the part with a teleprompter, and the same characters appear in every part."),
+        ),
       ),
     ),
   );
+  app.append(novelsSection());
   const list = el("div", { class: "project-list" }, el("p", { class: "muted" }, "Loading projects…"));
   app.append(section("Recent reels", list));
   try {
@@ -215,8 +238,8 @@ async function renderHome() {
         el(
           "a",
           { class: "project-row", href: `#/p/${p.id}` },
-          p.cover ? el("img", { src: mediaUrl(p.id, p.cover), alt: "" }) : el("div", { class: "thumb-empty" }, p.path === "idea" ? "✎" : "▶"),
-          el("div", {}, el("strong", {}, p.title), el("small", { class: "muted" }, `${p.path === "idea" ? "From an idea" : "From a video"} · ${p.stage} · ${p.input_seconds ? seconds(p.input_seconds) + " · " : ""}${ago(p.updated_at)}`)),
+          p.cover ? el("img", { src: mediaUrl(p.id, p.cover), alt: "" }) : el("div", { class: "thumb-empty" }, p.path === "idea" ? "✎" : p.path === "novel" ? "❡" : "▶"),
+          el("div", {}, el("strong", {}, p.title), el("small", { class: "muted" }, `${{ idea: "From an idea", novel: "Novel part", video: "From a video" }[p.path]} · ${p.stage} · ${p.input_seconds ? seconds(p.input_seconds) + " · " : ""}${ago(p.updated_at)}`)),
           p.renders ? el("span", { class: "pill ok" }, `${p.renders} render${p.renders > 1 ? "s" : ""}`) : null,
         ),
       );
@@ -264,7 +287,10 @@ function render() {
   app.append(body);
 
   const stage = project.stage;
-  if (project.path === "idea") {
+  if (project.path === "novel") {
+    main.append(partSection(project));
+    if (project.story) main.append(storySection(project), takesSection(project));
+  } else if (project.path === "idea") {
     main.append(ideaSection(project));
     if (project.script) main.append(scriptSection(project));
   } else {
@@ -275,7 +301,8 @@ function render() {
   }
   const inputsReady = project.path === "video" ? project.clips.length > 0 : project.script && project.script.scenes.every((s) => s.take);
   side.append(styleSection(project));
-  if (inputsReady || project.analysis) side.append(processSection(project));
+  // A novel part's pictures and layout come from its script (the next step of this feature).
+  if ((inputsReady || project.analysis) && project.path !== "novel") side.append(processSection(project));
   if (project.analysis) side.append(renderSection(project));
   side.append(usageSection(project));
   if (stage === "processing" || stage === "rendering") body.classList.add("dim");
@@ -294,13 +321,13 @@ function header(project) {
   });
   const steps = STAGES[project.path];
   const order = steps.map(([key]) => key);
-  const aliases = { scripting: "idea", regenerating: "review", rendering: "done" };
+  const aliases = { scripting: project.path === "novel" ? "story" : "idea", regenerating: "review", rendering: "done" };
   const current = aliases[project.stage] || project.stage;
   const position = Math.max(0, order.indexOf(current));
   return el(
     "div",
     { class: "project-head" },
-    el("a", { href: "#/", class: "back" }, "← All reels"),
+    el("a", { href: project.novel ? `#/n/${project.novel.id}` : "#/", class: "back" }, project.novel ? `← ${project.novel.title}` : "← All reels"),
     title,
     el(
       "ol",
@@ -606,6 +633,368 @@ function sceneCard(project, script, scene, index, markDirty, redraw, isDirty) {
     el("div", { class: "grid2" }, field("Delivery", direction), field("While spoken", display)),
     visualField,
     take,
+  );
+}
+
+// ---- novels -----------------------------------------------------------------------------------
+
+function novelMediaUrl(novelId, key) {
+  return `/api/novels/${novelId}/media/${key.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+// The novel's fields, for a new novel or an existing one. `onSave(fields)` stores them.
+function novelForm(novel, onSave, saveLabel) {
+  const schema = state.config.novel;
+  const values = { title: "", synopsis: "", language: "id", narration: "casual", visual_style: "cinematic", watermark: "", ...(novel || {}) };
+  const title = el("input", { value: values.title, maxlength: 120, placeholder: "The novel's title" });
+  const synopsis = el("textarea", { rows: 3, maxlength: 4000, placeholder: "A few sentences about the story (optional, helps the script)" }, values.synopsis);
+  const language = el("select", {}, options("novel_language", enumOf(schema, "language"), values.language));
+  const narration = el("select", {}, options("narration", enumOf(schema, "narration"), values.narration));
+  const look = el("select", {}, options("visual_style", enumOf(schema, "visual_style"), values.visual_style));
+  const watermark = el("input", { value: values.watermark, maxlength: 60, placeholder: "@yourname" });
+  const sample = el("small", { class: "muted" });
+  const describe = () => {
+    const option = state.config.narration?.[language.value]?.[narration.value];
+    clear(sample).append(option ? `Part one opens: “${option.opening}...” · ${option.voice}` : "");
+  };
+  language.addEventListener("change", describe);
+  narration.addEventListener("change", describe);
+  describe();
+  const save = () => {
+    if (!title.value.trim()) return toast("Give the novel a title", "error");
+    onSave({
+      title: title.value.trim(),
+      synopsis: synopsis.value.trim(),
+      language: language.value,
+      narration: narration.value,
+      visual_style: look.value,
+      watermark: watermark.value.trim(),
+    });
+  };
+  return el(
+    "div",
+    { class: "form" },
+    field("Title", title),
+    field("Synopsis", synopsis),
+    el("div", { class: "grid3" }, field("Language", language), field("Narration style", narration), field("Picture look", look)),
+    sample,
+    field("Watermark", watermark, "Shown on every part, e.g. where to read the novel."),
+    el("button", { class: "btn primary", onclick: save }, saveLabel),
+  );
+}
+
+function novelsSection() {
+  const list = el("div", { class: "project-list" }, el("p", { class: "muted" }, "Loading novels…"));
+  const form = novelForm(null, (fields) =>
+    act(async () => {
+      const novel = await api.post("/api/novels", fields);
+      location.hash = `#/n/${novel.id}`;
+      return null;
+    }), "Create the novel");
+  (async () => {
+    try {
+      const novels = await api.get("/api/novels");
+      clear(list);
+      if (!novels.length) list.append(el("p", { class: "muted" }, "No novels yet."));
+      for (const n of novels) {
+        list.append(
+          el(
+            "a",
+            { class: "project-row", href: `#/n/${n.id}` },
+            el("div", { class: "thumb-empty" }, "❡"),
+            el("div", {}, el("strong", {}, n.title), el("small", { class: "muted" }, `${n.chapters} chapter${n.chapters === 1 ? "" : "s"} · ${n.characters} character${n.characters === 1 ? "" : "s"} in the bible · ${ago(n.updated_at)}`)),
+          ),
+        );
+      }
+    } catch (error) {
+      clear(list).append(el("p", { class: "banner error" }, error.message));
+    }
+  })();
+  return section("Novels", list, el("details", { id: "new-novel" }, el("summary", {}, el("strong", {}, "New novel")), form));
+}
+
+async function renderNovel(id) {
+  clear(app).append(el("p", { class: "muted" }, "Loading…"));
+  let novel;
+  try {
+    novel = await api.get(`/api/novels/${id}`);
+  } catch (error) {
+    clear(app).append(section("Novel not found", el("p", {}, error.message), el("a", { href: "#/", class: "btn" }, "Back")));
+    return;
+  }
+  const reload = () => renderNovel(id);
+  const saveFields = (fields) => act(async () => { await api.put(`/api/novels/${id}`, fields); reload(); return null; }, "Saved");
+  const openPart = (number) =>
+    act(async () => {
+      const project = await api.post(`/api/novels/${id}/chapters/${number}/reel`);
+      location.hash = `#/p/${project.id}`;
+      return null;
+    });
+  const removeChapter = (c) =>
+    confirm(`Delete chapter ${c.number}${c.project_id ? " and its reel (takes and renders)" : ""}? What it added to the character bible goes too.`) &&
+    act(async () => { await api.del(`/api/novels/${id}/chapters/${c.number}`); reload(); return null; }, "Chapter deleted");
+  const chapters = novel.chapters.length
+    ? el(
+        "table",
+        { class: "chapters" },
+        el("tr", {}, el("th", {}, "Part"), el("th", {}, "Title"), el("th", {}, "Text"), el("th", {}, "Reel"), el("th", {}, "")),
+        novel.chapters.map((c) =>
+          el(
+            "tr",
+            {},
+            el("td", {}, String(c.number)),
+            el("td", {}, c.title || el("span", { class: "muted" }, "untitled")),
+            el("td", { class: "muted small" }, `${c.chars.toLocaleString()} chars`),
+            el("td", {}, c.stage ? el("span", { class: `pill${c.renders ? " ok" : ""}` }, c.renders ? `${c.renders} render${c.renders > 1 ? "s" : ""}` : c.stage) : el("span", { class: "muted small" }, "not started")),
+            el(
+              "td",
+              { class: "row-actions" },
+              el("button", { class: "btn small primary", onclick: () => openPart(c.number) }, c.project_id ? "Open" : "Make the part"),
+              el("button", { class: "icon-btn", title: "Delete chapter", onclick: () => removeChapter(c) }, "✕"),
+            ),
+          ),
+        ),
+      )
+    : el("p", { class: "muted" }, "No chapters yet. Add the first one below.");
+  const number = el("input", { type: "number", min: 1, max: 999, value: novel.next_chapter });
+  const ctitle = el("input", { maxlength: 160, placeholder: "optional" });
+  const ctext = el("textarea", { rows: 10, maxlength: 200000, placeholder: "Paste the whole chapter text here" });
+  const addChapter = () => {
+    if (ctext.value.trim().length < 200) return toast("Paste the whole chapter text (at least a few paragraphs)", "error");
+    act(async () => {
+      await api.post(`/api/novels/${id}/chapters`, { number: Number(number.value) || null, title: ctitle.value.trim(), text: ctext.value });
+      reload();
+      return null;
+    }, "Chapter added");
+  };
+  const removeNovel = () =>
+    confirm(`Delete “${novel.title}”, its character bible and every part's reel?`) &&
+    act(async () => { await api.del(`/api/novels/${id}`); location.hash = "#/"; return null; }, "Novel deleted");
+  clear(app).append(
+    el("div", { class: "project-head" }, el("a", { href: "#/", class: "back" }, "← All reels"), el("h1", {}, novel.title)),
+    el(
+      "div",
+      { class: "layout" },
+      el(
+        "div",
+        { class: "main" },
+        section("Chapters", el("p", { class: "muted small" }, "Each chapter is one part of the series: one reel with a hook, the story, a poll and a call to action."), chapters),
+        section(
+          "Add a chapter",
+          el("div", { class: "form" }, el("div", { class: "grid2" }, field("Part number", number), field("Chapter title", ctitle)), field("Chapter text", ctext), el("button", { class: "btn primary", onclick: addChapter }, "Add chapter")),
+        ),
+        bibleSection(novel),
+      ),
+      el(
+        "div",
+        { class: "side" },
+        section("The novel", novelForm(novel, saveFields, "Save")),
+        section(null, el("button", { class: "btn danger small", onclick: removeNovel }, "Delete novel")),
+      ),
+    ),
+  );
+}
+
+function bibleSection(novel) {
+  const characters = Object.values(novel.bible.characters || {});
+  const props = Object.values(novel.bible.props || {});
+  if (!characters.length && !props.length) {
+    return section("Character bible", el("p", { class: "muted" }, "Empty. The first part you process designs its characters here; later parts reuse them, so every part shows the same people."));
+  }
+  const picture = (key, alt) => (key ? el("img", { src: novelMediaUrl(novel.id, key), alt, loading: "lazy" }) : el("div", { class: "thumb-empty" }, alt.slice(0, 1).toUpperCase()));
+  return section(
+    "Character bible",
+    el(
+      "div",
+      { class: "bible" },
+      characters.map((c) => {
+        const latest = [...c.looks].sort((a, b) => b.chapter - a.chapter)[0];
+        return el(
+          "div",
+          { class: "bible-card" },
+          picture(latest?.image, c.name),
+          el(
+            "div",
+            {},
+            el("strong", {}, c.name),
+            el("small", { class: "muted" }, ` “${c.label}” · ${c.role} · since part ${c.created_in}`),
+            el("p", { class: "small" }, c.description),
+            c.looks.length ? el("div", { class: "looks" }, c.looks.map((x) => el("span", { class: "look", title: x.outfit }, x.image ? el("img", { src: novelMediaUrl(novel.id, x.image), alt: "" }) : null, `part ${x.chapter}`))) : null,
+            c.notes.map((n) => el("p", { class: "note" }, `Part ${n.chapter}: ${n.note}`)),
+          ),
+        );
+      }),
+      props.map((p) => el("div", { class: "bible-card" }, picture(p.image, p.id), el("div", {}, el("strong", {}, p.id), el("small", { class: "muted" }, ` object · since part ${p.created_in}`), el("p", { class: "small" }, p.description)))),
+    ),
+  );
+}
+
+// ---- a novel part: its script and takes -------------------------------------------------------
+
+function partSection(project) {
+  const part = project.novel;
+  const write = () => {
+    const takes = project.script ? project.script.scenes.filter((s) => s.take).length : 0;
+    if (takes && !confirm(`A new script replaces this one and deletes ${takes} recorded take(s). Continue?`)) return;
+    act(() => api.post(`/api/projects/${project.id}/story`), `${state.config.models.script_name} is writing the part…`);
+  };
+  return section(
+    project.story ? null : `Part ${project.chapter}`,
+    part
+      ? el("details", {}, el("summary", {}, el("strong", {}, `Chapter ${project.chapter}${part.chapter_title ? `: ${part.chapter_title}` : ""}`), el("span", { class: "muted small" }, ` · ${part.chapter_text.length.toLocaleString()} chars`)), el("div", { class: "chapter-text" }, part.chapter_text))
+      : el("p", { class: "banner warn" }, "This reel's novel was deleted."),
+    el(
+      "p",
+      { class: "muted small" },
+      project.story
+        ? "Rewrite the part if it misses the chapter's best moments. Edit single words below instead: that keeps your takes."
+        : `${state.config.models.script_name} writes the part from the chapter and the character bible: the hook, the story beats, a poll and the call to action. You then record it in a few takes.`,
+    ),
+    part ? el("button", { class: "btn primary", onclick: write }, project.story ? "Rewrite the part" : "Write the part") : null,
+  );
+}
+
+function showTags(show, prefix = "") {
+  const tags = [];
+  (show.characters || []).forEach((c) => tags.push(["c", c]));
+  if (show.prop) tags.push(["p", `object: ${show.prop}`]);
+  if (show.photo) tags.push(["ph", `photo: ${show.photo}`]);
+  (show.chat || []).forEach((m) => tags.push(["ch", `chat ${m.sender}: ${m.text}`]));
+  if (show.note && show.note.text) tags.push(["ch", `note: ${show.note.text}`]);
+  if (show.tag) tags.push(["t", show.tag]);
+  if (!tags.length) return null;
+  return el("div", { class: "tags" }, prefix ? el("span", { class: "muted small" }, prefix) : null, tags.map(([kind, text]) => el("span", { class: `tag ${kind}` }, text)));
+}
+
+function storySection(project) {
+  const story = structuredClone(project.story);
+  const save = el("button", { class: "btn primary", disabled: true }, "Save the words");
+  const dirty = () => (save.disabled = false);
+  const input = (value, attrs, onInput) => el("input", { value, oninput: (e) => (onInput(e.target.value), dirty()), ...attrs });
+  const area = (value, attrs, onInput) => el("textarea", { rows: Math.max(2, Math.ceil(value.length / 70)), oninput: (e) => (onInput(e.target.value), dirty()), ...attrs }, value);
+  const opening = project.novel?.opening;
+  save.addEventListener("click", () =>
+    act(
+      () =>
+        api.put(`/api/projects/${project.id}/story`, {
+          chapter_title: story.chapter_title,
+          hook: story.hook,
+          hook_direction: story.hook_direction,
+          beats: story.beats.map((b) => ({ text: b.text, direction: b.direction })),
+          poll: story.poll,
+          cta: story.cta,
+        }),
+      "Saved. Re-record any take whose words you changed.",
+    ),
+  );
+  const chars = [story.hook, ...story.beats.map((b) => b.text), story.poll.text, story.cta].join(" ").length;
+  const beats = story.beats.map((b, i) =>
+    el(
+      "li",
+      { class: "beat" },
+      el("div", { class: "beat-head small muted" }, `Beat ${i + 1} · ${LABELS.act[b.act] || b.act} · take ${b.take.slice(1)}${b.speaker !== "narrator" ? ` · quoting ${b.speaker}` : ""}`),
+      area(b.text, { maxlength: 400 }, (v) => (b.text = v)),
+      input(b.direction, { maxlength: 200, placeholder: "delivery note", class: "direction" }, (v) => (b.direction = v)),
+      showTags(b.show),
+      b.switch ? showTags(b.switch.show, `at “${b.switch.at}” →`) : null,
+    ),
+  );
+  const list = (title, items, fmt) => (items && items.length ? [el("h3", {}, title), el("ul", { class: "small plain" }, items.map((x) => el("li", {}, fmt(x))))] : []);
+  return section(
+    "Part script",
+    el("p", { class: "muted small" }, `Part ${story.part} · ${story.beats.length} beats · ${chars.toLocaleString()} characters, about ${Math.round(chars / 13.5)} seconds read aloud.`),
+    story.problems.length ? el("div", { class: "banner warn small" }, el("strong", {}, "Still to fix: "), story.problems.join("; ")) : null,
+    field("Part title", input(story.chapter_title, { maxlength: 120 }, (v) => (story.chapter_title = v))),
+    el(
+      "ol",
+      { class: "beats" },
+      el(
+        "li",
+        { class: "beat hook" },
+        el("div", { class: "beat-head small muted" }, `Hook · on camera · take 1${opening ? ` · starts with “${opening}...”` : ""}`),
+        area(story.hook, { maxlength: 400 }, (v) => (story.hook = v)),
+        input(story.hook_direction, { maxlength: 200, placeholder: "delivery note", class: "direction" }, (v) => (story.hook_direction = v)),
+      ),
+      beats,
+      el(
+        "li",
+        { class: "beat" },
+        el("div", { class: "beat-head small muted" }, "Poll · two options on screen · ends with the invitation to comment"),
+        area(story.poll.text, { maxlength: 400 }, (v) => (story.poll.text = v)),
+        el("div", { class: "grid2" }, field("Option A", input(story.poll.a, { maxlength: 40 }, (v) => (story.poll.a = v))), field("Option B", input(story.poll.b, { maxlength: 40 }, (v) => (story.poll.b = v)))),
+      ),
+      el(
+        "li",
+        { class: "beat" },
+        el("div", { class: "beat-head small muted" }, "Call to action · over the end card"),
+        area(story.cta, { maxlength: 400 }, (v) => (story.cta = v)),
+      ),
+    ),
+    el("div", { class: "row" }, save),
+    el(
+      "details",
+      {},
+      el("summary", {}, "Characters, outfits and pictures in this part"),
+      ...list("New characters (they join the bible)", story.characters, (c) => `${c.name} (${c.id}, “${c.label}”, ${c.role}): ${c.description}. Wears: ${c.outfit}`),
+      ...list("Returning characters' outfits", story.looks, (x) => `${x.id}: ${x.outfit}`),
+      ...list("Variants", story.variants, (v) => `${v.id} (${v.base}): ${v.change}${v.persistent ? " (lasting)" : ""}`),
+      ...list("Objects and scenes", story.props, (p) => `${p.id}${p.recurring ? " (recurring)" : ""}: ${p.description}`),
+      ...list("Photos", story.photos, (p) => `${p.id} “${p.title}”: ${p.description}`),
+      ...list("Notes for the bible", story.bible_notes, (x) => `${x.id}: ${x.note}`),
+    ),
+  );
+}
+
+function takesSection(project) {
+  const scenes = project.script ? project.script.scenes : [];
+  const recorded = scenes.filter((s) => s.take).length;
+  return section(
+    "Record the part",
+    el("p", { class: "muted small" }, `${scenes.length} takes · ${recorded} recorded. Read each take from the teleprompter in one go; the delivery notes show under the lines.`),
+    el("ol", { class: "scenes" }, scenes.map((scene, index) => takeCard(project, scenes, scene, index))),
+  );
+}
+
+function takeCard(project, scenes, scene, index) {
+  const record = () => {
+    const recorder = new Recorder({
+      scene,
+      index,
+      total: scenes.length,
+      onTake: async (blob, name, progress) => {
+        state.project = await upload(`/api/projects/${project.id}/scenes/${scene.id}/take`, blob, name, progress);
+        toast(`Take ${index + 1} recorded`, "ok");
+      },
+      onClose: () => render(),
+    });
+    recorder.open();
+  };
+  const picker = el("input", {
+    type: "file",
+    accept: "video/*",
+    hidden: true,
+    onchange: async (event) => {
+      const file = event.target.files[0];
+      if (file) await act(() => upload(`/api/projects/${project.id}/scenes/${scene.id}/take`, file, file.name), `Take ${index + 1} added`);
+    },
+  });
+  const controls = scene.take
+    ? el(
+        "div",
+        { class: "take-row" },
+        el("video", { src: mediaUrl(project.id, scene.take.key), controls: true, playsinline: true, preload: "metadata" }),
+        el("span", { class: "pill ok" }, `recorded · ${seconds(scene.take.duration)}`),
+        el("button", { class: "btn small", onclick: record }, "Retake"),
+        el("button", { class: "icon-btn", title: "Delete take", onclick: () => confirm("Delete this take?") && act(() => api.del(`/api/projects/${project.id}/scenes/${scene.id}/take`)) }, "✕"),
+      )
+    : el("div", { class: "take-row" }, el("button", { class: "btn primary small", onclick: record }, "● Record"), el("button", { class: "btn small", onclick: () => picker.click() }, "Upload a take"), picker);
+  return el(
+    "li",
+    { class: `scene${scene.take ? " recorded" : ""}` },
+    el("div", { class: "scene-head" }, el("span", { class: "scene-n" }, String(index + 1)), el("span", { class: "muted small" }, scene.purpose)),
+    el("p", { class: "take-lines" }, scene.lines),
+    scene.direction ? el("p", { class: "muted small" }, scene.direction) : null,
+    controls,
   );
 }
 
