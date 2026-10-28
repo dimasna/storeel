@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from itertools import pairwise
 
 from ..common import digest
 from ..jobs import JobContext
@@ -44,22 +45,18 @@ def _at(position: float, speech: list[tuple[float, float]], prefer_next: bool) -
 
 
 def place_words(text: str, speech: list[tuple[float, float]]) -> list[Word]:
-    """Spread the words of `text` over the speech stretches (see `_place`)."""
-    return _place(text.split(), speech, frozenset())
-
-
-def _place(tokens: list[str], speech: list[tuple[float, float]], turn_breaks: frozenset[int]) -> list[Word]:
     """Words timed over speech stretches.
 
-    The pauses between stretches are first matched to word boundaries (turn, sentence and
-    clause ends preferred, see `align_chunks`); within each chunk, words share the speaking
-    time in proportion to their syllables.
+    The pauses between stretches are first matched to word boundaries (sentence and clause
+    ends preferred, see `align_chunks`); within each chunk, words share the speaking time in
+    proportion to their syllables.
     """
+    tokens = text.split()
     if not tokens or not speech:
         return []
     weights = [0.35 + syllables(token) for token in tokens]
     words: list[Word] = []
-    for b1, b2, s1, s2 in align_chunks(tokens, weights, speech, turn_breaks):
+    for b1, b2, s1, s2 in align_chunks(tokens, weights, speech):
         words += _spread(tokens[b1:b2], weights[b1:b2], speech[s1 : s2 + 1])
     return words
 
@@ -81,7 +78,6 @@ def _spread(tokens: list[str], weights: list[float], speech: list[tuple[float, f
 SENTENCE_BREAK = re.compile(r"[.!?…]['\"”’)]*$")
 CLAUSE_BREAK = re.compile(r"[,;:—–-]['\"”’)]*$")
 SKIP_PENALTY = 0.08  # a pause inside a word or around an untranscribed filler ("um")
-CROSS_PENALTY = 0.3  # a turn edge that does not fall on a pause
 
 
 def _break_penalty(token: str) -> float:
@@ -93,18 +89,14 @@ def _break_penalty(token: str) -> float:
 
 
 def align_chunks(
-    tokens: list[str],
-    weights: list[float],
-    speech: list[tuple[float, float]],
-    turn_breaks: frozenset[int] = frozenset(),
+    tokens: list[str], weights: list[float], speech: list[tuple[float, float]]
 ) -> list[tuple[int, int, int, int]]:
     """Match the pauses between speech stretches to word boundaries.
 
     Returns chunks (first word, end word, first stretch, last stretch). A dynamic program
     picks, for each pause in order, a later word boundary or none, minimising how far each
-    chunk's share of the syllables is from its share of the speaking time, plus penalties
-    for pausing where the text has no punctuation and for a turn edge (`turn_breaks`, word
-    indexes where a new turn starts) that does not fall on a pause.
+    chunk's share of the syllables is from its share of the speaking time, plus a penalty
+    for pausing where the text has no punctuation.
     """
     gaps, count = len(speech) - 1, len(tokens)
     if gaps <= 0 or count <= 1:
@@ -115,13 +107,11 @@ def align_chunks(
     cum_t = [0.0]
     for start, end in speech:
         cum_t.append(cum_t[-1] + (end - start))
-    breaks = sorted(turn_breaks)
 
     def cost(b1: int, b2: int, g1: int, g2: int) -> float:
         share_w = (cum_w[b2] - cum_w[b1]) / cum_w[-1]
         share_t = (cum_t[g2 + 1] - cum_t[g1 + 1]) / cum_t[-1]
-        crossed = sum(1 for b in breaks if b1 < b < b2)
-        return abs(share_w - share_t) + CROSS_PENALTY * crossed
+        return abs(share_w - share_t)
 
     # state (gap, boundary): gap -1 / boundary 0 is the start, gap `gaps` / boundary `count` the end
     best: dict[tuple[int, int], tuple[float, tuple[int, int] | None]] = {(-1, 0): (0.0, None)}
@@ -134,7 +124,7 @@ def align_chunks(
                     continue
                 total = so_far + cost(b1, b2, g1, g2) + SKIP_PENALTY * (g2 - g1 - 1)
                 if g2 < gaps:
-                    total += 0.0 if b2 in turn_breaks else _break_penalty(tokens[b2 - 1])
+                    total += _break_penalty(tokens[b2 - 1])
                 if total < choice[0]:
                     choice = (total, (g1, b1))
             if choice[1] is not None:
@@ -150,11 +140,28 @@ def align_chunks(
     return chunks[::-1]
 
 
+def _boundary(
+    envelope: Envelope, previous_start: float, start: float, duration: float
+) -> tuple[float, float]:
+    """Where one turn stops and the next starts: the pause nearest the model's reported start
+    of the next turn, or, with no pause there (speech runs on), just before that start."""
+    lo, hi = max(previous_start, start - LEAD - 0.4), min(duration, start + 0.4)
+    speech = envelope.segments(lo, hi)
+    pauses = [(a[1], b[0]) for a, b in pairwise(speech)]
+    near = [(a, b) for a, b in pauses if b >= start - LEAD and a <= start + 0.15]
+    if near:
+        return min(near, key=lambda gap: abs(gap[1] - start))
+    cut = max(previous_start + 0.2, start - 0.1)  # onsets are reported a little late
+    return cut, cut
+
+
 def build_turns(raw_turns: list[dict], envelope: Envelope, duration: float) -> list[Turn]:
     """Turns from the transcription response, with refined edges and timed words.
 
-    Turns whose search windows touch are aligned together, so the edge between them lands
-    on the pause in the audio instead of on the model's (late) detection times.
+    The model's turn times are detection times: onsets a little late, ends later still. Each
+    edge between two turns is put on the pause nearest the reported onset (or just before
+    it when the speech runs on without a pause), then each turn's words are timed over the
+    speech inside its own window.
     """
     cleaned: list[tuple[float, float, str, str | None]] = []
     for raw in sorted(raw_turns, key=lambda t: t.get("startMs", 0)):
@@ -164,48 +171,30 @@ def build_turns(raw_turns: list[dict], envelope: Envelope, duration: float) -> l
         start = max(0.0, float(raw.get("startMs", 0)) / 1000)
         end = min(duration, max(start + 0.2, float(raw.get("endMs", 0)) / 1000))
         cleaned.append((start, end, text, raw.get("speaker")))
-
-    groups: list[list[int]] = []
-    for index, (start, _, _, _) in enumerate(cleaned):
-        if groups and start - LEAD < cleaned[groups[-1][-1]][1] + TRAIL:
-            groups[-1].append(index)
-        else:
-            groups.append([index])
-
+    edges = [
+        _boundary(envelope, previous[0], current[0], duration) for previous, current in pairwise(cleaned)
+    ]
     turns: list[Turn] = []
-    previous_end = 0.0
-    for group in groups:
-        first, last = cleaned[group[0]], cleaned[group[-1]]
-        lo = max(previous_end + 0.02, first[0] - LEAD)
-        hi = min(last[1] + TRAIL, duration)
+    for index, (start, end, text, speaker) in enumerate(cleaned):
+        lo = edges[index - 1][1] if index else max(0.0, start - LEAD)
+        hi = min(edges[index][0], end + TRAIL) if index < len(edges) else min(duration, end + TRAIL)
         speech = envelope.segments(lo, max(hi, lo + 0.2))
         if not speech:  # too quiet to tell (or not speech): trust the model's edges
-            speech = [(first[0], max(last[1], first[0] + 0.2))]
-        tokens: list[str] = []
-        owners: list[int] = []
-        for index in group:
-            for token in cleaned[index][2].split():
-                tokens.append(token)
-                owners.append(index)
-        breaks = frozenset(k for k in range(1, len(tokens)) if owners[k] != owners[k - 1])
-        words = _place(tokens, speech, breaks)
-        for index in group:
-            own = [word for word, owner in zip(words, owners, strict=True) if owner == index]
-            start, end = own[0].start, own[-1].end
-            inside = [(max(a, start), min(b, end)) for a, b in speech if b > start and a < end]
-            turns.append(
-                Turn(
-                    id=len(turns) + 1,
-                    start=start,
-                    end=end,
-                    text=cleaned[index][2],
-                    original=cleaned[index][2],
-                    speaker=cleaned[index][3],
-                    speech=[(round(a, 3), round(b, 3)) for a, b in inside] or [(start, end)],
-                    words=own,
-                )
+            speech = [(start, max(end, start + 0.2))]
+        speech = [(round(a, 3), round(b, 3)) for a, b in speech]
+        words = place_words(text, speech)
+        turns.append(
+            Turn(
+                id=len(turns) + 1,
+                start=words[0].start,
+                end=words[-1].end,
+                text=text,
+                original=text,
+                speaker=speaker,
+                speech=speech,
+                words=words,
             )
-        previous_end = speech[-1][1]
+        )
     return turns
 
 
