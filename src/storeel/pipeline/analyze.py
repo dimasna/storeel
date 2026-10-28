@@ -13,11 +13,11 @@ import re
 import unicodedata
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from ..common import digest, slug
 from ..jobs import JobContext, PipelineError
-from ..meta.schema import text_format
+from ..meta.schema import OutputError, parse_output, text_format
 from ..models import DEFAULT_TITLE, Analysis, Entity, Moment, Project, Source, Transcript, Word
 from ..prompts import load_prompt
 
@@ -31,32 +31,36 @@ GAP = 0.3
 INSTRUCTIONS = load_prompt("analysis")
 
 
+# The schema sent with the request marks every field required (see strict_json_schema), but
+# Muse Spark can still leave fields out, so the defaults here say what to assume instead.
 class EntityOut(BaseModel):
-    id: str = Field(description="lowercase snake_case id")
-    kind: Literal["character", "object", "place"]
-    name: str = Field(description="what the speaker calls it, e.g. 'Milo', 'my mum', 'the café'")
-    description: str = Field(description="English: how it looks, concretely, for an image model")
-    real_world: bool = Field(description="true only for a real, recognisable landmark, brand or product")
-    visible_in_video: bool = Field(description="true when it is clearly visible in the footage")
-    segment_prompt: str = Field(
-        description="when a visible character or object: a short noun phrase, else ''"
+    id: str = Field("", description="lowercase snake_case id")
+    kind: Literal["character", "object", "place"] = "object"
+    name: str = Field("", description="what the speaker calls it, e.g. 'Milo', 'my mum', 'the café'")
+    description: str = Field("", description="English: how it looks, concretely, for an image model")
+    real_world: bool = Field(
+        False, description="true only for a real, recognisable landmark, brand or product"
     )
-    visible_at: float = Field(description="when visible: seconds where it is clearly visible; else -1")
+    visible_in_video: bool = Field(False, description="true when it is clearly visible in the footage")
+    segment_prompt: str = Field(
+        "", description="when a visible character or object: a short noun phrase, else ''"
+    )
+    visible_at: float = Field(-1, description="when visible: seconds where it is clearly visible; else -1")
 
 
 class MomentOut(BaseModel):
-    quote: str = Field(description="3-15 consecutive words copied exactly from one transcript turn")
-    display: Literal["cutaway", "overlay"]
-    entities: list[str] = Field(description="ids of the entities the picture shows")
-    prompt: str = Field(description="English: the one picture to show, for an image model")
+    quote: str = Field("", description="3-15 consecutive words copied exactly from one transcript turn")
+    display: Literal["cutaway", "overlay"] = "cutaway"
+    entities: list[str] = Field(default_factory=list, description="ids of the entities the picture shows")
+    prompt: str = Field("", description="English: the one picture to show, for an image model")
 
 
 class AnalysisOut(BaseModel):
-    title: str = Field(description="a short title for the reel, in the speaker's language")
-    summary: str = Field(description="one sentence: what the video is about")
-    language: str = Field(description="the main spoken language as an ISO 639-1 code, e.g. 'id' or 'en'")
-    entities: list[EntityOut]
-    moments: list[MomentOut]
+    title: str = Field("", description="a short title for the reel, in the speaker's language")
+    summary: str = Field("", description="one sentence: what the video is about")
+    language: str = Field("", description="the main spoken language as an ISO 639-1 code, e.g. 'id' or 'en'")
+    entities: list[EntityOut] = Field(default_factory=list)
+    moments: list[MomentOut] = Field(default_factory=list)
 
 
 def target_moments(duration: float, visuals: str) -> int:
@@ -263,9 +267,13 @@ def analyze(ctx: JobContext, source: Source, transcript: Transcript) -> Analysis
         f" ({result.reasoning_tokens} reasoning)"
     )
     try:
-        out = AnalysisOut.model_validate_json(result.text)
-    except ValueError as exc:
-        raise PipelineError(f"Muse Spark returned a plan that does not parse: {exc}") from exc
+        out, missing = parse_output(AnalysisOut, result.text)
+    except (OutputError, ValidationError) as exc:
+        raise PipelineError(
+            f"Muse Spark's picture plan could not be read ({exc.__class__.__name__}); try again"
+        ) from exc
+    if missing:
+        ctx.log(f"Muse Spark left out: {', '.join(missing)} (filled in)")
     analysis = normalize(out, transcript, source.duration, count)
     analysis.digest = key
     dropped = len(out.moments) - len(analysis.moments)

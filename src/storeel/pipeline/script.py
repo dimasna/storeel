@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from ..common import slug
 from ..jobs import JobContext, PipelineError
-from ..meta.schema import text_format
+from ..meta.schema import OutputError, parse_output, text_format
 from ..models import DEFAULT_TITLE, Idea, Project, Scene, Script, ScriptEntity
 from ..prompts import load_prompt
 
@@ -32,38 +32,50 @@ VOICES = {
 INSTRUCTIONS = load_prompt("script")
 
 
+# The schema sent with the request marks every field required (see strict_json_schema), but
+# Muse Spark can still leave fields out, so the defaults here say what to assume instead.
 class SceneOut(BaseModel):
     purpose: Literal["hook", "context", "story", "point", "payoff", "cta"] = Field(
-        description="the job this scene does"
+        "story", description="the job this scene does"
     )
     lines: str = Field(
-        description="exactly what the speaker says, in the script's language; at most 30 words"
+        "", description="exactly what the speaker says, in the script's language; at most 30 words"
     )
     direction: str = Field(
-        description="a short delivery note (emotion, gesture, pace), in the script's language"
+        "", description="a short delivery note (emotion, gesture, pace), in the script's language"
     )
     display: Literal["none", "cutaway", "overlay"] = Field(
-        description="how a picture is shown during the scene"
+        "none", description="how a picture is shown during the scene"
     )
-    visual: str = Field(description="English: the one picture to show, or empty when display is none")
-    entities: list[str] = Field(description="ids of the entities in the picture")
+    visual: str = Field("", description="English: the one picture to show, or empty when display is none")
+    entities: list[str] = Field(default_factory=list, description="ids of the entities in the picture")
 
 
 class EntityOut(BaseModel):
-    id: str = Field(description="lowercase snake_case id")
-    kind: Literal["character", "object", "place"]
-    name: str = Field(description="what the speaker calls it")
+    id: str = Field("", description="lowercase snake_case id")
+    kind: Literal["character", "object", "place"] = "object"
+    name: str = Field("", description="what the speaker calls it")
     description: str = Field(
+        "",
         description="English: how it looks, concretely (age, build, hair, clothes; material, colour; "
-        "architecture, light)"
+        "architecture, light)",
     )
-    real_world: bool = Field(description="true only for a real, recognisable landmark, brand or product")
+    real_world: bool = Field(
+        False, description="true only for a real, recognisable landmark, brand or product"
+    )
 
 
 class ScriptOut(BaseModel):
-    title: str = Field(description="a short title for the video, in the script's language")
-    scenes: list[SceneOut]
-    entities: list[EntityOut]
+    title: str = Field("", description="a short title for the video, in the script's language")
+    scenes: list[SceneOut] = Field(default_factory=list)
+    entities: list[EntityOut] = Field(default_factory=list)
+
+
+def idea_title(idea: Idea) -> str:
+    """A title from the idea itself, for when the script comes back without one."""
+    words = idea.text.split()
+    title = " ".join(words[:7]) + ("…" if len(words) > 7 else "")
+    return (title[:1].upper() + title[1:])[:120] or DEFAULT_TITLE
 
 
 def _prompt(idea: Idea) -> str:
@@ -84,7 +96,9 @@ def _prompt(idea: Idea) -> str:
     )
 
 
-def clean_script(out: ScriptOut, language: Literal["id", "en"]) -> Script:
+def clean_script(
+    out: ScriptOut, language: Literal["id", "en"], fallback_title: str = DEFAULT_TITLE
+) -> Script:
     """Unique ids, known entity references, and a picture only where one is described."""
     entities: list[ScriptEntity] = []
     seen: set[str] = set()
@@ -121,32 +135,28 @@ def clean_script(out: ScriptOut, language: Literal["id", "en"]) -> Script:
             )
         )
     if not scenes:
-        raise PipelineError("Muse Spark returned a script without scenes; try again")
+        raise ScriptUnusable("the script has no scenes with lines")
     return Script(
-        title=out.title.strip()[:120] or DEFAULT_TITLE,
+        title=" ".join(out.title.split())[:120] or fallback_title,
         language=language,
         scenes=scenes[:20],
         entities=entities,
     )
 
 
-def write_script(ctx: JobContext) -> Script:
-    project = ctx.project()
-    if project.idea is None:
-        raise PipelineError("describe the idea first")
-    idea = project.idea
-    ctx.log(f"Muse Spark: writing a {idea.length}s {idea.format} script ({idea.language})")
+class ScriptUnusable(ValueError):
+    """Muse Spark answered, but not with a script that can be recorded."""
+
+
+def _ask(ctx: JobContext, idea: Idea, note: str | None) -> ScriptOut:
+    prompt = _prompt(idea) + (f"\n\n{note}" if note else "")
     result = ctx.client.responses(
         {
             "model": ctx.settings.spark_model,
             "store": False,
             "instructions": INSTRUCTIONS,
             "input": [
-                {
-                    "type": "message",
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": _prompt(idea)}],
-                }
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": prompt}]}
             ],
             "reasoning": {"effort": ctx.settings.spark_effort},
             "text": text_format("reel_script", ScriptOut),
@@ -163,10 +173,29 @@ def write_script(ctx: JobContext) -> Script:
         f" ({result.input_tokens} in, {result.output_tokens} out tokens)"
     )
     try:
-        out = ScriptOut.model_validate_json(result.text)
-    except ValueError as exc:
-        raise PipelineError(f"Muse Spark returned a script that does not parse: {exc}") from exc
-    script = clean_script(out, idea.language)
+        out, missing = parse_output(ScriptOut, result.text)
+    except (OutputError, ValidationError) as exc:
+        raise ScriptUnusable(f"the answer could not be read ({exc.__class__.__name__})") from exc
+    if missing:
+        ctx.log(f"Muse Spark left out: {', '.join(missing)} (filled in)")
+    return out
+
+
+def write_script(ctx: JobContext) -> Script:
+    project = ctx.project()
+    if project.idea is None:
+        raise PipelineError("describe the idea first")
+    idea = project.idea
+    ctx.log(f"Muse Spark: writing a {idea.length}s {idea.format} script ({idea.language})")
+    try:
+        script = clean_script(_ask(ctx, idea, None), idea.language, idea_title(idea))
+    except ScriptUnusable as exc:
+        ctx.log(f"{exc}; asking once more")
+        note = "Your previous answer could not be used. Answer with title, scenes and entities."
+        try:
+            script = clean_script(_ask(ctx, idea, note), idea.language, idea_title(idea))
+        except ScriptUnusable as again:
+            raise PipelineError(f"Muse Spark did not return a usable script ({again}); try again") from again
     words = sum(len(s.lines.split()) for s in script.scenes)
     ctx.log(f"script: {len(script.scenes)} scenes, {words} words, {len(script.entities)} entities")
 

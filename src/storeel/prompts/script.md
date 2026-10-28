@@ -13,3 +13,5 @@ PICTURES
 - "visual" describes exactly one picture in English for an image model: the subject and what happens, the setting, framing and light, concrete and consistent with the story. Never ask for readable text, captions, logos or watermarks in the picture.
 - Anything that appears in more than one picture (a person, a pet, an object, a place) is an entity: give it a lowercase snake_case id, a concrete English description of how it looks, and list its id in the "entities" of each scene that shows it. The speaker can be an entity (id "speaker") when the pictures show them inside the story; describe them generically unless the idea says how they look.
 - Never depict real public figures; describe a generic person instead.
+
+ANSWER with one JSON object with all three fields: "title" (a short title for the video), "scenes" and "entities".
