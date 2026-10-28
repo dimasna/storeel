@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from dotenv import load_dotenv
 
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]")
+SERVED_HOSTS = ("localhost", "127.0.0.1")  # Host headers the local server answers
 SPARK_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
 IMAGE_REASONING = ("low", "high")
 
@@ -97,5 +98,5 @@ def get_settings() -> Settings:
         max_input_seconds=_get_int("STOREEL_MAX_INPUT_SECONDS", 180, minimum=5),
         max_upload_mb=_get_int("STOREEL_MAX_UPLOAD_MB", 1024),
         workers=_get_int("STOREEL_WORKERS", 2),
-        allowed_hosts=LOCAL_HOSTS + extra_hosts,
+        allowed_hosts=SERVED_HOSTS + extra_hosts,
     )

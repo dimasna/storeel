@@ -15,6 +15,9 @@ dependencies = [
     "uvicorn>=0.35",
 ]
 
+[project.scripts]
+storeel = "storeel.cli:main"
+
 [dependency-groups]
 dev = ["ruff>=0.17"]
 
