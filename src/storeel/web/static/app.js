@@ -65,7 +65,8 @@ function options(field, values, current, labels = LABELS[field]) {
 }
 
 function enumOf(schema, field) {
-  return schema.properties[field].enum;
+  // A server started before a setting existed does not offer it: the field is left out.
+  return schema?.properties?.[field]?.enum ?? [];
 }
 
 function jobActive(project) {
@@ -626,8 +627,11 @@ function styleSection(project) {
     clearTimeout(timer);
     timer = setTimeout(save, 600);
   };
-  const select = (name, label, hint) =>
-    field(label, el("select", { onchange: (e) => ((style[name] = e.target.value), save()) }, options(name, enumOf(schema, name), style[name])), hint);
+  const select = (name, label, hint) => {
+    const values = enumOf(schema, name);
+    if (!values.length) return null;
+    return field(label, el("select", { onchange: (e) => ((style[name] = e.target.value), save()) }, options(name, values, style[name])), hint);
+  };
   const color = el("input", { type: "color", value: style.caption_color, onchange: (e) => ((style.caption_color = e.target.value.toUpperCase()), save()) });
   const watermark = el("input", { value: style.watermark, maxlength: 60, placeholder: "@yourname", oninput: (e) => ((style.watermark = e.target.value), later()) });
   const pictures = project.analysis ? "Picture changes apply when you update the pictures." : null;
