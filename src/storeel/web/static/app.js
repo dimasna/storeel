@@ -196,7 +196,7 @@ async function renderHome() {
           "button",
           { class: "choice", onclick: () => create("idea") },
           el("strong", {}, "Not yet: start from an idea"),
-          el("span", {}, "Describe the idea. Muse Spark writes a scene script; you record it scene by scene with a teleprompter."),
+          el("span", {}, `Describe the idea. ${state.config.models.text_name} writes a scene script; you record it scene by scene with a teleprompter.`),
         ),
       ),
     ),
@@ -447,7 +447,7 @@ function ideaSection(project) {
     if (takes && !confirm(`A new script replaces the current one and deletes ${takes} recorded take(s). Continue?`)) return;
     act(
       () => api.put(`/api/projects/${project.id}/idea`, { text: text.value.trim(), format: format.value, tone: tone.value, length: Number(length.value), language: language.value }),
-      "Muse Spark is writing the script…",
+      `${state.config.models.text_name} is writing the script…`,
     );
   };
   const open = !project.script;
@@ -662,7 +662,7 @@ function processSection(project) {
       { class: "muted small" },
       processed
         ? "Update applies style changes and redoes only what changed. Redo makes a new picture for every moment."
-        : "Transcribes the speech (Muse Voice Transcribe), plans the pictures (Muse Spark), finds faces and references (SAM 3.1) and draws the pictures (Muse Image).",
+        : `Transcribes the speech (Muse Voice Transcribe), plans the pictures (${state.config.models.text_name}), finds faces and references (SAM 3.1) and draws the pictures (Muse Image).`,
     ),
     el(
       "div",
@@ -799,7 +799,7 @@ function renderSection(project) {
 function usageSection(project) {
   const u = project.usage;
   const rows = [
-    ["Muse Spark", `${u.spark_input_tokens.toLocaleString()} in · ${u.spark_output_tokens.toLocaleString()} out tokens`],
+    ["Text model", `${u.spark_input_tokens.toLocaleString()} in · ${u.spark_output_tokens.toLocaleString()} out tokens`],
     ["Muse Image", `${u.images} image${u.images === 1 ? "" : "s"}`],
     ["SAM 3.1", `${u.sam_images} image${u.sam_images === 1 ? "" : "s"}`],
     ["Voice Transcribe", seconds(u.asr_seconds)],

@@ -1,4 +1,4 @@
-"""Path B: Muse Spark writes a scene-by-scene script from the user's idea."""
+"""Path B: the text model (Muse Wonder by default) writes a scene-by-scene script from the idea."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, ValidationError
 from ..common import slug
 from ..jobs import JobContext, PipelineError
 from ..meta.schema import OutputError, parse_output, text_format
-from ..models import DEFAULT_TITLE, Idea, Project, Scene, Script, ScriptEntity
+from ..models import DEFAULT_TITLE, Idea, Project, Scene, Script, ScriptEntity, text_model_name
 from ..prompts import load_prompt
 
 WORDS_PER_SECOND = {"id": 2.2, "en": 2.4}  # read from a teleprompter, a little slower than chat
@@ -33,7 +33,7 @@ INSTRUCTIONS = load_prompt("script")
 
 
 # The schema sent with the request marks every field required (see strict_json_schema), but
-# Muse Spark can still leave fields out, so the defaults here say what to assume instead.
+# the model can still leave fields out, so the defaults here say what to assume instead.
 class SceneOut(BaseModel):
     purpose: Literal["hook", "context", "story", "point", "payoff", "cta"] = Field(
         "story", description="the job this scene does"
@@ -145,29 +145,26 @@ def clean_script(
 
 
 class ScriptUnusable(ValueError):
-    """Muse Spark answered, but not with a script that can be recorded."""
+    """The text model answered, but not with a script that can be recorded."""
 
 
 def _ask(ctx: JobContext, idea: Idea, note: str | None) -> ScriptOut:
     prompt = _prompt(idea) + (f"\n\n{note}" if note else "")
+    model = ctx.settings.text_model
     result = ctx.client.responses(
         {
-            "model": ctx.settings.spark_model,
+            "model": model,
             "store": False,
             "instructions": INSTRUCTIONS,
             "input": [
                 {"type": "message", "role": "user", "content": [{"type": "input_text", "text": prompt}]}
             ],
-            "reasoning": {"effort": ctx.settings.spark_effort},
+            "reasoning": {"effort": ctx.settings.text_effort},
             "text": text_format("reel_script", ScriptOut),
         },
         cancel=ctx.cancelled,
     )
-    ctx.spend(
-        spark_input_tokens=result.input_tokens,
-        spark_cached_tokens=result.cached_tokens,
-        spark_output_tokens=result.output_tokens,
-    )
+    ctx.spend_text(model, result)
     ctx.log(
         f"script written in {result.seconds:.0f}s"
         f" ({result.input_tokens} in, {result.output_tokens} out tokens)"
@@ -177,7 +174,7 @@ def _ask(ctx: JobContext, idea: Idea, note: str | None) -> ScriptOut:
     except (OutputError, ValidationError) as exc:
         raise ScriptUnusable(f"the answer could not be read ({exc.__class__.__name__})") from exc
     if missing:
-        ctx.log(f"Muse Spark left out: {', '.join(missing)} (filled in)")
+        ctx.log(f"{text_model_name(model)} left out: {', '.join(missing)} (filled in)")
     return out
 
 
@@ -186,7 +183,11 @@ def write_script(ctx: JobContext) -> Script:
     if project.idea is None:
         raise PipelineError("describe the idea first")
     idea = project.idea
-    ctx.log(f"Muse Spark: writing a {idea.length}s {idea.format} script ({idea.language})")
+    name = text_model_name(ctx.settings.text_model)
+    ctx.log(
+        f"{name}: writing a {idea.length}s {idea.format} script ({idea.language},"
+        f" effort {ctx.settings.text_effort})"
+    )
     try:
         script = clean_script(_ask(ctx, idea, None), idea.language, idea_title(idea))
     except ScriptUnusable as exc:
@@ -195,7 +196,7 @@ def write_script(ctx: JobContext) -> Script:
         try:
             script = clean_script(_ask(ctx, idea, note), idea.language, idea_title(idea))
         except ScriptUnusable as again:
-            raise PipelineError(f"Muse Spark did not return a usable script ({again}); try again") from again
+            raise PipelineError(f"{name} did not return a usable script ({again}); try again") from again
     words = sum(len(s.lines.split()) for s in script.scenes)
     ctx.log(f"script: {len(script.scenes)} scenes, {words} words, {len(script.entities)} entities")
 

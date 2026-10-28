@@ -34,7 +34,17 @@ from ..db import Conflict, NotFound
 from ..jobs import PipelineError, Workers
 from ..media import ffmpeg as ff
 from ..meta import MetaAPIError
-from ..models import DEFAULT_TITLE, Display, Idea, Project, Scene, Script, ScriptEdit, Style
+from ..models import (
+    DEFAULT_TITLE,
+    Display,
+    Idea,
+    Project,
+    Scene,
+    Script,
+    ScriptEdit,
+    Style,
+    text_model_name,
+)
 from ..pipeline.render import FONT_FILE
 from ..pipeline.run import HANDLERS
 from ..pipeline.transcribe import retime
@@ -229,7 +239,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "max_input_seconds": settings.max_input_seconds,
             "max_upload_mb": settings.max_upload_mb,
             "models": {
-                "spark": settings.spark_model,
+                "text": settings.text_model,
+                "text_name": text_model_name(settings.text_model),
+                "text_effort": settings.text_effort,
                 "image": settings.image_model,
                 "asr": settings.asr_model,
                 "sam": settings.sam_model,
@@ -250,7 +262,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse({"detail": f"Meta did not accept the key: {exc}"}, status_code=status)
         finally:
             client.close()
-        needed = [settings.spark_model, settings.image_model, settings.asr_model, settings.sam_model]
+        needed = [settings.text_model, settings.image_model, settings.asr_model, settings.sam_model]
         return JSONResponse({"ok": True, "models": models, "missing": [m for m in needed if m not in models]})
 
     @app.get("/api/projects")

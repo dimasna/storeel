@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]")
 SERVED_HOSTS = ("localhost", "127.0.0.1")  # Host headers the local server answers
-SPARK_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
+TEXT_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
 IMAGE_REASONING = ("low", "high")
 
 
@@ -58,8 +58,8 @@ class Settings:
     api_key: str
     api_base: str
     data_dir: Path
-    spark_model: str
-    spark_effort: str
+    text_model: str  # writes the scripts and plans the pictures (Muse Wonder or Muse Spark)
+    text_effort: str
     image_model: str
     image_reasoning: str
     image_parallel: int
@@ -88,8 +88,15 @@ def get_settings() -> Settings:
         api_key=_get("MODEL_API_KEY", ""),
         api_base=_api_base(_get("META_API_BASE_URL", "https://api.meta.ai/v1")),
         data_dir=Path(_get("STOREEL_DATA_DIR", "data")).expanduser().resolve(),
-        spark_model=_get("STOREEL_SPARK_MODEL", "muse-spark-1.3"),
-        spark_effort=_get_choice("STOREEL_SPARK_EFFORT", "medium", SPARK_EFFORTS),
+        # STOREEL_SPARK_* are the names these settings had before Muse Wonder became the default.
+        text_model=_get("STOREEL_TEXT_MODEL", _get("STOREEL_SPARK_MODEL", "muse-wonder-1.0")),
+        text_effort=_get_choice(
+            "STOREEL_TEXT_EFFORT"
+            if os.environ.get("STOREEL_TEXT_EFFORT", "").strip()
+            else "STOREEL_SPARK_EFFORT",
+            "max",
+            TEXT_EFFORTS,
+        ),
         image_model=_get("STOREEL_IMAGE_MODEL", "muse-image-1.0"),
         image_reasoning=_get_choice("STOREEL_IMAGE_REASONING", "high", IMAGE_REASONING),
         image_parallel=_get_int("STOREEL_IMAGE_PARALLEL", 4),

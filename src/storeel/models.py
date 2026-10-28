@@ -230,18 +230,39 @@ class Render(Strict):
 
 
 # Standard-mode list prices (https://dev.meta.ai/docs/pricing-rate-limits), for estimates only.
-PRICE_SPARK_INPUT = 1.25 / 1e6
-PRICE_SPARK_CACHED = 0.15 / 1e6
-PRICE_SPARK_OUTPUT = 4.25 / 1e6
+# Text models, per token: (input, cached input, output), matched by model id prefix.
+TEXT_PRICES = {
+    "muse-wonder": (4.00 / 1e6, 0.20 / 1e6, 20.00 / 1e6),
+    "muse-spark": (1.25 / 1e6, 0.15 / 1e6, 4.25 / 1e6),
+}
+CONTRIBUTOR_PRICES = (0.10 / 1e6, 0.002 / 1e6, 0.20 / 1e6)  # the "-contributor" Muse Spark models
 PRICE_IMAGE = 0.01
 PRICE_SAM_IMAGE = 2.5 / 1000
 PRICE_ASR_SECOND = 0.18 / 3600
 
 
+def text_model_name(model: str) -> str:
+    """How the text model is called in logs and the studio, e.g. "Muse Wonder"."""
+    return "Muse Wonder" if model.startswith("muse-wonder") else "Muse Spark"
+
+
+def text_usd(model: str, input_tokens: int, cached_tokens: int, output_tokens: int) -> float:
+    """The list price of one text-model call; unknown models are priced like Muse Wonder."""
+    if model.endswith("-contributor"):
+        price_in, price_cached, price_out = CONTRIBUTOR_PRICES
+    else:
+        prefix = next((p for p in TEXT_PRICES if model.startswith(p)), "muse-wonder")
+        price_in, price_cached, price_out = TEXT_PRICES[prefix]
+    uncached = max(0, input_tokens - cached_tokens)
+    return uncached * price_in + cached_tokens * price_cached + output_tokens * price_out
+
+
 class Usage(Strict):
+    # Token counts of the text model (Muse Spark or Muse Wonder); the names predate Wonder.
     spark_input_tokens: int = 0
     spark_cached_tokens: int = 0
     spark_output_tokens: int = 0
+    text_usd: float = 0.0  # those tokens priced by the model that used them
     images: int = 0
     sam_images: int = 0
     asr_seconds: float = 0.0
@@ -253,11 +274,14 @@ class Usage(Strict):
     @property
     def estimated_usd(self) -> float:
         """Not stored (the stored document must round-trip): derived from the counters."""
-        uncached = max(0, self.spark_input_tokens - self.spark_cached_tokens)
+        text = self.text_usd
+        if not text and (self.spark_input_tokens or self.spark_output_tokens):
+            # Projects from before text_usd was counted only ever used Muse Spark.
+            text = text_usd(
+                "muse-spark", self.spark_input_tokens, self.spark_cached_tokens, self.spark_output_tokens
+            )
         return round(
-            uncached * PRICE_SPARK_INPUT
-            + self.spark_cached_tokens * PRICE_SPARK_CACHED
-            + self.spark_output_tokens * PRICE_SPARK_OUTPUT
+            text
             + self.images * PRICE_IMAGE
             + self.sam_images * PRICE_SAM_IMAGE
             + self.asr_seconds * PRICE_ASR_SECOND,

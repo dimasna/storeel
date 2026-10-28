@@ -23,7 +23,8 @@ from .db import Job
 from .files import ProjectFiles
 from .media.ffmpeg import FFmpegError
 from .meta import MetaAPIError, MetaClient
-from .models import Project, Usage
+from .meta.client import ResponseResult
+from .models import Project, Usage, text_usd
 from .services import Services
 
 log = logging.getLogger(__name__)
@@ -123,6 +124,15 @@ class JobContext:
         with self._usage_lock:
             for name, amount in amounts.items():
                 setattr(self._usage, name, getattr(self._usage, name) + amount)
+
+    def spend_text(self, model: str, result: ResponseResult) -> None:
+        """Count one text-model call, priced by the model that made it."""
+        self.spend(
+            spark_input_tokens=result.input_tokens,
+            spark_cached_tokens=result.cached_tokens,
+            spark_output_tokens=result.output_tokens,
+            text_usd=text_usd(model, result.input_tokens, result.cached_tokens, result.output_tokens),
+        )
 
     def flush_usage(self) -> None:
         with self._usage_lock:

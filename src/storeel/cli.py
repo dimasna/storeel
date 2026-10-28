@@ -104,7 +104,7 @@ def make(args: argparse.Namespace) -> int:
     usage = project.usage
     print(f"reel: {out} ({render.duration:.1f}s, {render.size / 1e6:.1f} MB)")
     print(
-        f"Model API usage: {usage.spark_input_tokens} Spark input / {usage.spark_output_tokens} output"
+        f"Model API usage: {usage.spark_input_tokens} text-model input / {usage.spark_output_tokens} output"
         f" tokens, {usage.images} images, {usage.sam_images} SAM images, {usage.asr_seconds:.0f}s transcribed"
         f" (about ${usage.estimated_usd:.3f} at list prices)"
     )

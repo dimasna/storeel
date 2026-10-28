@@ -1,4 +1,5 @@
-"""Muse Spark watches the video with its transcript and plans the pictures.
+"""The text model (Muse Wonder by default) watches the video with its transcript and plans the
+pictures.
 
 It lists the characters, objects and places the pictures need (and which of them can be
 seen in the footage, for SAM), and picks the moments where a picture helps. Each moment
@@ -18,7 +19,17 @@ from pydantic import BaseModel, Field, ValidationError
 from ..common import digest, slug
 from ..jobs import JobContext, PipelineError
 from ..meta.schema import OutputError, parse_output, text_format
-from ..models import DEFAULT_TITLE, Analysis, Entity, Moment, Project, Source, Transcript, Word
+from ..models import (
+    DEFAULT_TITLE,
+    Analysis,
+    Entity,
+    Moment,
+    Project,
+    Source,
+    Transcript,
+    Word,
+    text_model_name,
+)
 from ..prompts import load_prompt
 
 VERSION = 1
@@ -32,7 +43,7 @@ INSTRUCTIONS = load_prompt("analysis")
 
 
 # The schema sent with the request marks every field required (see strict_json_schema), but
-# Muse Spark can still leave fields out, so the defaults here say what to assume instead.
+# the model can still leave fields out, so the defaults here say what to assume instead.
 class EntityOut(BaseModel):
     id: str = Field("", description="lowercase snake_case id")
     kind: Literal["character", "object", "place"] = "object"
@@ -213,7 +224,8 @@ def analyze(ctx: JobContext, source: Source, transcript: Transcript) -> Analysis
     plan = project.script.model_dump(exclude={"scenes": {"__all__": {"take"}}}) if project.script else None
     key = digest(
         VERSION,
-        ctx.settings.spark_model,
+        ctx.settings.text_model,
+        ctx.settings.text_effort,
         source.digest,
         [(t.start, t.end, t.original) for t in transcript.turns],
         count,
@@ -230,13 +242,18 @@ def analyze(ctx: JobContext, source: Source, transcript: Transcript) -> Analysis
         return analysis
 
     client = ctx.client
+    model = ctx.settings.text_model
+    name = text_model_name(model)
     proxy = ctx.files.path(source.proxy_key)
     file_id = client.upload_file(proxy, "video/mp4", expires_seconds=3600, cancel=ctx.cancelled)
     try:
-        ctx.log(f"Muse Spark: watching {source.duration:.1f}s of video with {len(transcript.turns)} turn(s)")
+        ctx.log(
+            f"{name}: watching {source.duration:.1f}s of video with {len(transcript.turns)} turn(s)"
+            f" (effort {ctx.settings.text_effort})"
+        )
         result = client.responses(
             {
-                "model": ctx.settings.spark_model,
+                "model": model,
                 "store": False,
                 "instructions": INSTRUCTIONS,
                 "input": [
@@ -249,18 +266,14 @@ def analyze(ctx: JobContext, source: Source, transcript: Transcript) -> Analysis
                         ],
                     }
                 ],
-                "reasoning": {"effort": ctx.settings.spark_effort},
+                "reasoning": {"effort": ctx.settings.text_effort},
                 "text": text_format("reel_pictures", AnalysisOut),
             },
             cancel=ctx.cancelled,
         )
     finally:
         client.delete_file(file_id)  # the video is personal: do not leave it stored
-    ctx.spend(
-        spark_input_tokens=result.input_tokens,
-        spark_cached_tokens=result.cached_tokens,
-        spark_output_tokens=result.output_tokens,
-    )
+    ctx.spend_text(model, result)
     ctx.log(
         f"analysis took {result.seconds:.0f}s: {result.input_tokens} input tokens"
         f" ({result.cached_tokens} cached), {result.output_tokens} output"
@@ -270,10 +283,10 @@ def analyze(ctx: JobContext, source: Source, transcript: Transcript) -> Analysis
         out, missing = parse_output(AnalysisOut, result.text)
     except (OutputError, ValidationError) as exc:
         raise PipelineError(
-            f"Muse Spark's picture plan could not be read ({exc.__class__.__name__}); try again"
+            f"{name}'s picture plan could not be read ({exc.__class__.__name__}); try again"
         ) from exc
     if missing:
-        ctx.log(f"Muse Spark left out: {', '.join(missing)} (filled in)")
+        ctx.log(f"{name} left out: {', '.join(missing)} (filled in)")
     analysis = normalize(out, transcript, source.duration, count)
     analysis.digest = key
     dropped = len(out.moments) - len(analysis.moments)
