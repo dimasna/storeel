@@ -16,8 +16,8 @@ Create reel ┤                                                             ├�
 | Scene script (idea path) | Muse Spark 1.3, max effort | Writes a scene-by-scene script for a teleprompter, with the picture planned per scene |
 | Transcribe | Muse Voice Transcribe | Speech turns with timing; words are then timed from the audio (see below) |
 | Analyze | Muse Wonder 1.0, max effort (video) | Lists the characters, objects and places, and picks the moments that get a picture |
-| Analyze | SAM 3.1 | Cuts those seen in the video out as reference images; finds the face so cards go beside it |
-| Generate assets | Muse Image | Reference pictures for recurring entities, then one picture per moment |
+| Analyze | SAM 3.1 | Cuts those seen in the video out as reference images; checks the face when needed |
+| Generate assets | Muse Image (+ SAM 3.1 for cut-outs) | Reference pictures for recurring entities, then one picture per moment |
 | Compile | ffmpeg + Pillow | Your video with the pictures floating over it (cards, SAM cut-outs, or full screen), word-highlighted captions, watermark, loudness-normalised audio |
 
 Each text step has its own model and effort (`STOREEL_SCRIPT_*`, `STOREEL_PLAN_*`; see
