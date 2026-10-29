@@ -6,8 +6,9 @@ the cliffhanger), and the OUTRO (a poll, then the call to action). Each beat als
 screen shows. The checks below enforce that shape; what they find is sent back for one
 or two repair rounds, and whatever is still wrong is kept on the story for the user to see.
 
-The user records the part themselves, so the beats are grouped into a few takes: the hook, then
-one take per act (long acts are split), then the poll and the call to action together.
+The user records the part themselves, one short take per line: the hook, each beat, the poll,
+then the call to action. A slip costs one beat to redo, and each beat's pictures are timed by
+its own recording.
 """
 
 from __future__ import annotations
@@ -53,7 +54,6 @@ HOOK_MAX = 150
 BRIDGE_MAX = 150
 POLL_MAX = 110
 CTA_MAX = 130
-TAKE_MAX_CHARS = 520  # a take longer than ~40 s is split, so a slip costs less to redo
 REPAIR_ROUNDS = 2
 ACTS = ("bridge", "setup", "rise", "turn", "cliffhanger")
 ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
@@ -786,14 +786,9 @@ def to_story(out: StoryOut, number: int, continuing: bool, problems: list[str]) 
     )
 
 
-ACT_GROUP = {
-    "bridge": "opening",
-    "setup": "opening",
-    "rise": "rise",
-    "turn": "turn",
-    "cliffhanger": "cliffhanger",
-}
-ACT_LABEL = {"opening": "bridge / setup", "rise": "rise", "turn": "turn", "cliffhanger": "cliffhanger"}
+# The purposes of the takes that are not beats. OUTRO is the poll and the call to action in one
+# take, as parts written before one take per beat were recorded.
+HOOK, POLL, CTA, OUTRO = "hook", "poll", "call to action", "poll + call to action"
 
 
 def _direction(parts: list[str]) -> str:
@@ -802,35 +797,21 @@ def _direction(parts: list[str]) -> str:
 
 
 def assign_takes(story: Story) -> list[Scene]:
-    """Group the part into takes: the hook, one take per act (long acts split), the outro.
-    Sets each beat's `take` and returns the scenes to record, without takes attached."""
-    group: list[Beat] = []
-    count = 1  # t1 is the hook
-
-    def close() -> None:
-        nonlocal count
-        if not group:
-            return
-        count += 1
-        for beat in group:
-            beat.take = f"t{count}"
-        group.clear()
-
-    for beat in story.beats:
-        if group and (
-            ACT_GROUP[beat.act] != ACT_GROUP[group[0].act]
-            or sum(len(b.text) + 1 for b in group) + len(beat.text) > TAKE_MAX_CHARS
-        ):
-            close()
-        group.append(beat)
-    close()
+    """One take per line of the part: the hook, each beat, the poll, the call to action. A
+    take is short and its screen is timed by its own recording. Sets each beat's `take` and
+    returns the scenes to record, without takes attached."""
+    for number, beat in enumerate(story.beats, 2):  # t1 is the hook
+        beat.take = f"t{number}"
     return scenes_for(story)
 
 
-def scenes_for(story: Story) -> list[Scene]:
-    """The scenes to record, from the takes the beats are already grouped in."""
+def scenes_for(story: Story, outro: bool = False) -> list[Scene]:
+    """The scenes to record, from the takes the beats are already in: the hook, a scene per
+    take, then the poll and the call to action. Parts written before one take per beat may
+    group several beats in a take and, with `outro`, keep the poll and the call to action in
+    one take."""
     scenes = [
-        Scene(id="t1", purpose="hook", lines=(story.hook or "…")[:600], direction=story.hook_direction[:300])
+        Scene(id="t1", purpose=HOOK, lines=(story.hook or "…")[:600], direction=story.hook_direction[:300])
     ]
     order: list[str] = []
     for beat in story.beats:
@@ -841,25 +822,39 @@ def scenes_for(story: Story) -> list[Scene]:
         scenes.append(
             Scene(
                 id=take_id,
-                purpose=ACT_LABEL[ACT_GROUP.get(group[0].act, "rise")],
+                purpose=group[0].act if group[0].act in ACTS else "rise",
                 lines=(" ".join(b.text for b in group) or "…")[:600],
                 direction=_direction([b.direction for b in group]),
             )
         )
-    outro = f"{story.poll.text} {story.cta}".strip() or "…"
-    scenes.append(Scene(id=f"t{len(order) + 2}", purpose="poll + call to action", lines=outro[:600]))
+    n = len(order) + 2
+    if outro:
+        lines = f"{story.poll.text} {story.cta}".strip() or "…"
+        scenes.append(Scene(id=f"t{n}", purpose=OUTRO, lines=lines[:600]))
+    else:
+        scenes.append(Scene(id=f"t{n}", purpose=POLL, lines=(story.poll.text or "…")[:600]))
+        scenes.append(Scene(id=f"t{n + 1}", purpose=CTA, lines=(story.cta or "…")[:600]))
     return scenes
 
 
+def _kind(purpose: str) -> str:
+    return purpose if purpose in (HOOK, POLL, CTA, OUTRO) else "beat"
+
+
 def takes_script(story: Story, title: str, language: str, old: Script | None, regroup: bool = True) -> Script:
-    """The scenes to record for `story`. With `regroup` (a new script) the beats are grouped
-    afresh and no take is kept; otherwise (an edit) each scene keeps its recorded take: the user
-    re-records the ones whose words they changed."""
-    scenes = assign_takes(story) if regroup else scenes_for(story)
-    if not regroup:
-        previous = {s.id: s.take for s in (old.scenes if old else []) if s.take}
+    """The scenes to record for `story`. With `regroup` (a new script) every beat gets its own
+    take and no recording is kept; otherwise (an edit) the takes stay as they were and each
+    scene keeps its recording: the user re-records the ones whose words they changed."""
+    if regroup:
+        scenes = assign_takes(story)
+    else:
+        outro = bool(old and old.scenes and old.scenes[-1].purpose == OUTRO)
+        scenes = scenes_for(story, outro=outro)
+        previous = {s.id: s for s in (old.scenes if old else []) if s.take}
         for scene in scenes:
-            scene.take = previous.get(scene.id)
+            before = previous.get(scene.id)
+            if before is not None and _kind(before.purpose) == _kind(scene.purpose):
+                scene.take = before.take
     return Script(title=title[:120] or DEFAULT_TITLE, language=language, scenes=scenes, entities=[])
 
 

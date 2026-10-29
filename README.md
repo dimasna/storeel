@@ -173,8 +173,8 @@ A novel is told as a series: one reel per chapter, called a
   poll and a call to action ("... lengkapnya ada di link bio"). Each beat says what the screen
   shows. The script is checked against the format and sent back for up to two fixes; anything
   left is shown. Edit the words freely: edits keep your takes.
-- **Recording**: the part is split into a few takes (the hook, one per act, then the poll and
-  call to action) to record with the teleprompter, or upload one video of the whole part.
+- **Recording**: one take per line of the part (the hook, each beat, the poll, then the call
+  to action) to record with the teleprompter, or upload one video of the whole part.
 - **The character bible** grows chapter by chapter. A new character is drawn full body and
   cut out by SAM; in a later part they are redrawn from that portrait in the new outfit, so
   the face stays the same. Recurring objects are kept too, and notes (a death, a secret)

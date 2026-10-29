@@ -36,6 +36,7 @@ from .render import (
     pill,
     title_block,
 )
+from .story import CTA, HOOK, OUTRO, POLL
 
 MIN_LINE = 0.25  # seconds: no beat is squeezed to less than this
 
@@ -127,38 +128,44 @@ def take_spans(project: Project) -> dict[str, tuple[float, float]]:
 
 
 def timeline(project: Project) -> list[Line]:
-    """Every line of the part placed on the reel's timeline."""
+    """Every line of the part placed on the reel's timeline. The takes are the hook, the beats'
+    takes (one per beat; a part written before may group several), then the poll and the call
+    to action (or, in a part written before, both in one take)."""
     story, source, script = project.story, project.source, project.script
     if story is None or source is None or script is None:
         return []
     takes = take_spans(project)
-    ids = [s.id for s in script.scenes]
     lines: list[Line] = []
-    hook = takes.get(ids[0])
-    if hook is not None:
-        lines.append(Line("hook", hook[0], hook[1], ids[0]))
-    for take in ids[1:-1]:
-        span = takes.get(take)
-        beats = [b for b in story.beats if b.take == take]
-        if span is None or not beats:
+    for scene in script.scenes:
+        span = takes.get(scene.id)
+        if span is None:
             continue
         start, end = span
-        words = _segment_words(project, start, end)
-        shares = split_by_text([b.text for b in beats], words, start, end)
-        for beat, (t0, t1, own) in zip(beats, shares, strict=True):
-            at = _switch_time(beat, own, t0, t1)
-            if at is None:
-                lines.append(Line("beat", t0, t1, take, beat.show, beat))
-            else:
-                assert beat.switch is not None
-                lines.append(Line("beat", t0, at, take, beat.show, beat))
-                lines.append(Line("beat", at, t1, take, beat.switch.show, beat))
-    outro = takes.get(ids[-1])
-    if outro is not None:
-        words = _segment_words(project, outro[0], outro[1])
-        parts = split_by_text([story.poll.text, story.cta], words, outro[0], outro[1])
-        lines.append(Line("poll", parts[0][0], parts[0][1], ids[-1]))
-        lines.append(Line("cta", parts[1][0], parts[1][1], ids[-1]))
+        if scene.purpose == HOOK:
+            lines.append(Line("hook", start, end, scene.id))
+        elif scene.purpose == POLL:
+            lines.append(Line("poll", start, end, scene.id))
+        elif scene.purpose == CTA:
+            lines.append(Line("cta", start, end, scene.id))
+        elif scene.purpose == OUTRO:
+            words = _segment_words(project, start, end)
+            parts = split_by_text([story.poll.text, story.cta], words, start, end)
+            lines.append(Line("poll", parts[0][0], parts[0][1], scene.id))
+            lines.append(Line("cta", parts[1][0], parts[1][1], scene.id))
+        else:
+            beats = [b for b in story.beats if b.take == scene.id]
+            if not beats:
+                continue
+            words = _segment_words(project, start, end)
+            shares = split_by_text([b.text for b in beats], words, start, end)
+            for beat, (t0, t1, own) in zip(beats, shares, strict=True):
+                at = _switch_time(beat, own, t0, t1)
+                if at is None:
+                    lines.append(Line("beat", t0, t1, scene.id, beat.show, beat))
+                else:
+                    assert beat.switch is not None
+                    lines.append(Line("beat", t0, at, scene.id, beat.show, beat))
+                    lines.append(Line("beat", at, t1, scene.id, beat.switch.show, beat))
     return lines
 
 

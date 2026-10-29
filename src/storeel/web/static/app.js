@@ -1019,7 +1019,7 @@ function takesSection(project) {
     "Record the part",
     el("p", { class: "muted small" }, whole
       ? "This video is used instead of the takes. Its words are matched to the script to time the pictures."
-      : `${scenes.length} takes · ${recorded} recorded. Read each take from the teleprompter in one go; the delivery notes show under the lines. Or record the whole part elsewhere and upload it as one video.`),
+      : `${scenes.length} takes · ${recorded} recorded: the hook, one per beat, the poll and the call to action. Each take is a few lines, read from the teleprompter in one go (a slip costs one beat to redo); the delivery notes show under the lines. Or record the whole part elsewhere and upload it as one video.`),
     wholeVideo,
     whole ? null : el("ol", { class: "scenes" }, scenes.map((scene, index) => takeCard(project, scenes, scene, index))),
   );
