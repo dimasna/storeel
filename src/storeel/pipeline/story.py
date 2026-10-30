@@ -66,8 +66,9 @@ REVIEW_ROUNDS = 1  # storyboard reviews of a script in the right shape, each fol
 REVIEW_FIX = (
     "A storyboard review read the chapter next to this script and found moments whose pictures do"
     " not show what is being said. Fix the pictures of these beats (their see, show and then; add"
-    " characters, variants, props or photos where needed), keep everything else, and answer with the"
-    " whole corrected JSON object:"
+    " characters, variants, props or photos where needed; split a beat in two where the review says"
+    " so, its words kept exactly and in order), keep everything else, and answer with the whole"
+    " corrected JSON object:"
 )
 ACTS = ("bridge", "setup", "rise", "turn", "cliffhanger")
 ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
@@ -556,6 +557,16 @@ def _shown(out: StoryOut) -> set[str]:
     return ids
 
 
+def _quoted_show(b: BeatOut) -> ShowOut:
+    """The screen that is up while a beat's quoted words are said: the one after its switch when
+    the quote comes after the switch's words."""
+    at = b.then.at.strip().lower()
+    text = b.text.lower()
+    quote = min((k for k in (text.find('"'), text.find("\u201c")) if k >= 0), default=-1)
+    switch = text.find(at) if at else -1
+    return b.then.show if 0 <= switch <= quote else b.show
+
+
 def validate(
     out: StoryOut, novel: Novel, number: int, bible: Bible, continuing: bool, heard: list[str] | None = None
 ) -> list[str]:
@@ -643,6 +654,11 @@ def validate(
         need(6 <= len(out.beats) <= 24, f"{len(out.beats)} beats; write 8 to 20")
     behind: set[str] = set()  # the empty places already shown behind people
     again: dict[str, list[int]] = {}  # and the beats that show them behind people again
+    who = {c: v.base for c, v in variants.items()}  # a variant is its base character on screen
+
+    def scene_people(s: ShowOut) -> set[str]:
+        return {who.get(r, r) for r in props[s.prop].refs} if s.prop in props else set()
+
     for i, b in enumerate(out.beats, 1):
         if video:
             need(len(b.text) <= 320, f"beat {i} is {len(b.text)} characters: split it at a comma or a clause")
@@ -668,10 +684,16 @@ def validate(
                 if s.prop in behind and i not in again.setdefault(s.prop, []):
                     again[s.prop].append(i)
                 behind.add(s.prop)
+        for s in shows:  # one focus, not a crowd
+            named = {who.get(c, c) for c in s.characters} | scene_people(s)
+            need(
+                len(named) <= 3,
+                f"beat {i}: {len(named)} people on screen at once ({', '.join(sorted(named))}): with a scene"
+                " of people up, stand at most one person at the bottom",
+            )
         if b.speaker != "narrator" and b.speaker in people:  # the voiced character is on screen
-            who = {c: v.base for c, v in variants.items()}
             on = {who.get(c, c) for s in shows for c in s.characters}
-            on |= {who.get(r, r) for s in shows if s.prop in props for r in props[s.prop].refs}
+            on |= {r for s in shows for r in scene_people(s)}
             person = who.get(b.speaker, b.speaker)
             name = (names.get(person) or person).casefold()
             texting = any(
@@ -680,6 +702,15 @@ def validate(
             need(
                 person in on or texting,
                 f"beat {i}: {b.speaker!r} is quoted but not on screen: show them while their words are said",
+            )
+            quoted = _quoted_show(b)  # and the biggest thing on screen while they are said
+            standing = [c for c in quoted.characters if who.get(c, c) != person]
+            need(
+                not (person in scene_people(quoted) and standing),
+                f"beat {i}: {b.speaker!r} speaks but is only a small figure inside the scene while"
+                f" {' and '.join(standing)} {'stand' if len(standing) > 1 else 'stands'} at the bottom:"
+                f" stand {b.speaker!r} at the bottom while their words are said (viewers take the"
+                " biggest figure for the one speaking), or show the scene with nobody standing",
             )
     for place, where in again.items():
         beats = ", ".join(map(str, where))

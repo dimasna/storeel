@@ -18,7 +18,7 @@ THE VOICE. Everything in the hook, the beats, the poll and the cta is said aloud
 - Call people by their role (his wife, the palace princess, this guy), not by name: someone scrolling by knows no names yet.
 - Never in the hook: what happened in earlier parts, this part's cliffhanger or ending, empty praise, a question to the viewer (the poll asks it).
 
-2. THE BEATS ("beats"): the story in story order, one idea per beat, 40-190 characters each, 8 to 20 beats. Every beat has an "act", the job it does in this part:
+2. THE BEATS ("beats"): the story in story order, one idea and one picture per beat, 40-190 characters each, 8 to 20 beats. A beat that moves to another place, brings in another person or jumps to another time (a memory, a flashback) is two beats. Every beat has an "act", the job it does in this part:
 - "bridge" - from part two on, beat 1 and only beat 1: how the previous part ended (the user message gives it), in one sentence of at most <<BRIDGE_MAX>> characters, so a newcomer can follow and a returning viewer is not bored. Shape: <<BRIDGE_SHAPE>> Show the people of that moment, with the tag "<<PREVIOUSLY>>". Never re-introduce a character from scratch: that was part one's setup.
 - "setup" - who, where and the situation. Part one opens with it: <<SETUP_SHAPE>> From part two on, only where this part moves to a new place or brings in someone new.
 - "rise" - most beats: the moments that raise the stakes, the best lines quoted, the reactions.

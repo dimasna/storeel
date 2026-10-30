@@ -237,7 +237,8 @@ def calm(lines: list[Line]) -> list[Line]:
     MIN_HOLD seconds), and each new screen a little before its first word. A switch inside a beat
     that would leave a part that short is dropped: the beat keeps the picture of its longer part.
     A beat that short keeps the picture before it (or, right after the hook, takes the next one),
-    so the screen does not flash."""
+    so the screen does not flash; short beats in a row that together last long enough share the
+    first one's picture instead (a memory told in two quick beats still gets its picture)."""
     out: list[Line] = []
     i = 0
     while i < len(lines):
@@ -251,13 +252,29 @@ def calm(lines: list[Line]) -> list[Line]:
                 continue
         out.append(line)
         i += 1
-    for k, line in enumerate(out):
-        if line.kind != "beat" or line.end - line.start >= MIN_HOLD:
+
+    def short(k: int) -> bool:
+        return out[k].kind == "beat" and out[k].end - out[k].start < MIN_HOLD
+
+    k = 0
+    while k < len(out):
+        if not short(k):
+            k += 1
             continue
-        if k and out[k - 1].kind == "beat":
-            out[k] = replace(line, show=out[k - 1].show)
-        elif k + 1 < len(out) and out[k + 1].kind == "beat":
-            out[k] = replace(line, show=out[k + 1].show)
+        j = k  # out[k..j]: short beats in a row
+        while j + 1 < len(out) and short(j + 1):
+            j += 1
+        if j > k and out[j].end - out[k].start >= MIN_HOLD:
+            show = out[k].show
+        elif k and out[k - 1].kind == "beat":
+            show = out[k - 1].show
+        elif j + 1 < len(out) and out[j + 1].kind == "beat":
+            show = out[j + 1].show
+        else:
+            show = out[k].show
+        for m in range(k, j + 1):
+            out[m] = replace(out[m], show=show)
+        k = j + 1
     for k in range(1, len(out)):  # each new screen comes a little before its first word
         before, line = out[k - 1], out[k]
         if abs(before.end - line.start) > 0.05:

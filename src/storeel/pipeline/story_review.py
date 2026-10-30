@@ -73,7 +73,13 @@ def storyboard(out, bible: Bible) -> dict:
     return {
         "characters": cast,
         "props": {
-            p.id: {"description": p.description, "refs": p.refs, "people": p.people, "framing": p.framing}
+            p.id: {
+                "description": p.description,
+                "refs": p.refs,
+                "people": p.people,
+                "framing": p.framing,
+                "backdrop": p.backdrop,
+            }
             for p in out.props
         },
         "bible_props": {p.id: p.description for p in bible.props.values()},
