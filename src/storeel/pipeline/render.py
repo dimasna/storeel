@@ -250,6 +250,42 @@ def pill(
     return _shadowed(card_img, blur=max(3, size // 6), offset=max(2, size // 10), opacity=0.35)
 
 
+def name_tag(text: str, size: int, max_width: int) -> Image.Image:
+    """A character's name over their head, the first time the storyteller voices them: white bold
+    text with a dark outline and a soft shadow, on one line (smaller if it would not fit)."""
+    fnt = font(size, 800)
+    while size > 12 and fnt.getlength(text) > max_width:
+        size = round(size * 0.9)
+        fnt = font(size, 800)
+    stroke = max(2, round(size * 0.075))
+    ascent, descent = fnt.getmetrics()
+    pad = stroke + round(size * 0.3)
+    width, height = int(fnt.getlength(text)) + 2 * pad, ascent + descent + 2 * pad
+    base = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    shadow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).text(
+        (pad + size * 0.03, pad + ascent + size * 0.06),
+        text,
+        font=fnt,
+        anchor="ls",
+        fill=(0, 0, 0, 150),
+        stroke_width=stroke,
+        stroke_fill=(0, 0, 0, 150),
+    )
+    ImageDraw.Draw(base).text(
+        (pad, pad + ascent),
+        text,
+        font=fnt,
+        anchor="ls",
+        fill=(255, 255, 255, 255),
+        stroke_width=stroke,
+        stroke_fill=(0, 0, 0, 255),
+    )
+    shadow = shadow.filter(ImageFilter.GaussianBlur(max(1, size * 0.06)))
+    shadow.alpha_composite(base)
+    return shadow
+
+
 def photo_card(picture: Image.Image, width: int, title: str = "") -> Image.Image:
     """A photo in a dark rounded frame with its caption under it, the whole picture shown."""
     pad = max(6, round(width * 0.0165))

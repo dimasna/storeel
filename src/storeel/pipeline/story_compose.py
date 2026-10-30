@@ -7,9 +7,11 @@ proportions are safer than matching every word). A beat's "switch" is found by i
 
 Layout (fractions of the frame): a red tag at the top, then one main
 item (a note, chat bubbles, a photo card, a scene card or a cut-out object) in the upper half,
-and up to two characters standing at the bottom on their side. The hook has no pictures and
-keeps the speaker sharp; after it the speaker is blurred behind the story (style permitting).
-The poll and the end card are fixed screens; a "Part N" badge is up from the first frame.
+and up to two characters standing at the bottom on their side. The first time the storyteller
+voices a character (a beat quoting them), that character's name shows over their head. The
+hook has no pictures and keeps the speaker sharp; after it the speaker is blurred behind the
+story (style permitting). The poll and the end card are fixed screens; a "Part N" badge is up
+from the first frame.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from dataclasses import dataclass
 from PIL import Image
 
 from ..files import ProjectFiles
-from ..models import Beat, Project, Story, StoryShow, Word
+from ..models import Beat, BibleCharacter, Project, Story, StoryShow, Word
 from .analyze import find_quote
 from .compose import Compositor, H, W, _Card
 from .layout import covered, to_region
@@ -31,6 +33,7 @@ from .render import (
     card,
     chat_bubble,
     cutout_sprite,
+    name_tag,
     note_card,
     photo_card,
     pill,
@@ -183,6 +186,7 @@ SLOT_X = {"left": 0.24, "right": 0.76}
 STAND_H, STAND_BOTTOM = 0.52, 1.02
 BADGE_XY = (0.04, 0.035)
 BADGE_SIZE = 0.026  # of the height: small enough to sit above the platforms' top bar
+NAME_SIZE, NAME_GAP = 0.034, 0.006  # a voiced character's name, just above their head
 POLL_Y = (0.17, 0.265, 0.345)
 END_TOP, END_PROP_Y, END_PILL_Y = 0.115, 0.465, 0.635
 WORDS = {
@@ -194,17 +198,25 @@ WORDS = {
 class Sprites:
     """Builds and caches each screen element of a part, positioned on the frame."""
 
-    def __init__(self, project: Project, files: ProjectFiles, novel_files: ProjectFiles | None) -> None:
+    def __init__(
+        self,
+        project: Project,
+        files: ProjectFiles,
+        novel_files: ProjectFiles | None,
+        cast: dict[str, BibleCharacter] | None = None,
+    ) -> None:
         self.project = project
         self.story = project.story
         self.files = {"project": files, "novel": novel_files}
         self.pictures = project.part_pictures or {}
         self.props = {p.id: p for p in self.story.props} if self.story else {}
         self.photos = {p.id: p for p in self.story.photos} if self.story else {}
-        self.slots: dict[str, str] = {}
-        if project.novel_id and novel_files is not None:
-            for c in self.story.characters if self.story else []:
-                self.slots[c.id] = c.slot
+        # where each character stands and what viewers call them: the bible's, then this part's
+        self.slots = {cid: c.slot for cid, c in (cast or {}).items()}
+        self.labels = {cid: c.label for cid, c in (cast or {}).items()}
+        for c in self.story.characters if self.story else []:
+            self.slots[c.id], self.labels[c.id] = c.slot, c.label
+        self.bases = {v.id: v.base for v in self.story.variants} if self.story else {}
         self.cache: dict[tuple, Image.Image] = {}
 
     def image(self, picture_id: str) -> Image.Image | None:
@@ -220,15 +232,27 @@ class Sprites:
             self.cache[key] = build()
         return self.cache[key]
 
-    def layers(self, show: StoryShow) -> list[tuple[Image.Image, tuple[int, int]]]:
-        """One beat's screen: (sprite, top-left) in drawing order."""
+    def standing(self, show: StoryShow) -> list[str]:
+        """The characters a beat's screen shows standing at the bottom (those with a picture)."""
+        return [c for c in show.characters if self.image(c) is not None][:2] if show.characters else []
+
+    def person(self, character: str) -> str:
+        """Who a picture is of: a variant (Agus injured) is its base character (Agus)."""
+        return self.bases.get(character, character)
+
+    def label(self, character: str) -> str:
+        return self.labels.get(character) or self.labels.get(self.person(character)) or ""
+
+    def layers(self, show: StoryShow, name: str = "") -> list[tuple[Image.Image, tuple[int, int]]]:
+        """One beat's screen: (sprite, top-left) in drawing order. `name` is a standing character
+        whose name goes over their head (the storyteller voices them for the first time)."""
         out: list[tuple[Image.Image, tuple[int, int]]] = []
         shift = 0.0
         if show.tag:
             tag = self._cached(("tag", show.tag), lambda: pill(show.tag, round(0.04 * H)))
             out.append((tag, (W // 2 - tag.width // 2, round(TAG_Y * H) - tag.height // 2)))
             shift = TAG_SHIFT
-        chars = [c for c in show.characters if self.image(c) is not None][:2] if show.characters else []
+        chars = self.standing(show)
 
         def centred(sprite: Image.Image, y: float) -> None:
             out.append((sprite, (W // 2 - sprite.width // 2, round(y * H) - sprite.height // 2)))
@@ -286,6 +310,7 @@ class Sprites:
                     0.30 + shift,
                 )
         slots = ["left", "right"] if len(chars) == 2 else [self.slot(c) for c in chars]
+        named: tuple[Image.Image, tuple[int, int]] | None = None
         for cid, slot in zip(chars, slots, strict=True):
             picture = self.image(cid)
             info = self.pictures.get(cid)
@@ -302,23 +327,45 @@ class Sprites:
             x = round(SLOT_X[slot] * W) - sprite.width // 2
             y = round(STAND_BOTTOM * H) - sprite.height
             out.append((sprite, (x, y)))
+            if cid == name and (text := self.label(cid)):
+                named = self._name_over(text, sprite, x, y)
+        if named is not None:
+            out.append(named)  # last, so nothing covers it
         return out
 
+    def _name_over(
+        self, text: str, sprite: Image.Image, x: int, y: int
+    ) -> tuple[Image.Image, tuple[int, int]]:
+        """`text` centred just above the top of the picture in `sprite` (not its shadow)."""
+        tag = self._cached(("name", text), lambda: name_tag(text, round(NAME_SIZE * H), round(0.9 * W)))
+        top = _solid(sprite)[1]
+        bottom = _solid(tag)[3]
+        tx = min(max(0, x + sprite.width // 2 - tag.width // 2), W - tag.width)
+        ty = max(round(0.02 * H), y + top - round(NAME_GAP * H) - bottom)
+        return tag, (tx, ty)
+
     def slot(self, character: str) -> str:
-        if character in self.slots:
-            return self.slots[character]
-        novel_slot = getattr(self, "_novel_slots", {}).get(character)
-        return novel_slot or "left"
+        return self.slots.get(character) or self.slots.get(self.person(character)) or "left"
+
+
+def _solid(image: Image.Image) -> tuple[int, int, int, int]:
+    """The box of an image's opaque part: the picture or the text, without its soft shadow."""
+    box = image.getchannel("A").point(lambda v: 255 if v > 128 else 0).getbbox()
+    return box or (0, 0, image.width, image.height)
 
 
 class PartCompositor(Compositor):
     """The reel for a novel part: the speaker, the beats' pictures, the poll, the end card."""
 
     def __init__(
-        self, project: Project, files: ProjectFiles, novel_files: ProjectFiles | None, slots: dict[str, str]
+        self,
+        project: Project,
+        files: ProjectFiles,
+        novel_files: ProjectFiles | None,
+        cast: dict[str, BibleCharacter] | None = None,
     ) -> None:
         self._novel_files = novel_files
-        self._slots = slots
+        self._cast = cast or {}
         super().__init__(project, files)
 
     def _build_pictures(self, project: Project, files: ProjectFiles) -> list[tuple[float, float]]:
@@ -326,14 +373,14 @@ class PartCompositor(Compositor):
         if story is None:
             return []
         style = project.style
-        sprites = Sprites(project, files, self._novel_files)
-        sprites._novel_slots = self._slots
+        sprites = Sprites(project, files, self._novel_files, self._cast)
         language = project.script.language if project.script else "id"
         words = WORDS.get(language, WORDS["id"])
         lines = timeline(project)
         spans: list[tuple[float, float]] = []
         faces = project.part_faces
         ident = 0
+        named: set[str] = set()  # the characters whose name has been on screen
 
         def add(
             image: Image.Image, xy: tuple[int, int], start: float, end: float, animate: bool = True
@@ -343,13 +390,28 @@ class PartCompositor(Compositor):
             center = (xy[0] + image.width // 2, xy[1] + image.height // 2)
             self.cards.append(_Card(start, end, image, center, ident=ident, animate=animate))
 
+        def voiced(line: Line) -> str:
+            """The character standing in this line whose words the storyteller says, the first
+            time they do (their name goes over their head)."""
+            speaker = line.beat.speaker if line.beat is not None else "narrator"
+            if speaker == "narrator" or line.show is None:
+                return ""
+            person = sprites.person(speaker)
+            if person in named:
+                return ""
+            shown = next((c for c in sprites.standing(line.show) if sprites.person(c) == person), "")
+            if shown and sprites.label(shown):
+                named.add(person)
+                return shown
+            return ""
+
         previous: list[tuple[int, int, int]] = []  # what was on screen in the line before: no re-pop
         for line in lines:
             if line.kind == "hook":
                 previous = []
                 continue
             if line.kind == "beat" and line.show is not None:
-                layers = sprites.layers(line.show)
+                layers = sprites.layers(line.show, name=voiced(line))
             elif line.kind == "poll":
                 layers = self._poll(story, words)
             else:

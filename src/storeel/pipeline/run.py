@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
+
 from ..jobs import Handler, JobContext, PipelineError
-from ..models import Analysis, Project
+from ..models import Analysis, BibleCharacter, Project
 from .analyze import analyze
 from .assets import make_anchors, make_pictures
 from .compose import compose
@@ -140,16 +142,13 @@ def handle_render(ctx: JobContext) -> None:
         if project.style.speaker_behind == "auto" and not project.part_faces:
             find_part_faces(ctx)  # chosen after processing: check the face now
             project = ctx.project()
-        slots: dict[str, str] = {}
+        cast: dict[str, BibleCharacter] = {}
         novel_files = None
         if project.novel_id:
             novel_files = ctx.services.novel_files(project.novel_id)
-            try:
-                novel = ctx.services.db.get_novel(project.novel_id)
-                slots = {cid: c.slot for cid, c in novel.bible.characters.items()}
-            except LookupError:
-                pass
-        compositor = PartCompositor(project, ctx.files, novel_files, slots)
+            with contextlib.suppress(LookupError):  # the novel is gone: the part's own cast only
+                cast = ctx.services.db.get_novel(project.novel_id).bible.characters
+        compositor = PartCompositor(project, ctx.files, novel_files, cast)
     compose(ctx, project, fit_mb=int(fit) if fit else None, compositor=compositor)
 
 
