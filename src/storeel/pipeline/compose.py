@@ -175,7 +175,8 @@ class _Cutaway:
 class _Card:
     """A card or cut-out: pops in (fade and a small rise), fades out. With `animate` off it is
     simply there for its time; with `enter` off it is there from its first frame (the part badge,
-    which the platforms' cover frame must show) and still fades out when it leaves."""
+    which the platforms' cover frame must show) and still fades out when it leaves. One that
+    replaces another in the same place comes in without the rise (`rise` off): a dissolve."""
 
     start: float
     end: float
@@ -184,22 +185,95 @@ class _Card:
     ident: int = field(default=0)
     animate: bool = True
     enter: bool = True
+    rise: bool = True
+    fade: float = FADE_OUT  # seconds it takes to go, at the end of its time
 
     def animating(self, t: float) -> bool:
         entering = self.enter and t - self.start < POP_IN
-        return self.animate and (entering or self.end - t < FADE_OUT)
+        return self.animate and (entering or self.end - t < self.fade)
 
     def draw(self, canvas: Image.Image, t: float) -> None:
         alpha, rise = 1.0, 0.0
         if self.animate and self.enter and t - self.start < POP_IN:
-            eased = _ease_out((t - self.start) / POP_IN)
-            alpha, rise = eased, (1 - eased) * 0.02 * H
-        elif self.animate and self.end - t < FADE_OUT:
-            alpha = max(0.0, (self.end - t) / FADE_OUT)
+            alpha = _ease_out((t - self.start) / POP_IN)
+            if self.rise:
+                rise = (1 - alpha) * 0.02 * H
+        elif self.animate and self.end - t < self.fade:
+            alpha = max(0.0, (self.end - t) / self.fade)
         image = _faded(self.image, alpha)
         x = round(self.center[0] - image.width / 2)
         y = round(self.center[1] - image.height / 2 + rise)
         _composite(canvas, image, x, y)
+
+
+CUT_EPS = 0.02  # seconds: a picture ending this close to another's start is cut to it
+COVERS = 0.3  # a new card over this much of an old one (of the smaller of the two) replaces it there
+SOLID = 0.9  # a sprite this opaque (its share of its box) is a card; less, a cut-out with gaps
+
+
+def _box(card: _Card) -> tuple[float, float, float, float]:
+    w, h = card.image.width, card.image.height
+    return card.center[0] - w / 2, card.center[1] - h / 2, card.center[0] + w / 2, card.center[1] + h / 2
+
+
+def _covers(a: _Card, b: _Card) -> bool:
+    ax0, ay0, ax1, ay1 = _box(a)
+    bx0, by0, bx1, by1 = _box(b)
+    inter = max(0.0, min(ax1, bx1) - max(ax0, bx0)) * max(0.0, min(ay1, by1) - max(ay0, by0))
+    smaller = min((ax1 - ax0) * (ay1 - ay0), (bx1 - bx0) * (by1 - by0))
+    return smaller > 0 and inter >= COVERS * smaller
+
+
+def _solid(image: Image.Image) -> bool:
+    """Whether a sprite is a solid card (a picture in a frame) rather than a cut-out figure,
+    whose gaps show what is under it."""
+    if image.mode != "RGBA":
+        return True
+    alpha = image.getchannel("A").point(lambda v: 255 if v > 128 else 0)
+    box = alpha.getbbox()
+    if box is None:
+        return False
+    counts = alpha.crop(box).histogram()
+    return counts[255] >= SOLID * sum(counts)
+
+
+def join_cuts(cards: list[_Card], cutaways: list[_Cutaway]) -> None:
+    """Cuts with no empty frame between two pictures, dissolved the way an editor would.
+
+    A card that replaces another in the same place comes in on top of it without the rise. Under
+    a solid card the old picture stays whole until the new one is in, then fades out, so only
+    what the new card leaves uncovered is seen to go; under a cut-out, whose gaps would show the
+    old picture doubled, the two cross-fade. A full-screen picture stays until whatever follows
+    it is in, the same way. A picture that nothing replaces fades out just after its time instead
+    of just before it, so it never leaves while its words are still being said."""
+    plan: list[tuple[_Card, list[_Card]]] = []
+    for a in cards:
+        if a.animate:
+            nxt = [
+                b
+                for b in cards
+                if b is not a and b.animate and abs(b.start - a.end) < CUT_EPS and _covers(a, b)
+            ]
+            plan.append((a, nxt))
+    for a, nxt in plan:  # (only the ends change, so the plan made first stays right)
+        for b in nxt:
+            b.rise = False
+        if not nxt:
+            a.end += a.fade
+        elif all(_solid(b.image) for b in nxt):
+            a.end += POP_IN + a.fade
+        else:
+            a.end += POP_IN
+            a.fade = POP_IN
+    for c in cutaways:
+        cut = c.end
+        if any(d is not c and abs(d.start - cut) < CUT_EPS for d in cutaways):
+            c.end += 2 * CUT_FADE  # the next one fades in on top: stay whole under it, then go
+            continue
+        after = [b for b in cards if b.animate and abs(b.start - cut) < CUT_EPS]
+        for b in after:
+            b.rise = False
+        c.end += POP_IN + CUT_FADE if after else CUT_FADE
 
 
 class Compositor:
@@ -231,6 +305,7 @@ class Compositor:
         self.cards: list[_Card] = []
         self.unchecked_faces = 0  # "auto" blur without face boxes: blurred to be safe
         self.blurs = blur_windows(self._build_pictures(project, files), self.duration)
+        join_cuts(self.cards, self.cutaways)
         self.mark: tuple[Image.Image, tuple[int, int]] | None = None
         if style.watermark:
             image = watermark(style.watermark, round(H * WATERMARK_SIZE), round(W * 0.8))
@@ -291,9 +366,12 @@ class Compositor:
     def frame(self, t: float) -> Image.Image:
         """The overlay layer at `t`, with MASK_ROWS extra rows at the bottom holding the blur level."""
         canvas = Image.new("RGBA", (W, H + MASK_ROWS), (0, 0, 0, 0))
-        cut = next((c for c in self.cutaways if c.start <= t < c.end), None)
-        if cut is not None:
-            canvas.paste(cut.frame(t), (0, 0))
+        cuts = sorted((c for c in self.cutaways if c.start <= t < c.end), key=lambda c: c.start)
+        for k, cut in enumerate(cuts):  # two at a cut: the next one fades in over the last
+            if k == 0:
+                canvas.paste(cut.frame(t), (0, 0))
+            else:
+                _composite(canvas, cut.frame(t), 0, 0)
         for item in self.cards:
             if item.start <= t < item.end:
                 item.draw(canvas, t)

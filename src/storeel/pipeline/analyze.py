@@ -33,12 +33,13 @@ from ..models import (
 )
 from ..prompts import load_prompt
 
-VERSION = 2  # 2: pictures are cards or cut-outs (with a subject for SAM)
+VERSION = 3  # 2: pictures are cards or cut-outs (with a subject for SAM); 3: they lead their words, run on
 SECONDS_PER_MOMENT = {"few": 12.0, "balanced": 7.0, "many": 4.5}
-MIN_LENGTH = {"cutaway": 1.5, "overlay": 2.0, "cutout": 2.0}
+MIN_LENGTH = {"cutaway": 2.5, "overlay": 3.0, "cutout": 3.0}  # time to take a picture in
 MAX_LENGTH = {"cutaway": 6.0, "overlay": 8.0, "cutout": 8.0}
 HOOK = 1.0  # keep the first second (the platforms' cover frame) on the speaker
-GAP = 0.3
+LEAD = 0.25  # a picture comes this long before its first word, so it is there when the word lands
+BRIDGE = 1.5  # a gap shorter than this between two pictures would only flash the speaker: cut through
 
 INSTRUCTIONS = load_prompt("analysis")
 
@@ -188,7 +189,7 @@ def normalize(
             continue
         display = item.display if item.display != "cutaway" or allow_full else "overlay"
         first, last = words[span[0]], words[span[1]]
-        start = max(HOOK, first.start - 0.1)
+        start = max(HOOK, first.start - LEAD)
         end = max(last.end + 0.25, start + MIN_LENGTH[display])
         end = min(end, start + MAX_LENGTH[display], duration)
         if end - start < MIN_LENGTH[display] * 0.8:
@@ -209,8 +210,15 @@ def normalize(
     placed.sort(key=lambda m: m.start)
     moments: list[Moment] = []
     for moment in placed:
-        if moments and moment.start < moments[-1].end + GAP:
-            moment.start = round(moments[-1].end + GAP, 3)
+        if moments:
+            before = moments[-1]
+            if moment.start < before.end:  # they overlap: cut to the new picture on its words
+                if moment.start - before.start >= MIN_LENGTH[before.display]:
+                    before.end = moment.start
+                else:
+                    moment.start = before.end
+            elif moment.start - before.end < BRIDGE:  # a short gap would only flash the speaker
+                before.end = moment.start
         if moment.end - moment.start >= MIN_LENGTH[moment.display] * 0.8:
             moments.append(moment)
     cap = max(count + 2, round(count * 1.4))

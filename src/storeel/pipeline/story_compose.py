@@ -44,6 +44,7 @@ from .story import CTA, HOOK, OUTRO, POLL
 
 MIN_LINE = 0.25  # seconds: no beat is squeezed to less than this
 MIN_HOLD = 3.0  # seconds a picture stays up at least: the viewer needs time to look at it
+LEAD = 0.2  # seconds a new picture comes before its first word, so it is there when the word lands
 ANCHOR_SHARE = 0.4  # a line of one whole video starts on its own words when this much of it is heard
 
 
@@ -232,10 +233,11 @@ def timeline(project: Project) -> list[Line]:
 
 
 def calm(lines: list[Line]) -> list[Line]:
-    """The timeline with nothing on screen too briefly to take in (under MIN_HOLD seconds). A
-    switch inside a beat that would leave a part that short is dropped: the beat keeps the
-    picture of its longer part. A beat that short keeps the picture before it (or, right after
-    the hook, takes the next one), so the screen does not flash."""
+    """The timeline as an editor cuts it: nothing on screen too briefly to take in (under
+    MIN_HOLD seconds), and each new screen a little before its first word. A switch inside a beat
+    that would leave a part that short is dropped: the beat keeps the picture of its longer part.
+    A beat that short keeps the picture before it (or, right after the hook, takes the next one),
+    so the screen does not flash."""
     out: list[Line] = []
     i = 0
     while i < len(lines):
@@ -256,6 +258,15 @@ def calm(lines: list[Line]) -> list[Line]:
             out[k] = replace(line, show=out[k - 1].show)
         elif k + 1 < len(out) and out[k + 1].kind == "beat":
             out[k] = replace(line, show=out[k + 1].show)
+    for k in range(1, len(out)):  # each new screen comes a little before its first word
+        before, line = out[k - 1], out[k]
+        if abs(before.end - line.start) > 0.05:
+            continue
+        keep = MIN_HOLD if before.kind == "beat" else 1.0
+        lead = min(LEAD, max(0.0, before.end - before.start - keep))
+        if lead > 0:
+            out[k - 1] = replace(before, end=before.end - lead)
+            out[k] = replace(line, start=line.start - lead)
     return out
 
 
