@@ -171,19 +171,31 @@ A novel is told as a series: one reel per chapter, called a
 - **The part script** (Muse Spark): a hook on camera with a fixed opening, the story in beats
   (part one's setup or a bridge from the previous part, rises, the turn, a cliffhanger), a
   poll and a call to action ("... lengkapnya ada di link bio"). Each beat says what the screen
-  shows. The script is checked against the format and sent back for up to two fixes; anything
-  left is shown. Edit the words freely: edits keep your takes.
+  shows. The script is checked against the format and sent back for up to two fixes. Then a
+  storyboard review reads the chapter next to it (is the quoted person on screen? is anything
+  shown before it is said? does each outfit fit?) and sends its notes back for one rewrite
+  (`STOREEL_STORY_REVIEW_EFFORT`, "off" to skip; one real review cost $0.047). Anything left
+  is shown. Edit the words freely: edits keep your takes.
 - **Recording**: one take per line of the part (the hook, each beat, the poll, then the call
-  to action) to record with the teleprompter, or upload one video of the whole part.
+  to action) to record with the teleprompter, or upload one video of the whole part. After
+  processing, a take whose lines can't be heard in it (read from another version of the
+  script, say) is flagged before you render.
 - **The character bible** grows chapter by chapter. A new character is drawn full body and
   cut out by SAM; in a later part they are redrawn from that portrait in the new outfit, so
-  the face stays the same. Recurring objects are kept too, and notes (a death, a secret)
-  carry into later scripts. Part N sees only what earlier parts added.
+  the face stays the same. Each new portrait is checked by Muse Spark (one figure, whole body,
+  the right look and outfit, the same face as before) and drawn once more with the checker's
+  fix if it is wrong (`STOREEL_PICTURE_CHECK_EFFORT`; about $0.0035 a check). Recurring
+  objects are kept too, and notes (a death, a secret) carry into later scripts. Part N sees
+  only what earlier parts added.
 - **On screen**: a "Part N" badge from the first frame, the hook on the sharp speaker, then
   the speaker blurred behind each beat's red tag, its photo card, scene, cut-out object, note
-  or chat bubbles, and up to two characters standing at the bottom. Then the poll screen and
-  the end card. Pictures follow your recording: each take's words are shared out among its
-  beats.
+  or chat bubbles, and up to two characters standing at the bottom (a character's name over
+  their head the first time you voice them). Then the poll screen and the end card. Pictures
+  follow your recording: with one video of the whole part, each line starts where its words
+  are heard.
+- **Captions** are what Muse Voice Transcribe heard. Review them before you render: where a
+  line follows the script but a word differs (a misheard name, a word said twice), the page
+  shows the script's wording and can use it.
 - **Cost** (October 2026, list prices): a 110-second part cost about $0.25 on the real API:
   $0.13 for the script (Muse Spark at max effort), eight to nine pictures and five SAM
   cut-outs, and the transcription. Later parts reuse the bible's pictures.

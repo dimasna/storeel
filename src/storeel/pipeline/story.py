@@ -47,6 +47,7 @@ from ..models import (
     text_model_name,
 )
 from ..prompts import load_prompt
+from . import story_review
 
 READ_CHARS_PER_SECOND = 13.5  # read aloud from a teleprompter, a little slower than text-to-speech
 MAX_SECONDS = 170  # the reel stays under three minutes with the end card
@@ -55,6 +56,13 @@ BRIDGE_MAX = 150
 POLL_MAX = 110
 CTA_MAX = 130
 REPAIR_ROUNDS = 2
+REVIEW_ROUNDS = 1  # storyboard reviews of a script in the right shape, each followed by a rewrite
+REVIEW_FIX = (
+    "A storyboard review read the chapter next to this script and found moments whose pictures do"
+    " not show what is being said. Fix the pictures of these beats (their see, show and then; add"
+    " characters, variants, props or photos where needed), keep everything else, and answer with the"
+    " whole corrected JSON object:"
+)
 ACTS = ("bridge", "setup", "rise", "turn", "cliffhanger")
 ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 
@@ -982,7 +990,11 @@ def write_story(ctx: JobContext) -> Story:
         }
     ]
     best: tuple[StoryOut, list[str]] | None = None
-    for round_no in range(REPAIR_ROUNDS + 1):
+    best_rank = (1 << 30, 0)  # (format problems, storyboard mismatches): fewer is better
+    reviewing = story_review.enabled(ctx)
+    reviews = 0
+    rounds = REPAIR_ROUNDS + (REVIEW_ROUNDS if reviewing else 0)
+    for round_no in range(rounds + 1):
         ctx.check()
         if round_no:
             ctx.log(f"repair round {round_no}: {len(best[1]) if best else '?'} problem(s) to fix")
@@ -1022,10 +1034,22 @@ def write_story(ctx: JobContext) -> Story:
             problems = validate(out, novel, number, bible, continuing)
             if missing:
                 problems.insert(0, f"fill in every field (missing: {', '.join(missing)})")
-        if out is not None and (best is None or len(problems) < len(best[1])):
-            best = (out, problems)
-        if not problems:
+        review: list[str] = []  # a script in the right shape gets one look at its pictures
+        if out is not None and not problems and reviewing and reviews < REVIEW_ROUNDS and round_no < rounds:
+            reviews += 1
+            ctx.log("storyboard review: does every picture show what the words say?")
+            review = story_review.review_story(ctx, novel, number, out, bible)
+        rank = (len(problems), len(review))
+        if out is not None and (best is None or rank < best_rank):
+            best, best_rank = (out, problems + review), rank
+        if not problems and not review:
             break
+        fix = (
+            "Fix these problems and answer with the whole corrected JSON object:\n- "
+            + "\n- ".join(problems[:30])
+            if problems
+            else REVIEW_FIX + "\n- " + "\n- ".join(review)
+        )
         messages += [
             {
                 "type": "message",
@@ -1038,8 +1062,7 @@ def write_story(ctx: JobContext) -> Story:
                 "content": [
                     {
                         "type": "input_text",
-                        "text": "Fix these problems and answer with the whole corrected "
-                        "JSON object:\n- " + "\n- ".join(problems[:30]),
+                        "text": fix,
                     }
                 ],
             },
