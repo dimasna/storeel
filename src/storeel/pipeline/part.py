@@ -16,7 +16,7 @@ from __future__ import annotations
 import base64
 import io
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from PIL import Image
 
@@ -36,6 +36,7 @@ from ..models import (
     Region,
     Story,
 )
+from . import picture_check
 from .assets import LANDSCAPE, NO_TEXT, PORTRAIT, SQUARE, STYLES, Request, generate
 from .detect import _frame, _segment, cut_out
 from .story_compose import take_spans
@@ -150,6 +151,17 @@ class Job:
     request: Request
     subject: str = ""  # cut out when set
     refs: list[str] = field(default_factory=list)  # ids of pictures this one is drawn from
+    name: str = ""  # a character's name, for the portrait check
+
+
+@dataclass
+class Take:
+    """One drawing of a picture: the PNG (cut out when SAM found the subject) and its size."""
+
+    png: bytes
+    width: int
+    height: int
+    cutout: bool
 
 
 def _ref_part(path) -> dict:
@@ -173,13 +185,22 @@ def _text(text: str) -> dict:
 
 
 class Painter:
-    """Draws a part's pictures into the novel's files (bible) or the reel's (this part only)."""
+    """Draws a part's pictures into the novel's files (bible) or the reel's (this part only).
+    A character portrait is checked by a text model and drawn again once if it is wrong."""
 
-    def __init__(self, ctx: JobContext, novel: Novel, project_files: ProjectFiles, novel_files: ProjectFiles):
+    def __init__(
+        self,
+        ctx: JobContext,
+        novel: Novel,
+        project_files: ProjectFiles,
+        novel_files: ProjectFiles,
+        earlier: dict[str, PartPicture] | None = None,
+    ):
         self.ctx = ctx
         self.style = STYLES[novel.visual_style]
         self.model = ctx.settings.image_model
         self.files = {"project": project_files, "novel": novel_files}
+        self.earlier = earlier or {}  # the part's pictures from the last run, with their checks
 
     def key(self, scope: str, name: str, *parts: object) -> str:
         folder = "bible" if scope == "novel" else "part"
@@ -201,25 +222,67 @@ class Painter:
             with Image.open(files.path(job.key)) as image:
                 picture.width, picture.height = image.size
                 picture.cutout = image.mode == "RGBA"
+            before = self.earlier.get(job.id)
+            if before is not None and before.key == job.key:  # checked when it was drawn
+                picture.checked, picture.problems = before.checked, before.problems
             return picture
         try:
-            png, width, height, seconds = generate(self.ctx, job.request)
-            cut = False
-            if job.subject:
-                made = cut_out(self.ctx, png, job.subject)
-                if made is not None:
-                    png, width, height = made
-                    cut = True
-                else:
-                    self.ctx.log(f"SAM could not find {job.subject!r} in {job.id}; it is shown as a card")
-            files.write_bytes(job.key, png)
-            picture.width, picture.height, picture.cutout = width, height, cut
-            shape = f"{width}x{height}" + (" cut out" if cut else "")
-            self.ctx.log(f"Muse Image: {job.id} ({job.display}) {shape} in {seconds:.0f}s")
+            take = self._take(job, job.request)
+            if job.kind in ("character", "variant") and picture_check.enabled(self.ctx):
+                take, check = self._checked(job, take)
+                if check is not None:
+                    picture.checked, picture.problems = True, [] if check.ok else check.problems
+            files.write_bytes(job.key, take.png)
+            picture.width, picture.height, picture.cutout = take.width, take.height, take.cutout
         except MetaAPIError as exc:
             picture.key, picture.error = None, str(exc)
             self.ctx.log(f"Muse Image: {job.id} failed: {exc}")
         return picture
+
+    def _take(self, job: Job, request: Request) -> Take:
+        png, width, height, seconds = generate(self.ctx, request)
+        cut = False
+        if job.subject:
+            made = cut_out(self.ctx, png, job.subject)
+            if made is not None:
+                png, width, height = made
+                cut = True
+            else:
+                self.ctx.log(f"SAM could not find {job.subject!r} in {job.id}; it is shown as a card")
+        shape = f"{width}x{height}" + (" cut out" if cut else "")
+        self.ctx.log(f"Muse Image: {job.id} ({job.display}) {shape} in {seconds:.0f}s")
+        return Take(png, width, height, cut)
+
+    def _checked(self, job: Job, take: Take) -> tuple[Take, picture_check.Check | None]:
+        """The portrait as checked, drawn again with the checker's fix when it is wrong; the
+        better of the two is kept."""
+        content = job.request.content
+        last = max(i for i, p in enumerate(content) if p["type"] == "input_text")  # the drawing prompt
+        text = content[last]["text"]
+        references = [p for p in content if p["type"] == "input_image"]
+        name = job.name or job.id
+        check = picture_check.check_portrait(self.ctx, take.png, text, references, name)
+        best = (take, check)
+        for _ in range(picture_check.RETAKES):
+            if check is None or check.ok:
+                break
+            self.ctx.log(f"portrait check: {job.id}: {'; '.join(check.problems)}; drawing it again")
+            again = [*content[:last], _text(picture_check.retake_text(text, check)), *content[last + 1 :]]
+            try:
+                retake = self._take(job, replace(job.request, content=again))
+            except MetaAPIError as exc:
+                self.ctx.log(f"Muse Image: {job.id} redraw failed: {exc}")
+                break
+            check = picture_check.check_portrait(self.ctx, retake.png, text, references, name)
+            if check is None:
+                break
+            if best[1] is None or check.score < best[1].score:
+                best = (retake, check)
+        kept = best[1]
+        if kept is not None:
+            verdict = "ok" if kept.ok else f"still: {'; '.join(kept.problems)} (used anyway)"
+            self.ctx.log(f"portrait check: {job.id} {verdict}")
+        return best
 
 
 def _portrait_text(name: str, description: str, outfit: str, subject: str, style: str) -> str:
@@ -241,7 +304,7 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
     n = story.part
     novel = db.get_novel(project.novel_id)
     bible = update_bible(novel.bible, story)
-    painter = Painter(ctx, novel, ctx.files, ctx.services.novel_files(novel.id))
+    painter = Painter(ctx, novel, ctx.files, ctx.services.novel_files(novel.id), project.part_pictures)
     style = painter.style
     shown = people_shown(story)
     variants = {v.id: v for v in story.variants}
@@ -278,7 +341,7 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
             )
             request = Request([_ref_part(painter.path("novel", base)), _text(text)], PORTRAIT, False, [cid])
             key = painter.key("novel", c.id, text, base)
-        first.append(Job(cid, "character", "standing", "novel", key, request, subject=c.subject))
+        first.append(Job(cid, "character", "standing", "novel", key, request, subject=c.subject, name=c.name))
     for vid in sorted(v for v in shown if v in variants):
         v = variants[vid]
         c = bible.characters.get(v.base)
@@ -291,7 +354,17 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
         )
         request = Request([_text(text)], PORTRAIT, False, [v.base])
         second.append(
-            Job(vid, "variant", "standing", "project", "", request, subject=c.subject, refs=[v.base])
+            Job(
+                vid,
+                "variant",
+                "standing",
+                "project",
+                "",
+                request,
+                subject=c.subject,
+                refs=[v.base],
+                name=c.name,
+            )
         )
     for prop in story.props:
         if prop.id not in used_props:
@@ -354,9 +427,12 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
 
     ctx.log(f"part {n}: {len(first) + len(second)} pictures to draw or reuse ({len(characters)} characters)")
     pictures: dict[str, PartPicture] = {}
+    earlier = project.part_pictures or {}
     for cid in characters:  # characters whose portrait for this chapter is already drawn
         look = chapter_look(bible.characters[cid], n)
         if look and look.image and painter.exists("novel", look.image):
+            before = earlier.get(cid)
+            checked = before is not None and before.key == look.image  # checked when it was drawn
             with Image.open(painter.path("novel", look.image)) as image:
                 pictures[cid] = PartPicture(
                     id=cid,
@@ -367,6 +443,8 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
                     cutout=image.mode == "RGBA",
                     width=image.width,
                     height=image.height,
+                    checked=checked and before.checked,
+                    problems=list(before.problems) if checked else [],
                 )
     with ThreadPoolExecutor(ctx.settings.image_parallel) as pool:
         for picture in pool.map(painter.draw, first):

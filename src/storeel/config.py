@@ -64,6 +64,11 @@ class Settings:
     plan_model: str
     plan_effort: str
     max_output_tokens: int  # per text-model call, reasoning included: bounds a runaway answer
+    # Checks: a text model looks at each new character portrait (redrawing a wrong one) and
+    # reviews a new part's storyboard against the chapter; "off" skips a check.
+    check_model: str
+    picture_check_effort: str
+    story_review_effort: str
     image_model: str
     image_reasoning: str
     image_parallel: int
@@ -99,6 +104,9 @@ def get_settings() -> Settings:
         plan_model=_get("STOREEL_PLAN_MODEL", "muse-wonder-1.0"),
         plan_effort=_get_choice("STOREEL_PLAN_EFFORT", "max", TEXT_EFFORTS),
         max_output_tokens=_get_int("STOREEL_MAX_OUTPUT_TOKENS", 32000, minimum=1000),
+        check_model=_get("STOREEL_CHECK_MODEL", "muse-spark-1.3"),
+        picture_check_effort=_get_choice("STOREEL_PICTURE_CHECK_EFFORT", "low", (*TEXT_EFFORTS, "off")),
+        story_review_effort=_get_choice("STOREEL_STORY_REVIEW_EFFORT", "high", (*TEXT_EFFORTS, "off")),
         image_model=_get("STOREEL_IMAGE_MODEL", "muse-image-1.0"),
         image_reasoning=_get_choice("STOREEL_IMAGE_REASONING", "high", IMAGE_REASONING),
         image_parallel=_get_int("STOREEL_IMAGE_PARALLEL", 4),

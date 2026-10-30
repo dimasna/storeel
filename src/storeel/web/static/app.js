@@ -986,6 +986,8 @@ function partPicturesSection(project) {
             {},
             el("strong", {}, p.id),
             el("small", { class: "muted" }, ` ${p.kind} · ${how[p.display] || p.display}${p.display !== "card" && !p.cutout && p.key ? " (not cut out: shown framed)" : ""}`),
+            p.checked && !p.problems.length ? el("p", { class: "ok-text small" }, "✓ checked") : null,
+            p.checked && p.problems.length ? el("p", { class: "note" }, `The check still found, after one redraw: ${p.problems.join("; ")}.`) : null,
             p.error ? el("p", { class: "banner error small" }, p.error) : null,
           ),
         ),

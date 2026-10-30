@@ -335,6 +335,8 @@ class PartPicture(Strict):
     height: int = 0
     prompt: str = ""
     error: str | None = None
+    checked: bool = False  # a character portrait the checker looked at
+    problems: list[str] = Field(default_factory=list)  # what it still found wrong (after a redraw)
 
 
 # ---- what the pipeline produces ------------------------------------------------------------
