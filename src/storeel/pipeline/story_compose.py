@@ -285,6 +285,7 @@ def arrange(chars: list[str], before: dict[str, str], usual) -> list[str]:
 TAG_Y = 0.15
 TAG_SHIFT = 0.05  # the main item moves down this much under a tag
 CARD_Y, CARD_W = 0.29, 0.84
+CARD_MAX_H = 0.36  # of the height: a tall picture is shown narrower, never over most of the frame
 OBJECT_W = {"small": 0.42, "medium": 0.64, "large": 0.94}
 OBJECT_H = {"small": 0.24, "medium": 0.34, "large": 0.46}  # tall objects are sized by height
 NOTE_Y = 0.30
@@ -397,8 +398,9 @@ class Sprites:
                 )
         elif show.photo and (picture := self.image(show.photo)) is not None:
             title = self.photos[show.photo].title if show.photo in self.photos else ""
+            width = _card_width(picture)
             centred(
-                self._cached(("photo", show.photo), lambda: photo_card(picture, round(CARD_W * W), title)),
+                self._cached(("photo", show.photo, width), lambda: photo_card(picture, width, title)),
                 CARD_Y + shift,
             )
         elif show.prop and (picture := self.image(show.prop)) is not None:
@@ -416,8 +418,9 @@ class Sprites:
                     y = 0.4 if size == "large" else 0.35 + shift
                 centred(self._cached(("object", show.prop, size), lambda: cutout_sprite(picture, *box)), y)
             else:
+                width = _card_width(picture)
                 centred(
-                    self._cached(("scene", show.prop), lambda: photo_card(picture, round(CARD_W * W))),
+                    self._cached(("scene", show.prop, width), lambda: photo_card(picture, width)),
                     0.30 + shift,
                 )
         named: tuple[Image.Image, tuple[int, int]] | None = None
@@ -462,6 +465,12 @@ def _solid(image: Image.Image) -> tuple[int, int, int, int]:
     """The box of an image's opaque part: the picture or the text, without its soft shadow."""
     box = image.getchannel("A").point(lambda v: 255 if v > 128 else 0).getbbox()
     return box or (0, 0, image.width, image.height)
+
+
+def _card_width(picture: Image.Image) -> int:
+    """A card's width: the full card width, or narrower for a tall picture, so that the card is
+    never taller than CARD_MAX_H of the frame (it would cover the speaker and the people)."""
+    return min(round(CARD_W * W), round(CARD_MAX_H * H * picture.width / max(1, picture.height)))
 
 
 class PartCompositor(Compositor):

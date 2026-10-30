@@ -364,7 +364,9 @@ class PropOut(BaseModel):
     id: str = ""
     description: str = ""
     subject: str = ""
-    shape: Literal["wide", "tall", "square"] = "square"
+    shape: Literal["wide", "tall", "square"] = Field(
+        "square", description="an object's outline; a scene or an empty place is always drawn wide"
+    )
     size: Literal["small", "medium", "large"] = "medium"
     refs: list[str] = Field(default_factory=list)
     people: int = 0

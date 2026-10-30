@@ -389,10 +389,23 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
                 )
             )
         else:
+            # A scene, a place or a detail is a framed picture in the upper part of the screen, as
+            # the video path's cards are: always wide, with room for the place and the action (a
+            # tall one would cover most of the frame).
+            size = LANDSCAPE
             figures = (
                 f" Exactly {prop.people} figure{'s' if prop.people != 1 else ''}." if prop.people else ""
             )
-            text = f"Create one new image: {prop.description.rstrip('.')}.{figures} Style: {style}. {NO_TEXT}"
+            acting = (
+                " The people act the moment out in its place, caught in the middle of what they are"
+                " doing: not posed side by side facing the viewer like a portrait."
+                if (prop.refs or prop.people) and prop.framing != "close-up"
+                else ""
+            )
+            text = (
+                f"Create one new image: {prop.description.rstrip('.')}.{figures}{acting}"
+                f" Style: {style}. {NO_TEXT}"
+            )
             job = Job(
                 prop.id,
                 "prop",
@@ -405,7 +418,7 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
             if prop.refs:
                 second.append(job)  # its key depends on the portraits drawn first
             else:
-                job.key = painter.key(scope, prop.id, text)
+                job.key = painter.key(scope, prop.id, text, size)
                 first.append(job)
     for prop_id in sorted(used_props - {p.id for p in story.props}):
         bp = bible.props.get(prop_id)  # a bible prop from an earlier chapter, shown again
@@ -464,7 +477,8 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
             ]
             refs.append(ref.key)
         job.request = Request([*content, *job.request.content], job.request.size, False, job.refs)
-        job.key = painter.key(job.scope, job.id, [p.get("text") for p in job.request.content], refs)
+        drawn = [job.request.size] if job.kind == "prop" else []  # scenes became wide: draw them again
+        job.key = painter.key(job.scope, job.id, [p.get("text") for p in job.request.content], refs, *drawn)
     with ThreadPoolExecutor(ctx.settings.image_parallel) as pool:
         for picture in pool.map(painter.draw, second):
             pictures[picture.id] = picture
