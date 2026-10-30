@@ -27,6 +27,6 @@ MOMENTS
   - A memory or flashback gets its own picture, drawn as it was then (younger, other clothes, the old place), only on its words.
 - Keep the first sentence (the hook) on the speaker. Leave the speaker on screen for their own opinions, emotions, jokes and punchlines. Do not illustrate filler.
 - Moments never overlap and are spread over the video.
-- prompt: English, one image for an image model: the subject and what happens, the setting, the framing and the light, consistent with the transcript and the entity descriptions. Name the entities it shows. Never ask for readable text, captions, logos, signs with words or watermarks. Never depict real public figures; describe a generic person instead.
+- prompt: English, one image for an image model: the subject and what happens, the setting, the framing and the light, consistent with the transcript and the entity descriptions. Name the entities it shows. Never ask for readable text, captions, logos, signs with words or watermarks. Never depict real public figures; describe a generic person instead. Give every adult an adult's age ("a woman in her early twenties", never "girl" for an adult), show feelings through the face and the pose, and leave out looks words (beautiful, sexy, seductive) and body words (lips, skin, body): the image model's safety filter refuses some of those pictures.
 
 ANSWER with one JSON object with all five fields: "title", "summary", "language", "entities" and "moments".

@@ -37,7 +37,7 @@ from ..models import (
     Story,
 )
 from . import picture_check
-from .assets import LANDSCAPE, NO_TEXT, PORTRAIT, SQUARE, STYLES, Request, generate
+from .assets import LANDSCAPE, NO_TEXT, POLICY_TRIES, PORTRAIT, SQUARE, STYLES, Request, generate_allowed
 from .detect import _frame, _segment, cut_out
 from .story_compose import take_spans
 
@@ -227,7 +227,7 @@ class Painter:
                 picture.checked, picture.problems = before.checked, before.problems
             return picture
         try:
-            take = self._take(job, job.request)
+            take = self._drawn(job)
             if job.kind in ("character", "variant") and picture_check.enabled(self.ctx):
                 take, check = self._checked(job, take)
                 if check is not None:
@@ -236,11 +236,37 @@ class Painter:
             picture.width, picture.height, picture.cutout = take.width, take.height, take.cutout
         except MetaAPIError as exc:
             picture.key, picture.error = None, str(exc)
+            if exc.content_policy:
+                portraits = job.kind == "prop" and any(
+                    p["type"] == "input_image" for p in job.request.content
+                )
+                picture.error = (
+                    f"Muse Image's safety filter refused this picture {POLICY_TRIES} times"
+                    + (", also without the portraits" if portraits else "")
+                    + ". It often passes on another try: press Update to draw it again."
+                )
             self.ctx.log(f"Muse Image: {job.id} failed: {exc}")
         return picture
 
+    def _drawn(self, job: Job) -> Take:
+        """The picture, drawn again while the safety filter refuses it. A scene it keeps refusing
+        with the characters' portraits is drawn from its words alone: the people may look less
+        like their portraits, but the beat has its picture (on the real API, both scenes refused
+        with portraits were drawn without them)."""
+        try:
+            return self._take(job, job.request)
+        except MetaAPIError as exc:
+            content = job.request.content
+            words = [
+                p for p in content if p["type"] == "input_text" and not p["text"].startswith("Reference ")
+            ]
+            if not (exc.content_policy and job.kind == "prop" and len(words) < len(content)):
+                raise
+            self.ctx.log(f"Muse Image: {job.id} is drawn from its words only, without the portraits")
+            return self._take(job, replace(job.request, content=words, references=[]))
+
     def _take(self, job: Job, request: Request) -> Take:
-        png, width, height, seconds = generate(self.ctx, request)
+        png, width, height, seconds = generate_allowed(self.ctx, request, job.id)
         cut = False
         if job.subject:
             made = cut_out(self.ctx, png, job.subject)

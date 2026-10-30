@@ -196,6 +196,26 @@ def generate(ctx: JobContext, request: Request) -> tuple[bytes, int, int, float]
     return buffer.getvalue(), rgb.width, rgb.height, time.monotonic() - started
 
 
+POLICY_TRIES = 3  # drawings of one request: the safety filter refuses some and passes others
+
+
+def generate_allowed(ctx: JobContext, request: Request, name: str) -> tuple[bytes, int, int, float]:
+    """generate(), asked again when Muse Image's safety filter refuses the drawing. The filter
+    judges each drawing, so the same request often passes on another try (on the real API, two
+    scenes refused in a part were both drawn on the next one or two), and a refused drawing is not
+    billed. Raises the last refusal after POLICY_TRIES."""
+    for attempt in range(1, POLICY_TRIES + 1):
+        try:
+            return generate(ctx, request)
+        except MetaAPIError as exc:
+            if not exc.content_policy or attempt == POLICY_TRIES:
+                raise
+            ctx.log(
+                f"Muse Image's safety filter refused {name}; drawing it again ({attempt + 1}/{POLICY_TRIES})"
+            )
+    raise AssertionError("unreachable")
+
+
 def _anchors_needed(analysis: Analysis, only: set[str] | None) -> list[Entity]:
     moments = [m for m in analysis.moments if m.enabled and (only is None or m.id in only)]
     uses: dict[str, int] = {}
@@ -224,7 +244,7 @@ def make_anchors(ctx: JobContext, analysis: Analysis, style: Style, only: set[st
     def run(item: tuple[Entity, Request, str]) -> None:
         entity, request, key = item
         try:
-            png, width, height, seconds = generate(ctx, request)
+            png, width, height, seconds = generate_allowed(ctx, request, f"the reference for {entity.name}")
         except MetaAPIError as exc:
             ctx.log(f"Muse Image: reference for {entity.name} failed ({exc}); it will be drawn from words")
             return
@@ -286,13 +306,13 @@ def make_pictures(ctx: JobContext, analysis: Analysis, style: Style, only: set[s
         else:
             try:
                 try:
-                    png, width, height, seconds = generate(ctx, request)
+                    png, width, height, seconds = generate_allowed(ctx, request, moment.id)
                 except MetaAPIError as exc:
                     if not (exc.content_policy and request.references):
                         raise
                     ctx.log(f"Muse Image refused {moment.id} with references; trying from words only")
                     request = moment_request(ctx, moment, entities, style, use_references=False)
-                    png, width, height, seconds = generate(ctx, request)
+                    png, width, height, seconds = generate_allowed(ctx, request, moment.id)
                 cut = False
                 if request.display == "cutout":
                     try:
