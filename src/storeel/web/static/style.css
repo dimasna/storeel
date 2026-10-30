@@ -164,6 +164,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; marg
 .turns { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .turn { display: grid; grid-template-columns: 58px 1fr; gap: 8px; align-items: start; }
 .turn small { grid-column: 2; }
+.beat .said { margin: 0; line-height: 1.45; }
 .turn .review { grid-column: 2; display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; }
 .turn .review .differs { color: var(--warn); }
 .turn .review .script { margin: 0; padding: 6px 8px; border-left: 2px solid var(--border); color: var(--muted); }

@@ -180,6 +180,12 @@ A novel is told as a series: one reel per chapter, called a
   to action) to record with the teleprompter, or upload one video of the whole part. After
   processing, a take whose lines can't be heard in it (read from another version of the
   script, say) is flagged before you render.
+- **Your own video**: already recorded the part your way? Upload it instead of writing a
+  script ("Make it from my video"). It is transcribed and Muse Spark splits what you said into
+  the hook and the beats, keeping your words (a stretch it leaves out goes back for a fix),
+  then plans the pictures as usual. The poll screen and the end card appear only if you said
+  a poll or a call to action. A part written from the chapter can switch to your video, and
+  back.
 - **The character bible** grows chapter by chapter. A new character is drawn full body and
   cut out by SAM; in a later part they are redrawn from that portrait in the new outfit, so
   the face stays the same. Each new portrait is checked by Muse Spark (one figure, whole body,

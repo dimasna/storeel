@@ -81,8 +81,28 @@ def handle_script(ctx: JobContext) -> None:
 
 
 def handle_story(ctx: JobContext) -> None:
-    ctx.step("Writing the part", 0.0, 1.0)
-    write_story(ctx)
+    if not ctx.params.get("from_video"):
+        ctx.step("Writing the part", 0.0, 1.0)
+        write_story(ctx)
+        return
+    # From the user's own video of the part: what they said becomes the part's words.
+    project = ctx.project()
+    if not project.clips:
+        raise PipelineError("upload your video of the part first")
+    ctx.step("Preparing the video", 0.0, 0.2)
+    source = ingest(ctx)
+    ctx.flush_usage()
+    ctx.check()
+    ctx.step("Transcribing", 0.2, 0.35)
+    names = _keywords(project)  # a part made before: its characters; and the earlier parts' cast
+    with contextlib.suppress(LookupError):
+        novel = ctx.services.db.get_novel(project.novel_id or "")
+        names += [c.name for c in novel.bible.before(project.chapter or 1).characters.values()]
+    transcript = transcribe(ctx, source, _language(project), names)
+    ctx.flush_usage()
+    ctx.check()
+    ctx.step("Making the part from your video", 0.35, 1.0)
+    write_story(ctx, transcript.turns)
 
 
 def handle_process(ctx: JobContext) -> None:

@@ -21,6 +21,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from ..common import slug
+from ..config import TEXT_EFFORTS
 from ..jobs import JobContext, PipelineError
 from ..meta import MetaAPIError
 from ..meta.schema import OutputError, parse_output, text_format
@@ -44,10 +45,12 @@ from ..models import (
     StoryShow,
     StorySwitch,
     StoryVariant,
+    Turn,
     text_model_name,
 )
 from ..prompts import load_prompt
 from . import story_review
+from .align import Text, align
 
 READ_CHARS_PER_SECOND = 13.5  # read aloud from a teleprompter, a little slower than text-to-speech
 MAX_SECONDS = 170  # the reel stays under three minutes with the end card
@@ -56,6 +59,9 @@ BRIDGE_MAX = 150
 POLL_MAX = 110
 CTA_MAX = 130
 REPAIR_ROUNDS = 2
+# A part made from the user's video thinks at most this hard: on the real API, splitting a 98.5 s
+# video at "max" ran past 20,000 output tokens three times; "high" answered in 66 s.
+VIDEO_EFFORT = "high"
 REVIEW_ROUNDS = 1  # storyboard reviews of a script in the right shape, each followed by a rewrite
 REVIEW_FIX = (
     "A storyboard review read the chapter next to this script and found moments whose pictures do"
@@ -269,7 +275,9 @@ def opens_correctly(hook: str, opening: str) -> bool:
     return _norm(hook).startswith(_norm(opening))
 
 
-def system_prompt(novel: Novel) -> str:
+def system_prompt(novel: Novel, from_video: bool = False) -> str:
+    """The script writer's rules: what to say (or, for a part made from the user's own video, how
+    to split what they said), then the rules for the pictures and the character bible."""
     w = wording(novel.language, novel.narration)
     values = {
         "PART_WORD": w.part_word,
@@ -286,7 +294,7 @@ def system_prompt(novel: Novel) -> str:
         "POLL_SHAPE": w.poll_shape,
         "CTA_SHAPE": w.cta_shape,
     }
-    text = load_prompt("story")
+    text = load_prompt("story_video" if from_video else "story") + "\n\n" + load_prompt("story_pictures")
     for key, value in values.items():
         text = text.replace(f"<<{key}>>", value)
     return text
@@ -453,11 +461,12 @@ def max_chars() -> int:
     return round(MAX_SECONDS * READ_CHARS_PER_SECOND)
 
 
-def user_prompt(novel: Novel, number: int, bible: Bible, previous: Previous | None) -> str:
+def _context(novel: Novel, number: int, bible: Bible, previous: Previous | None) -> list[str]:
+    """What every part's script is written from: the novel, the chapter, how the last part
+    ended, and the character bible."""
     chapter = novel.chapter(number)
     assert chapter is not None
     language = novel.language
-    continuing = previous is not None
     title = " ".join(novel.title.split())
     out = [
         f"NOVEL: {title}",
@@ -482,6 +491,14 @@ def user_prompt(novel: Novel, number: int, bible: Bible, previous: Previous | No
             lines.append(f"Its text ended with:\n<<<\n{end}\n>>>")
         out += [*lines, ""]
     out += [f"CHARACTER BIBLE:\n{_bible_block(bible)}", ""]
+    return out
+
+
+def user_prompt(novel: Novel, number: int, bible: Bible, previous: Previous | None) -> str:
+    language = novel.language
+    continuing = previous is not None
+    title = " ".join(novel.title.split())
+    out = _context(novel, number, bible, previous)
     before = part_phrase(previous.number, language) if previous else ""
     first = (
         f'act "bridge": how {before} ended, in one sentence of at most {BRIDGE_MAX} characters'
@@ -504,6 +521,21 @@ def user_prompt(novel: Novel, number: int, bible: Bible, previous: Previous | No
     return "\n".join(out)
 
 
+def video_prompt(
+    novel: Novel, number: int, bible: Bible, previous: Previous | None, turns: list[Turn]
+) -> str:
+    """The request for a part made from the user's own video: the context, then what they said."""
+    out = _context(novel, number, bible, previous)
+    out += [
+        "WHAT THEY SAID IN THEIR VIDEO (the transcript, turn by turn, with seconds; every word goes"
+        " into the part, in this order):",
+        *(f"[{t.start:.1f}-{t.end:.1f}s] {t.text}" for t in turns),
+        "",
+        "Turn their words into the part as one JSON object.",
+    ]
+    return "\n".join(out)
+
+
 # ---- the checks -------------------------------------------------------------------------------
 
 
@@ -522,8 +554,11 @@ def _shown(out: StoryOut) -> set[str]:
     return ids
 
 
-def validate(out: StoryOut, novel: Novel, number: int, bible: Bible, continuing: bool) -> list[str]:
-    """What a repair round must fix (empty = usable)."""
+def validate(
+    out: StoryOut, novel: Novel, number: int, bible: Bible, continuing: bool, heard: list[str] | None = None
+) -> list[str]:
+    """What a repair round must fix (empty = usable). `heard`: for a part made from the user's own
+    video, the words they said, which replace the rules for what to say."""
     p: list[str] = []
 
     def need(cond: bool, msg: str) -> None:
@@ -538,6 +573,7 @@ def validate(out: StoryOut, novel: Novel, number: int, bible: Bible, continuing:
     props = {x.id: x for x in out.props}
     photos = {x.id for x in out.photos}
     people = bible_chars | new_chars | set(variants)
+    names = {cid: c.name for cid, c in bible.characters.items()} | {c.id: c.name for c in out.characters}
 
     need(bool(out.chapter_title.strip()), "write 'chapter_title'")
     for c in out.characters:
@@ -586,20 +622,35 @@ def validate(out: StoryOut, novel: Novel, number: int, bible: Bible, continuing:
     for x in out.photos:
         need(len(x.description) >= 20, f"photo {x.id!r}: describe the place")
 
-    opening = hook_opening(novel, number, continuing)
-    need(
-        20 <= len(out.hook) <= HOOK_MAX + 10, f"the hook is {len(out.hook)} characters; keep it 20-{HOOK_MAX}"
-    )
-    need(opens_correctly(out.hook, opening), f'the hook must start with "{opening}..." and then the punch')
-    need(6 <= len(out.beats) <= 24, f"{len(out.beats)} beats; write 8 to 20")
+    video = heard is not None  # made from the user's own video: the words are what they said
+    if video:
+        need(bool(out.hook.strip()), "the hook is what they say first, before the story starts")
+        need(
+            2 <= len(out.beats) <= 40,
+            f"{len(out.beats)} beats; split what they said after the hook into beats of 40-190 characters",
+        )
+    else:
+        opening = hook_opening(novel, number, continuing)
+        need(
+            20 <= len(out.hook) <= HOOK_MAX + 10,
+            f"the hook is {len(out.hook)} characters; keep it 20-{HOOK_MAX}",
+        )
+        need(
+            opens_correctly(out.hook, opening), f'the hook must start with "{opening}..." and then the punch'
+        )
+        need(6 <= len(out.beats) <= 24, f"{len(out.beats)} beats; write 8 to 20")
     for i, b in enumerate(out.beats, 1):
-        need(15 <= len(b.text) <= 220, f"beat {i}: text is {len(b.text)} characters; keep 40-190")
+        if video:
+            need(len(b.text) <= 320, f"beat {i} is {len(b.text)} characters: split it at a comma or a clause")
+        else:
+            need(15 <= len(b.text) <= 220, f"beat {i}: text is {len(b.text)} characters; keep 40-190")
         need(
             b.speaker == "narrator" or b.speaker in people,
             f"beat {i}: speaker {b.speaker!r} is not narrator or a character id",
         )
         need(len(b.see) >= 8, f"beat {i}: write 'see' (who and what the viewer sees) before 'show'")
         at = b.then.at.strip()
+        shows = (b.show, b.then.show) if at else (b.show,)
         if at:
             spoken = b.text.lower()
             need(
@@ -608,6 +659,24 @@ def validate(out: StoryOut, novel: Novel, number: int, bible: Bible, continuing:
             )
         for show in (b.show, b.then.show) if at else (b.show,):
             _check_show(i, show, people, props, bible_props, photos, need)
+        if b.speaker != "narrator" and b.speaker in people:  # the voiced character is on screen
+            who = {c: v.base for c, v in variants.items()}
+            on = {who.get(c, c) for s in shows for c in s.characters}
+            on |= {who.get(r, r) for s in shows if s.prop in props for r in props[s.prop].refs}
+            person = who.get(b.speaker, b.speaker)
+            name = (names.get(person) or person).casefold()
+            texting = any(
+                name and name in m.sender.casefold() for s in shows for m in s.chat
+            )  # their message
+            need(
+                person in on or texting,
+                f"beat {i}: {b.speaker!r} is quoted but not on screen: show them while their words are said",
+            )
+    if video:
+        if out.poll.text.strip():
+            need(bool(out.poll.a and out.poll.b), "the poll they said needs its two options, a and b")
+            need(len(out.poll.a) <= 30 and len(out.poll.b) <= 30, "poll options at most 28 characters")
+        return p + (said_problems(out, heard) if heard else [])  # no transcript: nothing to compare
     need(bool(out.poll.text and out.poll.a and out.poll.b), "poll needs text, a and b")
     need(len(out.poll.a) <= 30 and len(out.poll.b) <= 30, "poll options at most 28 characters")
     need(bool(out.cta.strip()), "missing cta")
@@ -662,6 +731,53 @@ def validate(out: StoryOut, novel: Novel, number: int, bible: Bible, continuing:
     return p
 
 
+MISSING_RUN = 4  # words in a row they said that no part of the script has: a stretch left out
+OFF_WORDS = 0.75  # a piece of the script with less of its words heard is not what they said
+
+
+def said_problems(out: StoryOut, heard: list[str]) -> list[str]:
+    """For a part made from the user's video: its words must be what they said, all of it, in
+    their order (the pictures are timed by lining the two up)."""
+    pieces = [
+        ("the hook", out.hook),
+        *((f"beat {i}", b.text) for i, b in enumerate(out.beats, 1)),
+        ("the poll", out.poll.text),
+        ("the cta", out.cta),
+    ]
+    script = Text.of([text.split() for _, text in pieces])
+    said = Text.of([heard])
+    al = align(script.tokens, said.tokens)
+    problems: list[str] = []
+    for index, (where, text) in enumerate(pieces):
+        own = [k for k, owner in enumerate(script.owner) if owner == index]
+        hits = sum(1 for k in own if al.script_to_heard[k] is not None)
+        if own and len(own) - hits >= MISSING_RUN and hits < OFF_WORDS * len(own):
+            problems.append(f'{where} ("{_short(text)}") is not what they said: copy their words, in order')
+    runs: list[tuple[int, int]] = []
+    start: int | None = None
+    for k, match in enumerate([*al.heard_to_script, 0]):  # the 0 closes a run at the end
+        if match is None:
+            start = k if start is None else start
+            continue
+        if start is not None and k - start >= MISSING_RUN:
+            runs.append((start, k))
+        start = None
+    for a, b in runs[:3]:
+        words = said.words[said.word_of[a] : said.word_of[b - 1] + 1]
+        problems.append(
+            f'they said "{_short(" ".join(words))}", which is in no part of the script: put every word'
+            " they said in the hook, a beat, the poll or the cta, in their order"
+        )
+    if len(runs) > 3:
+        problems.append(f"{len(runs) - 3} more stretches of what they said are missing")
+    return problems
+
+
+def _short(text: str, words: int = 12) -> str:
+    parts = text.split()
+    return " ".join(parts[:words]) + ("…" if len(parts) > words else "")
+
+
 def _check_show(
     i: int, show: ShowOut, people: set[str], props: dict, bible_props: set[str], photos: set[str], need
 ) -> None:
@@ -710,7 +826,9 @@ def _show(s: ShowOut) -> StoryShow:
     )
 
 
-def to_story(out: StoryOut, number: int, continuing: bool, problems: list[str]) -> Story:
+def to_story(
+    out: StoryOut, number: int, continuing: bool, problems: list[str], from_video: bool = False
+) -> Story:
     beats = [
         Beat(
             act=b.act,
@@ -791,6 +909,7 @@ def to_story(out: StoryOut, number: int, continuing: bool, problems: list[str]) 
             if x.id and x.note
         ],
         problems=problems,
+        from_video=from_video,
     )
 
 
@@ -839,9 +958,11 @@ def scenes_for(story: Story, outro: bool = False) -> list[Scene]:
     if outro:
         lines = f"{story.poll.text} {story.cta}".strip() or "…"
         scenes.append(Scene(id=f"t{n}", purpose=OUTRO, lines=lines[:600]))
-    else:
-        scenes.append(Scene(id=f"t{n}", purpose=POLL, lines=(story.poll.text or "…")[:600]))
-        scenes.append(Scene(id=f"t{n + 1}", purpose=CTA, lines=(story.cta or "…")[:600]))
+        return scenes
+    for purpose, said in ((POLL, story.poll.text), (CTA, story.cta)):
+        if said or not story.from_video:  # a part made from a video has them only if they were said
+            scenes.append(Scene(id=f"t{n}", purpose=purpose, lines=(said or "…")[:600]))
+            n += 1
     return scenes
 
 
@@ -939,7 +1060,11 @@ def apply_edit(
     story.poll = Poll(text=" ".join(poll.text.split()), a=poll.a.strip()[:40], b=poll.b.strip()[:40])
     story.cta = " ".join(cta.split())
     bible = novel.bible.before(story.part)
-    story.problems = validate(story_to_out(story), novel, story.part, bible, story.continuing)
+    heard = None
+    if story.from_video:  # its words are checked against what was said, if the transcript is there
+        turns = project.transcript.turns if project.transcript else []
+        heard = [w.text for t in turns for w in t.words]
+    story.problems = validate(story_to_out(story), novel, story.part, bible, story.continuing, heard)
     project.script = takes_script(story, project.title, novel.language, project.script, regroup=False)
 
 
@@ -964,7 +1089,10 @@ def previous_part(ctx: JobContext, novel: Novel, number: int) -> Previous | None
     return Previous(number=prev.number, title=title, text=prev.text, beats=beats)
 
 
-def write_story(ctx: JobContext) -> Story:
+def write_story(ctx: JobContext, turns: list[Turn] | None = None) -> Story:
+    """Write the part from the chapter, or, with `turns` (the transcript of the user's own video
+    of the part), make it from what they said: their words split into beats, the pictures
+    planned for them."""
     project = ctx.project()
     if project.novel_id is None or project.chapter is None:
         raise PipelineError("this reel is not a novel chapter")
@@ -972,40 +1100,57 @@ def write_story(ctx: JobContext) -> Story:
     number = project.chapter
     if novel.chapter(number) is None:
         raise PipelineError(f"the novel has no chapter {number}")
+    from_video = turns is not None
+    heard = [w.text for t in turns or [] for w in t.words] if from_video else None
+    if from_video and not heard:
+        raise PipelineError(
+            "no speech was recognised in the video, so there is nothing to make the part from"
+        )
     bible = novel.bible.before(number)
     previous = previous_part(ctx, novel, number)
     continuing = previous is not None
     model = ctx.settings.script_model
     name = text_model_name(model)
+    what = f"making part {number} from your video" if from_video else f"writing part {number}"
     ctx.log(
-        f"{name}: writing part {number} of {novel.title!r} ({novel.language}, {novel.narration},"
-        f" effort {ctx.settings.script_effort}); bible: {len(bible.characters)} characters,"
+        f"{name}: {what} of {novel.title!r} ({novel.language}, {novel.narration}, effort"
+        f" {ctx.settings.script_effort}); bible: {len(bible.characters)} characters,"
         f" {len(bible.props)} props from earlier chapters"
+    )
+    request = (
+        video_prompt(novel, number, bible, previous, turns or [])
+        if from_video
+        else user_prompt(novel, number, bible, previous)
     )
     messages: list[dict] = [
         {
             "type": "message",
             "role": "user",
-            "content": [{"type": "input_text", "text": user_prompt(novel, number, bible, previous)}],
+            "content": [{"type": "input_text", "text": request}],
         }
     ]
     best: tuple[StoryOut, list[str]] | None = None
     best_rank = (1 << 30, 0)  # (format problems, storyboard mismatches): fewer is better
     reviewing = story_review.enabled(ctx)
     reviews = 0
+    effort = ctx.settings.script_effort
+    if from_video and effort in TEXT_EFFORTS:  # splitting their words needs less thinking than writing
+        effort = TEXT_EFFORTS[min(TEXT_EFFORTS.index(effort), TEXT_EFFORTS.index(VIDEO_EFFORT))]
     rounds = REPAIR_ROUNDS + (REVIEW_ROUNDS if reviewing else 0)
     for round_no in range(rounds + 1):
         ctx.check()
-        if round_no:
-            ctx.log(f"repair round {round_no}: {len(best[1]) if best else '?'} problem(s) to fix")
+        if round_no and best is not None:
+            ctx.log(f"repair round {round_no}: {len(best[1])} problem(s) to fix")
+        elif round_no:
+            ctx.log(f"round {round_no}: trying again")
         try:
             result = ctx.client.responses(
                 {
                     "model": model,
                     "store": False,
-                    "instructions": system_prompt(novel),
+                    "instructions": system_prompt(novel, from_video),
                     "input": messages,
-                    "reasoning": {"effort": ctx.settings.script_effort},
+                    "reasoning": {"effort": effort},
                     "max_output_tokens": ctx.settings.max_output_tokens,
                     "text": text_format("novel_part", StoryOut),
                 },
@@ -1015,7 +1160,13 @@ def write_story(ctx: JobContext) -> Story:
             if not exc.output_limit:
                 raise
             ctx.spend_text(model, exc.usage)
-            ctx.log(f"the answer ran past {ctx.settings.max_output_tokens} output tokens and was stopped")
+            # The same request would run as long again: the next try thinks one level less.
+            lower = TEXT_EFFORTS[max(0, TEXT_EFFORTS.index(effort) - 1)] if effort in TEXT_EFFORTS else effort
+            ctx.log(
+                f"the answer ran past {ctx.settings.max_output_tokens} output tokens and was stopped"
+                + (f"; trying with effort {lower}" if lower != effort and best is None else "")
+            )
+            effort = lower
             if best is not None:
                 break
             continue
@@ -1031,7 +1182,7 @@ def write_story(ctx: JobContext) -> Story:
             ]
             out = None
         else:
-            problems = validate(out, novel, number, bible, continuing)
+            problems = validate(out, novel, number, bible, continuing, heard)
             if missing:
                 problems.insert(0, f"fill in every field (missing: {', '.join(missing)})")
         review: list[str] = []  # a script in the right shape gets one look at its pictures
@@ -1070,7 +1221,7 @@ def write_story(ctx: JobContext) -> Story:
     if best is None:
         raise PipelineError(f"{name} did not return a usable part script; try again")
     out, problems = best
-    story = to_story(out, number, continuing, problems)
+    story = to_story(out, number, continuing, problems, from_video)
     for item in problems:
         ctx.log(f"  still to fix: {item}")
     ctx.log(
@@ -1086,7 +1237,10 @@ def write_story(ctx: JobContext) -> Story:
         p.script = takes_script(story, reel_title(novel, story), novel.language, None)
         if p.title in ("", DEFAULT_TITLE) or p.title.startswith(f"{novel.title} - Part"):
             p.title = reel_title(novel, story)
-        p.invalidate_media()
+        if from_video:  # the video is the recording: keep it and its transcript, plan the pictures anew
+            p.analysis, p.part_faces = None, {}
+        else:
+            p.invalidate_media()
 
     ctx.update(save)
     for key in removed:

@@ -92,6 +92,10 @@ class ProcessRequest(Body):
     fresh: bool = False  # new pictures for every moment
 
 
+class PartRequest(Body):
+    from_video: bool = False  # make the part from the user's own video of it, not from the chapter
+
+
 class TurnEdit(Body):
     text: str = Field(min_length=1, max_length=2000)
 
@@ -353,8 +357,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         project = load(project_id)
         if project.path == "idea":
             raise PipelineError("this project records scenes; upload clips to a video project")
-        if project.path == "novel" and project.story is None:
-            raise PipelineError("write the part first, then record it or upload a video of it")
         if project.path == "novel" and project.clips:
             raise PipelineError("a part takes one video: remove the current one first")
         idle(project_id)
@@ -654,11 +656,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=3600"})
 
     @app.post("/api/projects/{project_id}/story")
-    def write_part(project_id: str, request: Request) -> dict[str, Any]:
+    def write_part(project_id: str, request: Request, body: PartRequest | None = None) -> dict[str, Any]:
         project = load(project_id)
         if project.path != "novel":
             raise PipelineError("this reel is not a novel chapter")
-        return start(project_id, "story", key=user_key(request))
+        from_video = bool(body and body.from_video)
+        if from_video and not project.clips:
+            raise PipelineError("upload your video of the part first")
+        params = {"from_video": True} if from_video else {}
+        return start(project_id, "story", params, key=user_key(request))
 
     @app.put("/api/projects/{project_id}/story")
     def edit_part(project_id: str, body: StoryEdit) -> dict[str, Any]:

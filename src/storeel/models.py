@@ -319,6 +319,9 @@ class Story(Strict):
     photos: list[StoryPhoto] = Field(default_factory=list)
     bible_notes: list[StoryBibleNote] = Field(default_factory=list)
     problems: list[str] = Field(default_factory=list)  # what the checks still found
+    # Made from the user's own video of the part: its words are what they said (the video is the
+    # recording), and the poll and the call to action are there only if they said them.
+    from_video: bool = False
 
 
 class PartPicture(Strict):

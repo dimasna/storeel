@@ -178,8 +178,9 @@ async function pollOnce() {
   if (changed) {
     render();
     const job = after.job;
-    if (job && job.status === "done") toast(`${JOB_NAMES[job.kind] || job.kind}: done`, "ok");
-    if (job && job.status === "failed") toast(`${JOB_NAMES[job.kind] || job.kind} failed`, "error");
+    const name = job && job.kind === "story" && job.step ? job.step : job && (JOB_NAMES[job.kind] || job.kind); // "Making the part from your video"
+    if (job && job.status === "done") toast(`${name}: done`, "ok");
+    if (job && job.status === "failed") toast(`${name} failed`, "error");
   } else {
     updateJobPanel(after.job);
   }
@@ -837,24 +838,57 @@ function bibleSection(novel) {
 
 function partSection(project) {
   const part = project.novel;
-  const write = () => {
+  const story = project.story;
+  const video = project.clips[0];
+  const fromVideo = Boolean(story && story.from_video);
+  const writer = state.config.models.script_name;
+  const write = async () => {
     const takes = project.script ? project.script.scenes.filter((s) => s.take).length : 0;
     if (takes && !confirm(`A new script replaces this one and deletes ${takes} recorded take(s). Continue?`)) return;
-    act(() => api.post(`/api/projects/${project.id}/story`), `${state.config.models.script_name} is writing the part…`);
+    if (video && !confirm("A new script won't match the video you uploaded, so the video is removed from this part and you record the new script. Continue?")) return;
+    if (video && !(await act(() => api.del(`/api/projects/${project.id}/clips/${video.id}`)))) return;
+    act(() => api.post(`/api/projects/${project.id}/story`, {}), `${writer} is writing the part…`);
   };
+  const fromMyVideo = () => {
+    if (story && !fromVideo && !confirm("Make the part from your video? Its beats become what you said there, and the script written from the chapter is replaced.")) return;
+    act(() => api.post(`/api/projects/${project.id}/story`, { from_video: true }), "Making the part from your video…");
+  };
+  const picker = el("input", {
+    type: "file",
+    accept: "video/*",
+    hidden: true,
+    onchange: async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const added = await act(() => upload(`/api/projects/${project.id}/clips`, file, file.name), "Video added");
+      if (added) await act(() => api.post(`/api/projects/${project.id}/story`, { from_video: true }), "Making the part from your video…");
+    },
+  });
+  const removeVideo = () => confirm("Remove this video?") && act(() => api.del(`/api/projects/${project.id}/clips/${video.id}`));
+  let about;
+  let actions = [];
+  if (!story) {
+    about = video
+      ? `Your video (${seconds(video.duration)}) is uploaded. ${writer} makes the part from it: what you said, split into beats, with the pictures planned for each one.`
+      : `${writer} writes the part from the chapter and the character bible: the hook, the story beats, a poll and the call to action. You then record it. Already recorded the part? Upload your video instead: what you said becomes the part.`;
+    actions = video
+      ? [el("button", { class: "btn primary", onclick: fromMyVideo }, "Make the part from this video"), el("button", { class: "btn", onclick: removeVideo }, "Remove the video")]
+      : [el("button", { class: "btn primary", onclick: write }, "Write the part"), el("button", { class: "btn", onclick: () => picker.click() }, "Make it from my video"), picker];
+  } else if (fromVideo) {
+    about = "Made from your video: the beats are what you said, and the pictures are planned for them. Make it again if the pictures miss something.";
+    actions = [el("button", { class: "btn primary", onclick: fromMyVideo }, "Make it again from the video"), el("button", { class: "btn", onclick: write }, "Write a script from the chapter instead")];
+  } else {
+    about = "Rewrite the part if it misses the chapter's best moments. Edit single words below instead: that keeps your takes.";
+    actions = [el("button", { class: "btn primary", onclick: write }, "Rewrite the part")];
+    if (video) actions.push(el("button", { class: "btn", onclick: fromMyVideo }, "Make the part from my video instead"));
+  }
   return section(
-    project.story ? null : `Part ${project.chapter}`,
+    story ? null : `Part ${project.chapter}`,
     part
       ? el("details", {}, el("summary", {}, el("strong", {}, `Chapter ${project.chapter}${part.chapter_title ? `: ${part.chapter_title}` : ""}`), el("span", { class: "muted small" }, ` · ${part.chapter_text.length.toLocaleString()} chars`)), el("div", { class: "chapter-text" }, part.chapter_text))
       : el("p", { class: "banner warn" }, "This reel's novel was deleted."),
-    el(
-      "p",
-      { class: "muted small" },
-      project.story
-        ? "Rewrite the part if it misses the chapter's best moments. Edit single words below instead: that keeps your takes."
-        : `${state.config.models.script_name} writes the part from the chapter and the character bible: the hook, the story beats, a poll and the call to action. You then record it in a few takes.`,
-    ),
-    part ? el("button", { class: "btn primary", onclick: write }, project.story ? "Rewrite the part" : "Write the part") : null,
+    el("p", { class: "muted small" }, about),
+    part ? el("div", { class: "row" }, ...actions) : null,
   );
 }
 
@@ -872,10 +906,13 @@ function showTags(show, prefix = "") {
 
 function storySection(project) {
   const story = structuredClone(project.story);
-  const save = el("button", { class: "btn primary", disabled: true }, "Save the words");
+  const said = Boolean(story.from_video); // made from the user's video: its words are what they said
+  const save = el("button", { class: "btn primary", disabled: true }, said ? "Save" : "Save the words");
   const dirty = () => (save.disabled = false);
   const input = (value, attrs, onInput) => el("input", { value, oninput: (e) => (onInput(e.target.value), dirty()), ...attrs });
   const area = (value, attrs, onInput) => el("textarea", { rows: Math.max(2, Math.ceil(value.length / 70)), oninput: (e) => (onInput(e.target.value), dirty()), ...attrs }, value);
+  const words = (value, attrs, onInput) => (said ? el("p", { class: "said" }, value) : area(value, attrs, onInput));
+  const note = (value, attrs, onInput) => (said ? null : input(value, attrs, onInput));
   const opening = project.novel?.opening;
   save.addEventListener("click", () =>
     act(
@@ -888,7 +925,7 @@ function storySection(project) {
           poll: story.poll,
           cta: story.cta,
         }),
-      "Saved. Re-record any take whose words you changed.",
+      said ? "Saved" : "Saved. Re-record any take whose words you changed.",
     ),
   );
   const chars = [story.hook, ...story.beats.map((b) => b.text), story.poll.text, story.cta].join(" ").length;
@@ -896,9 +933,9 @@ function storySection(project) {
     el(
       "li",
       { class: "beat" },
-      el("div", { class: "beat-head small muted" }, `Beat ${i + 1} · ${LABELS.act[b.act] || b.act} · take ${b.take.slice(1)}${b.speaker !== "narrator" ? ` · quoting ${b.speaker}` : ""}`),
-      area(b.text, { maxlength: 400 }, (v) => (b.text = v)),
-      input(b.direction, { maxlength: 200, placeholder: "delivery note", class: "direction" }, (v) => (b.direction = v)),
+      el("div", { class: "beat-head small muted" }, `Beat ${i + 1} · ${LABELS.act[b.act] || b.act}${said ? "" : ` · take ${b.take.slice(1)}`}${b.speaker !== "narrator" ? ` · quoting ${b.speaker}` : ""}`),
+      words(b.text, { maxlength: 400 }, (v) => (b.text = v)),
+      note(b.direction, { maxlength: 200, placeholder: "delivery note", class: "direction" }, (v) => (b.direction = v)),
       showTags(b.show),
       b.switch ? showTags(b.switch.show, `at “${b.switch.at}” →`) : null,
     ),
@@ -906,7 +943,9 @@ function storySection(project) {
   const list = (title, items, fmt) => (items && items.length ? [el("h3", {}, title), el("ul", { class: "small plain" }, items.map((x) => el("li", {}, fmt(x))))] : []);
   return section(
     "Part script",
-    el("p", { class: "muted small" }, `Part ${story.part} · ${story.beats.length} beats · ${chars.toLocaleString()} characters, about ${Math.round(chars / 13.5)} seconds read aloud.`),
+    el("p", { class: "muted small" }, said
+      ? `Part ${story.part} · ${story.beats.length} beats, in your own words from the video.`
+      : `Part ${story.part} · ${story.beats.length} beats · ${chars.toLocaleString()} characters, about ${Math.round(chars / 13.5)} seconds read aloud.`),
     story.problems.length ? el("div", { class: "banner warn small" }, el("strong", {}, "Still to fix: "), story.problems.join("; ")) : null,
     field("Part title", input(story.chapter_title, { maxlength: 120 }, (v) => (story.chapter_title = v))),
     el(
@@ -915,25 +954,30 @@ function storySection(project) {
       el(
         "li",
         { class: "beat hook" },
-        el("div", { class: "beat-head small muted" }, `Hook · on camera · take 1${opening ? ` · starts with “${opening}...”` : ""}`),
-        area(story.hook, { maxlength: 400 }, (v) => (story.hook = v)),
-        input(story.hook_direction, { maxlength: 200, placeholder: "delivery note", class: "direction" }, (v) => (story.hook_direction = v)),
+        el("div", { class: "beat-head small muted" }, said ? "Hook · on camera · what you say first" : `Hook · on camera · take 1${opening ? ` · starts with “${opening}...”` : ""}`),
+        words(story.hook, { maxlength: 400 }, (v) => (story.hook = v)),
+        note(story.hook_direction, { maxlength: 200, placeholder: "delivery note", class: "direction" }, (v) => (story.hook_direction = v)),
       ),
       beats,
-      el(
-        "li",
-        { class: "beat" },
-        el("div", { class: "beat-head small muted" }, "Poll · two options on screen · ends with the invitation to comment"),
-        area(story.poll.text, { maxlength: 400 }, (v) => (story.poll.text = v)),
-        el("div", { class: "grid2" }, field("Option A", input(story.poll.a, { maxlength: 40 }, (v) => (story.poll.a = v))), field("Option B", input(story.poll.b, { maxlength: 40 }, (v) => (story.poll.b = v)))),
-      ),
-      el(
-        "li",
-        { class: "beat" },
-        el("div", { class: "beat-head small muted" }, "Call to action · over the end card"),
-        area(story.cta, { maxlength: 400 }, (v) => (story.cta = v)),
-      ),
+      said && !story.poll.text
+        ? null
+        : el(
+            "li",
+            { class: "beat" },
+            el("div", { class: "beat-head small muted" }, said ? "Poll · two options on screen" : "Poll · two options on screen · ends with the invitation to comment"),
+            words(story.poll.text, { maxlength: 400 }, (v) => (story.poll.text = v)),
+            el("div", { class: "grid2" }, field("Option A", input(story.poll.a, { maxlength: 40 }, (v) => (story.poll.a = v))), field("Option B", input(story.poll.b, { maxlength: 40 }, (v) => (story.poll.b = v)))),
+          ),
+      said && !story.cta
+        ? null
+        : el(
+            "li",
+            { class: "beat" },
+            el("div", { class: "beat-head small muted" }, "Call to action · over the end card"),
+            words(story.cta, { maxlength: 400 }, (v) => (story.cta = v)),
+          ),
     ),
+    said && !story.poll.text && !story.cta ? el("p", { class: "muted small" }, "You didn't end with a poll or a call to action, so the reel has no poll screen or end card.") : null,
     el("div", { class: "row" }, save),
     el(
       "details",
@@ -960,7 +1004,7 @@ function partProcessSection(project) {
       { class: "muted small" },
       processed
         ? "Update after a retake or a script change: only what changed is made again."
-        : "Transcribes your takes, then draws the part's pictures with Muse Image: characters from the bible (cut out by SAM, the same faces as in earlier parts), objects, places and photos.",
+        : "Transcribes your recording, then draws the part's pictures with Muse Image: characters from the bible (cut out by SAM, the same faces as in earlier parts), objects, places and photos.",
     ),
     el("button", { class: "btn primary", onclick: () => act(() => api.post(`/api/projects/${project.id}/process`, { fresh: false }), processed ? "Updating…" : "Processing started") }, processed ? "Update" : "Process the part"),
   );
@@ -1018,10 +1062,13 @@ function takesSection(project) {
         el("button", { class: "icon-btn", title: "Remove the video", onclick: () => confirm("Remove this video? The takes (if any) are used again.") && act(() => api.del(`/api/projects/${project.id}/clips/${whole.id}`)) }, "✕"),
       )
     : el("div", { class: "take-row" }, el("button", { class: "btn small", onclick: () => picker.click() }, "Upload one video of the whole part"), picker);
+  const said = Boolean(project.story && project.story.from_video);
   return section(
-    "Record the part",
+    said ? "Your video" : "Record the part",
     el("p", { class: "muted small" }, whole
-      ? "This video is used instead of the takes. Its words are matched to the script to time the pictures."
+      ? said
+        ? "The part was made from this video: its beats are what you said, and its words time the pictures. Removing it leaves the beats to record as takes."
+        : "This video is used instead of the takes. Its words are matched to the script to time the pictures."
       : `${scenes.length} takes · ${recorded} recorded: the hook, one per beat, the poll and the call to action. Each take is a few lines, read from the teleprompter in one go (a slip costs one beat to redo); the delivery notes show under the lines. Or record the whole part elsewhere and upload it as one video.`),
     wholeVideo,
     heardBanner(project),
