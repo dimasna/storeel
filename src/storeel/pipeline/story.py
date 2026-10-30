@@ -639,6 +639,8 @@ def validate(
             opens_correctly(out.hook, opening), f'the hook must start with "{opening}..." and then the punch'
         )
         need(6 <= len(out.beats) <= 24, f"{len(out.beats)} beats; write 8 to 20")
+    behind: set[str] = set()  # the empty places already shown behind people
+    again: dict[str, list[int]] = {}  # and the beats that show them behind people again
     for i, b in enumerate(out.beats, 1):
         if video:
             need(len(b.text) <= 320, f"beat {i} is {len(b.text)} characters: split it at a comma or a clause")
@@ -659,6 +661,11 @@ def validate(
             )
         for show in (b.show, b.then.show) if at else (b.show,):
             _check_show(i, show, people, props, bible_props, photos, need)
+        for s in shows:  # an empty place behind people: once, as the first look at it
+            if s.prop in props and props[s.prop].backdrop and s.characters:
+                if s.prop in behind and i not in again.setdefault(s.prop, []):
+                    again[s.prop].append(i)
+                behind.add(s.prop)
         if b.speaker != "narrator" and b.speaker in people:  # the voiced character is on screen
             who = {c: v.base for c, v in variants.items()}
             on = {who.get(c, c) for s in shows for c in s.characters}
@@ -672,6 +679,13 @@ def validate(
                 person in on or texting,
                 f"beat {i}: {b.speaker!r} is quoted but not on screen: show them while their words are said",
             )
+    for place, where in again.items():
+        beats = ", ".join(map(str, where))
+        need(
+            False,
+            f"the empty place {place!r} is behind people again in beats {beats}: show what they do there"
+            " as a scene of them (refs, people, the action), one scene per moment",
+        )
     if video:
         if out.poll.text.strip():
             need(bool(out.poll.a and out.poll.b), "the poll they said needs its two options, a and b")
@@ -1111,10 +1125,13 @@ def write_story(ctx: JobContext, turns: list[Turn] | None = None) -> Story:
     continuing = previous is not None
     model = ctx.settings.script_model
     name = text_model_name(model)
+    effort = ctx.settings.script_effort
+    if from_video and effort in TEXT_EFFORTS:  # splitting their words needs less thinking than writing
+        effort = TEXT_EFFORTS[min(TEXT_EFFORTS.index(effort), TEXT_EFFORTS.index(VIDEO_EFFORT))]
     what = f"making part {number} from your video" if from_video else f"writing part {number}"
     ctx.log(
         f"{name}: {what} of {novel.title!r} ({novel.language}, {novel.narration}, effort"
-        f" {ctx.settings.script_effort}); bible: {len(bible.characters)} characters,"
+        f" {effort}); bible: {len(bible.characters)} characters,"
         f" {len(bible.props)} props from earlier chapters"
     )
     request = (
@@ -1133,9 +1150,6 @@ def write_story(ctx: JobContext, turns: list[Turn] | None = None) -> Story:
     best_rank = (1 << 30, 0)  # (format problems, storyboard mismatches): fewer is better
     reviewing = story_review.enabled(ctx)
     reviews = 0
-    effort = ctx.settings.script_effort
-    if from_video and effort in TEXT_EFFORTS:  # splitting their words needs less thinking than writing
-        effort = TEXT_EFFORTS[min(TEXT_EFFORTS.index(effort), TEXT_EFFORTS.index(VIDEO_EFFORT))]
     rounds = REPAIR_ROUNDS + (REVIEW_ROUNDS if reviewing else 0)
     for round_no in range(rounds + 1):
         ctx.check()
