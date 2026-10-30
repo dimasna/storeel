@@ -16,7 +16,7 @@ from the first frame.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from PIL import Image
 
@@ -43,6 +43,7 @@ from .render import (
 from .story import CTA, HOOK, OUTRO, POLL
 
 MIN_LINE = 0.25  # seconds: no beat is squeezed to less than this
+MIN_HOLD = 3.0  # seconds a picture stays up at least: the viewer needs time to look at it
 ANCHOR_SHARE = 0.4  # a line of one whole video starts on its own words when this much of it is heard
 
 
@@ -230,6 +231,54 @@ def timeline(project: Project) -> list[Line]:
     return lines
 
 
+def calm(lines: list[Line]) -> list[Line]:
+    """The timeline with nothing on screen too briefly to take in (under MIN_HOLD seconds). A
+    switch inside a beat that would leave a part that short is dropped: the beat keeps the
+    picture of its longer part. A beat that short keeps the picture before it (or, right after
+    the hook, takes the next one), so the screen does not flash."""
+    out: list[Line] = []
+    i = 0
+    while i < len(lines):
+        line, after = lines[i], lines[i + 1] if i + 1 < len(lines) else None
+        if after is not None and line.kind == after.kind == "beat" and after.beat is line.beat:
+            first, second = line.end - line.start, after.end - after.start
+            if min(first, second) < MIN_HOLD:
+                show = after.show if second > first else line.show
+                out.append(replace(line, end=after.end, show=show))
+                i += 2
+                continue
+        out.append(line)
+        i += 1
+    for k, line in enumerate(out):
+        if line.kind != "beat" or line.end - line.start >= MIN_HOLD:
+            continue
+        if k and out[k - 1].kind == "beat":
+            out[k] = replace(line, show=out[k - 1].show)
+        elif k + 1 < len(out) and out[k + 1].kind == "beat":
+            out[k] = replace(line, show=out[k + 1].show)
+    return out
+
+
+def arrange(chars: list[str], before: dict[str, str], usual) -> list[str]:
+    """The side each standing character takes: one already on screen keeps their side (no jumping
+    across when someone joins or leaves), a newcomer takes their usual side, or the free one."""
+    if not chars:
+        return []
+    if len(chars) == 1:
+        return [before.get(chars[0]) or usual(chars[0])]
+    a, b = chars[:2]
+    other = {"left": "right", "right": "left"}
+    if a in before and b in before and before[a] != before[b]:
+        return [before[a], before[b]]
+    if a in before:
+        return [before[a], other[before[a]]]
+    if b in before:
+        return [other[before[b]], before[b]]
+    if usual(a) != usual(b):
+        return [usual(a), usual(b)]
+    return ["left", "right"]
+
+
 # ---- the layout -------------------------------------------------------------------------------
 
 # Where things go, as fractions of the frame.
@@ -301,9 +350,12 @@ class Sprites:
     def label(self, character: str) -> str:
         return self.labels.get(character) or self.labels.get(self.person(character)) or ""
 
-    def layers(self, show: StoryShow, name: str = "") -> list[tuple[Image.Image, tuple[int, int]]]:
+    def layers(
+        self, show: StoryShow, name: str = "", sides: list[str] | None = None
+    ) -> list[tuple[Image.Image, tuple[int, int]]]:
         """One beat's screen: (sprite, top-left) in drawing order. `name` is a standing character
-        whose name goes over their head (the storyteller voices them for the first time)."""
+        whose name goes over their head (the storyteller voices them for the first time); `sides`
+        where each standing character stands (by default their usual side)."""
         out: list[tuple[Image.Image, tuple[int, int]]] = []
         shift = 0.0
         if show.tag:
@@ -311,6 +363,7 @@ class Sprites:
             out.append((tag, (W // 2 - tag.width // 2, round(TAG_Y * H) - tag.height // 2)))
             shift = TAG_SHIFT
         chars = self.standing(show)
+        slots = sides or arrange(chars, {}, self.slot)
 
         def centred(sprite: Image.Image, y: float) -> None:
             out.append((sprite, (W // 2 - sprite.width // 2, round(y * H) - sprite.height // 2)))
@@ -327,7 +380,7 @@ class Sprites:
         elif show.chat:
             x = 0.5
             if len(chars) == 1:
-                x = 0.44 if self.slot(chars[0]) == "right" else 0.56
+                x = 0.44 if slots[0] == "right" else 0.56
             for k, message in enumerate(show.chat[:2]):
                 bubble = self._cached(
                     ("chat", message.sender, message.text),
@@ -367,7 +420,6 @@ class Sprites:
                     self._cached(("scene", show.prop), lambda: photo_card(picture, round(CARD_W * W))),
                     0.30 + shift,
                 )
-        slots = ["left", "right"] if len(chars) == 2 else [self.slot(c) for c in chars]
         named: tuple[Image.Image, tuple[int, int]] | None = None
         for cid, slot in zip(chars, slots, strict=True):
             picture = self.image(cid)
@@ -434,19 +486,26 @@ class PartCompositor(Compositor):
         sprites = Sprites(project, files, self._novel_files, self._cast)
         language = project.script.language if project.script else "id"
         words = WORDS.get(language, WORDS["id"])
-        lines = timeline(project)
+        lines = calm(timeline(project))
         spans: list[tuple[float, float]] = []
         faces = project.part_faces
         ident = 0
         named: set[str] = set()  # the characters whose name has been on screen
 
         def add(
-            image: Image.Image, xy: tuple[int, int], start: float, end: float, animate: bool = True
-        ) -> None:
+            image: Image.Image,
+            xy: tuple[int, int],
+            start: float,
+            end: float,
+            animate: bool = True,
+            enter: bool = True,
+        ) -> _Card:
             nonlocal ident
             ident += 1
             center = (xy[0] + image.width // 2, xy[1] + image.height // 2)
-            self.cards.append(_Card(start, end, image, center, ident=ident, animate=animate))
+            card = _Card(start, end, image, center, ident=ident, animate=animate, enter=enter)
+            self.cards.append(card)
+            return card
 
         def voiced(line: Line) -> str:
             """The character standing in this line whose words the storyteller says, the first
@@ -463,23 +522,34 @@ class PartCompositor(Compositor):
                 return shown
             return ""
 
-        previous: list[tuple[int, int, int]] = []  # what was on screen in the line before: no re-pop
+        # What is on screen, by (sprite, position): a picture that carries on into the next line is
+        # the same card made longer (it neither blinks nor pops again), and it fades out once,
+        # when it leaves. `sides`: where each standing character is, so nobody jumps across.
+        live: dict[tuple[int, int, int], _Card] = {}
+        sides: dict[str, str] = {}
         for line in lines:
             if line.kind == "hook":
-                previous = []
+                live, sides = {}, {}
                 continue
             if line.kind == "beat" and line.show is not None:
-                layers = sprites.layers(line.show, name=voiced(line))
+                chars = sprites.standing(line.show)
+                placed = arrange(chars, sides, sprites.slot)
+                sides = dict(zip(chars, placed, strict=True))
+                layers = sprites.layers(line.show, name=voiced(line), sides=placed)
             elif line.kind == "poll":
-                layers = self._poll(story, words)
+                layers, sides = self._poll(story, words), {}
             else:
-                layers = self._end(project, sprites, words)
-            now = []
+                layers, sides = self._end(project, sprites, words), {}
+            now: dict[tuple[int, int, int], _Card] = {}
             for image, xy in layers:
                 key = (id(image), *xy)
-                add(image, xy, line.start, line.end, animate=key not in previous)
-                now.append(key)
-            previous = now
+                card = live.get(key)
+                if card is not None and abs(card.end - line.start) < 1e-6:
+                    card.end = line.end
+                else:
+                    card = add(image, xy, line.start, line.end)
+                now[key] = card
+            live = now
             behind = style.speaker_behind
             blur = behind == "blur"
             if behind == "auto":
@@ -495,7 +565,9 @@ class PartCompositor(Compositor):
             part = f"Part {story.part}"
             mark = badge(part, story.chapter_title, round(BADGE_SIZE * H), round(0.86 * W))
             end = next((x.start for x in lines if x.kind == "cta"), self.duration)
-            add(mark, (round(BADGE_XY[0] * W), round(BADGE_XY[1] * H)), 0.0, end, animate=False)
+            add(
+                mark, (round(BADGE_XY[0] * W), round(BADGE_XY[1] * H)), 0.0, end, enter=False
+            )  # on the cover frame
         return spans
 
     def _poll(self, story: Story, words: dict[str, str]) -> list[tuple[Image.Image, tuple[int, int]]]:

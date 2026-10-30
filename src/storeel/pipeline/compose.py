@@ -174,7 +174,8 @@ class _Cutaway:
 @dataclass
 class _Card:
     """A card or cut-out: pops in (fade and a small rise), fades out. With `animate` off it is
-    simply there for its time (the part badge, which the platforms' cover frame must show)."""
+    simply there for its time; with `enter` off it is there from its first frame (the part badge,
+    which the platforms' cover frame must show) and still fades out when it leaves."""
 
     start: float
     end: float
@@ -182,13 +183,15 @@ class _Card:
     center: tuple[int, int]
     ident: int = field(default=0)
     animate: bool = True
+    enter: bool = True
 
     def animating(self, t: float) -> bool:
-        return self.animate and (t - self.start < POP_IN or self.end - t < FADE_OUT)
+        entering = self.enter and t - self.start < POP_IN
+        return self.animate and (entering or self.end - t < FADE_OUT)
 
     def draw(self, canvas: Image.Image, t: float) -> None:
         alpha, rise = 1.0, 0.0
-        if self.animate and t - self.start < POP_IN:
+        if self.animate and self.enter and t - self.start < POP_IN:
             eased = _ease_out((t - self.start) / POP_IN)
             alpha, rise = eased, (1 - eased) * 0.02 * H
         elif self.animate and self.end - t < FADE_OUT:
