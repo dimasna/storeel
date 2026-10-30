@@ -19,6 +19,8 @@ from ..models import Source, Transcript, Turn, Word
 
 VERSION = 1
 LANGUAGE_BIAS = {"auto": [], "id": ["Indonesian", "English"], "en": ["English"]}
+KEYWORD_MAX = 30  # characters: Muse Voice Transcribe rejects a longer keyword (400)
+KEYWORDS_MAX = 50
 VOWELS = re.compile(r"[aeiouyàáâãäåæèéêëìíîïòóôõöøùúûüýœ]+", re.IGNORECASE)
 LEAD = 0.6  # turn onsets are detected late: look this far back for the real one
 TRAIL = 0.15
@@ -205,9 +207,28 @@ def retime(turn: Turn, text: str) -> Turn:
     return turn.model_copy(update={"text": text, "words": place_words(text, speech)})
 
 
+def asr_keywords(names: list[str]) -> list[str]:
+    """The names to bias the transcription toward, each short enough for the API. A longer name
+    goes as runs of its whole words that fit ("Raden Mas Arya Wiratama" and "Kusumanegara"
+    for "Raden Mas Arya Wiratama Kusumanegara"); a single word that is too long is left out."""
+    out: set[str] = set()
+    for name in names:
+        run: list[str] = []
+        for word in name.split():
+            if len(word) > KEYWORD_MAX or (run and len(" ".join([*run, word])) > KEYWORD_MAX):
+                if run:
+                    out.add(" ".join(run))
+                run = []
+            if len(word) <= KEYWORD_MAX:
+                run.append(word)
+        if run:
+            out.add(" ".join(run))
+    return sorted(out)[:KEYWORDS_MAX]
+
+
 def transcribe(ctx: JobContext, source: Source, language: str, keywords: list[str]) -> Transcript:
     bias = LANGUAGE_BIAS.get(language, [])
-    keywords = sorted({k.strip() for k in keywords if k.strip()})[:50]
+    keywords = asr_keywords(keywords)
     key = digest(VERSION, source.digest, ctx.settings.asr_model, bias, keywords)
     current = ctx.project().transcript
     if current is not None and current.digest == key:
