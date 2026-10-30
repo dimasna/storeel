@@ -624,6 +624,7 @@ function sceneCard(project, script, scene, index, markDirty, redraw, isDirty) {
       { class: "scene-head" },
       el("span", { class: "scene-n" }, String(index + 1)),
       el("span", { class: "muted small" }, scene.purpose || ""),
+      heardPill(project, scene),
       el(
         "div",
         { class: "row-actions" },
@@ -1021,7 +1022,37 @@ function takesSection(project) {
       ? "This video is used instead of the takes. Its words are matched to the script to time the pictures."
       : `${scenes.length} takes · ${recorded} recorded: the hook, one per beat, the poll and the call to action. Each take is a few lines, read from the teleprompter in one go (a slip costs one beat to redo); the delivery notes show under the lines. Or record the whole part elsewhere and upload it as one video.`),
     wholeVideo,
+    heardBanner(project),
     whole ? null : el("ol", { class: "scenes" }, scenes.map((scene, index) => takeCard(project, scenes, scene, index))),
+  );
+}
+
+// The lines the recording does not say (a take read from another version of the script).
+function heardPill(project, scene) {
+  const heard = (project.heard || {})[scene.id];
+  if (!scene.take || !heard || heard.status === "ok") return null;
+  const title = `${Math.round(heard.share * 100)}% of the lines heard in this take`;
+  return heard.status === "not heard"
+    ? el("span", { class: "pill bad", title }, "not heard in this take")
+    : el("span", { class: "pill warn", title }, "partly heard");
+}
+
+function heardBanner(project) {
+  const heard = project.heard || {};
+  const scenes = project.script ? project.script.scenes : [];
+  const checked = scenes.filter((s) => heard[s.id]);
+  const off = checked.filter((s) => heard[s.id].status === "not heard");
+  if (!off.length) return null;
+  const whole = project.path === "novel" && project.clips.length > 0;
+  const first = (s) => `${scenes.indexOf(s) + 1}. “${s.lines.split(/\s+/).slice(0, 5).join(" ")}…”`;
+  return el(
+    "div",
+    { class: "banner warn small" },
+    el("strong", {}, `${off.length} of ${checked.length} lines don't match what you said. `),
+    whole
+      ? "The video was probably read from another version of the script, so these lines' pictures will be out of step. Re-record it from the script, or upload the right video: "
+      : "Re-record these takes, or their pictures won't fit what you say: ",
+    off.map(first).join("  "),
   );
 }
 
@@ -1061,7 +1092,7 @@ function takeCard(project, scenes, scene, index) {
   return el(
     "li",
     { class: `scene${scene.take ? " recorded" : ""}` },
-    el("div", { class: "scene-head" }, el("span", { class: "scene-n" }, String(index + 1)), el("span", { class: "muted small" }, scene.purpose)),
+    el("div", { class: "scene-head" }, el("span", { class: "scene-n" }, String(index + 1)), el("span", { class: "muted small" }, scene.purpose), heardPill(project, scene)),
     el("p", { class: "take-lines" }, scene.lines),
     scene.direction ? el("p", { class: "muted small" }, scene.direction) : null,
     controls,
@@ -1215,9 +1246,13 @@ function transcriptSection(project) {
   const transcript = project.transcript;
   if (!transcript) return null;
   if (!transcript.turns.length) return section("Captions", el("p", { class: "muted" }, "No speech was recognised, so the reel has no captions."));
+  const notes = project.caption_notes || {};
+  const scripted = project.path !== "video";
   return section(
     "Captions",
-    el("p", { class: "muted small" }, "Fix any word Muse Voice Transcribe misheard. Words are re-timed over the same speech."),
+    el("p", { class: "muted small" }, scripted
+      ? "Check the captions before you render. They are what Muse Voice Transcribe heard; fix any word it misheard. Where a line differs from the script, the script's words are shown under it. Words are re-timed over the same speech."
+      : "Fix any word Muse Voice Transcribe misheard. Words are re-timed over the same speech."),
     el(
       "ol",
       { class: "turns" },
@@ -1230,7 +1265,17 @@ function transcriptSection(project) {
             if (value && value !== turn.text) act(() => api.put(`/api/projects/${project.id}/turns/${turn.id}`, { text: value }), "Caption updated");
           },
         }, turn.text);
-        return el("li", { class: "turn" }, el("span", { class: "time" }, seconds(turn.start)), text, turn.text !== turn.original ? el("small", { class: "muted" }, "heard: ", turn.original) : null);
+        const note = notes[turn.id];
+        const review = note && note.script
+          ? el(
+              "div",
+              { class: "review" },
+              note.differs.length ? el("span", { class: "differs" }, "Not in the script: ", note.differs.join(", ")) : null,
+              el("p", { class: "script" }, note.script),
+              el("button", { class: "btn small", onclick: () => act(() => api.put(`/api/projects/${project.id}/turns/${turn.id}`, { text: note.script }), "Caption updated") }, "Use the script's words"),
+            )
+          : null;
+        return el("li", { class: "turn" }, el("span", { class: "time" }, seconds(turn.start)), text, turn.text !== turn.original ? el("small", { class: "muted" }, "heard: ", turn.original) : null, review);
       }),
     ),
   );
@@ -1242,8 +1287,11 @@ function renderSection(project) {
   const fit = el("input", { type: "checkbox" });
   const go = () => act(() => api.post(`/api/projects/${project.id}/render`, { fit_mb: fit.checked ? 25 : null }), "Rendering…");
   const renders = [...project.renders].reverse();
+  const differing = Object.values(project.caption_notes || {}).filter((n) => n.script).length;
   return section(
     "Reel",
+    heardBanner(project),
+    differing ? el("p", { class: "note" }, `${differing === 1 ? "1 caption line differs" : `${differing} caption lines differ`} from the script: check ${differing === 1 ? "it" : "them"} under Captions before you render.`) : null,
     el("label", { class: "toggle" }, fit, " Keep under 25 MB (for Messenger and Instagram DMs)"),
     el("button", { class: "btn primary wide", onclick: go }, renders.length ? "Render again" : "Render the reel"),
     renders.map((r, i) =>

@@ -99,6 +99,8 @@ h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color
 .row-actions { display: flex; gap: 4px; margin-left: auto; }
 .pill { font-size: 0.75rem; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
 .pill.ok { color: var(--ok); border-color: rgb(60 207 145 / 40%); }
+.pill.warn { color: var(--warn); border-color: rgb(245 165 36 / 40%); }
+.pill.bad { color: var(--error); border-color: rgb(255 93 93 / 40%); }
 
 .form { display: flex; flex-direction: column; gap: 10px; }
 .field { display: flex; flex-direction: column; gap: 5px; }
@@ -162,6 +164,10 @@ details summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; marg
 .turns { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .turn { display: grid; grid-template-columns: 58px 1fr; gap: 8px; align-items: start; }
 .turn small { grid-column: 2; }
+.turn .review { grid-column: 2; display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; }
+.turn .review .differs { color: var(--warn); }
+.turn .review .script { margin: 0; padding: 6px 8px; border-left: 2px solid var(--border); color: var(--muted); }
+.turn .review .btn { align-self: flex-start; }
 
 .render { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .render video { width: 100%; aspect-ratio: 9 / 16; background: #000; border-radius: 12px; }

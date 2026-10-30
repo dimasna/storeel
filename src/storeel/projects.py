@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import uuid
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -15,6 +16,7 @@ from .db import Job
 from .jobs import PipelineError
 from .media import ffmpeg as ff
 from .models import DEFAULT_TITLE, Clip, Project, Style
+from .pipeline.heard import caption_review, heard_report
 from .pipeline.story import hook_opening
 from .services import Services
 
@@ -146,6 +148,9 @@ def view(services: Services, project: Project) -> dict[str, Any]:
     data["job"] = job.view() if job else None
     data["usage"]["estimated_usd"] = project.usage.estimated_usd
     data["input_seconds"] = round(sum(c.duration for c in project.inputs()), 2)
+    # how the recording compares with the script, for the warnings and the caption review
+    data["heard"] = heard_report(project)
+    data["caption_notes"] = {str(turn): asdict(note) for turn, note in caption_review(project).items()}
     if project.path == "novel" and project.novel_id:
         data["novel"] = _novel_part(services, project)
     return data

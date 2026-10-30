@@ -22,6 +22,7 @@ from PIL import Image
 
 from ..files import ProjectFiles
 from ..models import Beat, BibleCharacter, Project, Story, StoryShow, Word
+from .align import Text, align, tokens
 from .analyze import find_quote
 from .compose import Compositor, H, W, _Card
 from .layout import covered, to_region
@@ -42,6 +43,7 @@ from .render import (
 from .story import CTA, HOOK, OUTRO, POLL
 
 MIN_LINE = 0.25  # seconds: no beat is squeezed to less than this
+ANCHOR_SHARE = 0.4  # a line of one whole video starts on its own words when this much of it is heard
 
 
 @dataclass
@@ -117,8 +119,64 @@ def _whole_video_takes(project: Project) -> dict[str, tuple[float, float]]:
     if source is None or script is None:
         return {}
     words = _segment_words(project, 0.0, source.duration)
-    spans = split_by_text([s.lines for s in script.scenes], words, 0.0, source.duration)
-    return {scene.id: (a, b) for scene, (a, b, _) in zip(script.scenes, spans, strict=True)}
+    spans = scene_spans([s.lines for s in script.scenes], words, 0.0, source.duration)
+    return {scene.id: span for scene, span in zip(script.scenes, spans, strict=True)}
+
+
+def scene_spans(texts: list[str], words: list[Word], start: float, end: float) -> list[tuple[float, float]]:
+    """Where each of `texts` (said in order, in one recording) starts and ends. A line starts on
+    its words where they are heard (the script and the transcript lined up word by word); the
+    lines that were not heard share the time between their neighbours by their length."""
+    n = len(texts)
+    if n == 0:
+        return []
+    if not words:
+        return [(a, b) for a, b, _ in split_by_text(texts, words, start, end)]
+    script = Text.of([t.split() for t in texts])
+    heard: list[str] = []
+    heard_word: list[int] = []
+    for index, word in enumerate(words):
+        for token in tokens(word.text):
+            heard.append(token)
+            heard_word.append(index)
+    matches = align(script.tokens, heard).script_to_heard
+    starts: list[float | None] = [start] + [None] * (n - 1)
+    used = -1  # the last heard token an earlier line matched
+    for i in range(n):
+        own = [k for k, owner in enumerate(script.owner) if owner == i]
+        hits = [k for k in own if matches[k] is not None]
+        if hits and len(hits) >= ANCHOR_SHARE * len(own) and i > 0:
+            first = matches[hits[0]]
+            assert first is not None
+            lead = own.index(hits[0])  # its first words were misheard: start that much earlier
+            starts[i] = words[heard_word[max(used + 1, first - lead)]].start
+        if hits:
+            last = matches[hits[-1]]
+            assert last is not None
+            used = max(used, last)
+    previous = start
+    for i in range(1, n):  # keep the lines in order, each long enough to be seen
+        at = starts[i]
+        if at is not None and (at < previous + MIN_LINE or at > end - MIN_LINE * (n - i)):
+            starts[i] = None
+        elif at is not None:
+            previous = at
+    placed = list(starts)
+    i = 0
+    while i < n:
+        j = i + 1
+        while j < n and starts[j] is None:
+            j += 1
+        a = placed[i]
+        b = starts[j] if j < n else end
+        assert a is not None and b is not None
+        if j - i > 1:  # lines i+1..j-1 were not heard: share the stretch by their text
+            stretch = [w for w in words if a - 0.05 <= w.start < b]
+            for k, (t0, _, _) in enumerate(split_by_text(texts[i:j], stretch, a, b)[1:], i + 1):
+                placed[k] = t0
+        i = j
+    bounds = [t for t in placed if t is not None]
+    return [(bounds[i], bounds[i + 1] if i + 1 < n else end) for i in range(n)]
 
 
 def take_spans(project: Project) -> dict[str, tuple[float, float]]:
