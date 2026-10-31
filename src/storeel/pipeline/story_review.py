@@ -14,13 +14,12 @@ import json
 
 from pydantic import BaseModel, Field, ValidationError
 
+from ..config import TEXT_EFFORTS
 from ..jobs import JobContext
 from ..meta import MetaAPIError
 from ..meta.schema import OutputError, parse_output, text_format
 from ..models import Bible, Novel
 from ..prompts import load_prompt
-
-MAX_OUTPUT = 16000
 
 
 class MismatchOut(BaseModel):
@@ -98,26 +97,36 @@ def review_story(ctx: JobContext, novel: Novel, number: int, out, bible: Bible) 
     text = f"CHAPTER {number}:\n<<<\n{chapter.text.strip()}\n>>>\n\nSTORYBOARD:\n" + json.dumps(
         storyboard(out, bible), ensure_ascii=False, indent=1
     )
-    try:
-        result = ctx.client.responses(
-            {
-                "model": model,
-                "store": False,
-                "instructions": load_prompt("story_review"),
-                "input": [
-                    {"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}
-                ],
-                "reasoning": {"effort": ctx.settings.story_review_effort},
-                "max_output_tokens": min(MAX_OUTPUT, ctx.settings.max_output_tokens),
-                "text": text_format("story_review", ReviewOut),
-            },
-            cancel=ctx.cancelled,
-        )
-    except MetaAPIError as exc:
-        if exc.usage:
-            ctx.spend_text(model, exc.usage)
-        ctx.log(f"storyboard review skipped: {exc}")
-        return []
+    effort = ctx.settings.story_review_effort
+    cap = ctx.settings.max_output_tokens
+    while True:
+        try:
+            result = ctx.client.responses(
+                {
+                    "model": model,
+                    "store": False,
+                    "instructions": load_prompt("story_review"),
+                    "input": [
+                        {"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}
+                    ],
+                    "reasoning": {"effort": effort},
+                    "max_output_tokens": cap,
+                    "text": text_format("story_review", ReviewOut),
+                },
+                cancel=ctx.cancelled,
+            )
+            break
+        except MetaAPIError as exc:
+            if exc.usage:
+                ctx.spend_text(model, exc.usage)
+            # A review that thinks past the cap would do so again: once, it thinks one level less.
+            lower = TEXT_EFFORTS[max(0, TEXT_EFFORTS.index(effort) - 1)] if effort in TEXT_EFFORTS else effort
+            if exc.output_limit and lower != effort and effort == ctx.settings.story_review_effort:
+                ctx.log(f"storyboard review ran past {cap} output tokens; trying with effort {lower}")
+                effort = lower
+                continue
+            ctx.log(f"storyboard review skipped: {exc}")
+            return []
     ctx.spend_text(model, result.usage)
     try:
         review, _ = parse_output(ReviewOut, result.text)

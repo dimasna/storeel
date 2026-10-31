@@ -691,6 +691,24 @@ def validate(
                 f"beat {i}: {len(named)} people on screen at once ({', '.join(sorted(named))}): with a scene"
                 " of people up, stand at most one person at the bottom",
             )
+        for s in shows:  # the card shows what happens: people acting together, or a face up close
+            card = props.get(s.prop)
+            if card is None:
+                continue
+            if card.backdrop and len(s.characters) == 2:
+                need(
+                    False,
+                    f"beat {i}: the empty place {s.prop!r} is behind two people standing: show what happens"
+                    " between them or what they talk about, or close on the face of the one the words hit",
+                )
+            elif (
+                not card.backdrop and card.framing != "close-up" and len(card.refs) == 1 and card.people <= 1
+            ):
+                need(
+                    False,
+                    f"beat {i}: the card {s.prop!r} shows {card.refs[0]} alone in a place: show them with the"
+                    " one they act with, or close on their face (framing close-up) as a reaction",
+                )
         if b.speaker != "narrator" and b.speaker in people:  # the voiced character is on screen
             on = {who.get(c, c) for s in shows for c in s.characters}
             on |= {r for s in shows for r in scene_people(s)}
@@ -701,8 +719,11 @@ def validate(
             )  # their message
             quoted = _quoted_show(b)  # the screen up while their words are said
             scene = props.get(quoted.prop)
-            face = scene is not None and scene.framing == "close-up" and scene_people(quoted) == {person}
-            if not texting and not face and person not in {who.get(c, c) for c in quoted.characters}:
+            inside = scene_people(quoted)
+            face = scene is not None and scene.framing == "close-up" and inside == {person}
+            two_shot = not quoted.characters and person in inside and len(inside) > 1  # an act between two
+            standing = {who.get(c, c) for c in quoted.characters}
+            if not texting and not face and not two_shot and person not in standing:
                 others = [c for c in quoted.characters if who.get(c, c) != person]
                 instead = (
                     f" ({' and '.join(others)} {'stand' if len(others) > 1 else 'stands'} there instead)"
@@ -713,7 +734,17 @@ def validate(
                     + (instead if others else "")
                     + f": stand {b.speaker!r} there while their words are said (viewers take the standing"
                     " figure for the one speaking)"
-                    + ("; a scene shown then has the one they talk to, not them" if person in on else ""),
+                    + (
+                        "; a scene shown then has the one they talk to, not them"
+                        if others and person in on
+                        else ""
+                    )
+                    + (
+                        "; only an act between two people (a whisper in the ear, a slap) may be a scene of"
+                        " the two of them, with nobody standing"
+                        if not others
+                        else ""
+                    ),
                 )
     alone = [i for i, b in enumerate(out.beats, 1) if not b.show.characters]
     allowed = max(2, -(-len(out.beats) // 4))  # one beat in four, rounded up

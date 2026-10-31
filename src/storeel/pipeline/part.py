@@ -311,12 +311,15 @@ class Painter:
         return best
 
 
+CALM = "a calm, neutral face, not smiling"  # a standing figure is on screen in sad beats and happy ones
+
+
 def _portrait_text(name: str, description: str, outfit: str, subject: str, style: str) -> str:
     return (
         f"Full-body character portrait of {name}, a {subject}: {description.rstrip('.')}. Wearing:"
         f" {outfit.rstrip('.')}. One figure alone, standing, facing the viewer, the whole body visible from"
-        f" head to feet with space around it, arms relaxed, empty hands, on a {PLAIN}. Style: {style}."
-        f" {NO_TEXT}"
+        f" head to feet with space around it, {CALM}, arms relaxed, empty hands, on a {PLAIN}."
+        f" Style: {style}. {NO_TEXT}"
     )
 
 
@@ -361,8 +364,8 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
             text = (
                 f"The {c.subject} in the reference is {c.name}: {c.description.rstrip('.')}. Draw {c.name}"
                 f" again, the same face, hair, body and age, now wearing: {outfit.rstrip('.')}. One figure"
-                f" alone, standing, facing the viewer, the whole body visible from head to feet, empty hands,"
-                f" on a {PLAIN}."
+                f" alone, standing, facing the viewer, the whole body visible from head to feet, {CALM},"
+                f" empty hands, on a {PLAIN}."
                 f" Style: {style}. {NO_TEXT}"
             )
             request = Request([_ref_part(painter.path("novel", base)), _text(text)], PORTRAIT, False, [cid])
@@ -424,7 +427,9 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
             )
             acting = (
                 " The people act the moment out in its place, caught in the middle of what they are"
-                " doing: not posed side by side facing the viewer like a portrait."
+                " doing: not posed side by side facing the viewer like a portrait. A medium shot: the"
+                " people fill most of the picture's height, their faces and feelings clearly visible,"
+                " the place around them."
                 if (prop.refs or prop.people) and prop.framing != "close-up"
                 else ""
             )
