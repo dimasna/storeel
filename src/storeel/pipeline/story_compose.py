@@ -319,7 +319,10 @@ OBJECT_H = {"small": 0.24, "medium": 0.34, "large": 0.46}  # tall objects are si
 NOTE_Y = 0.30
 CHAT_Y, CHAT_STEP, CHAT_W = 0.22, 0.135, 0.80
 SLOT_X = {"left": 0.24, "right": 0.76}
-STAND_H, STAND_BOTTOM = 0.52, 1.02
+# A standing character: 42% of the frame tall, feet on the bottom edge. Over a sharp speaker its head
+# comes up to about their mouth, at the side (at 52% of the frame it reached their nose).
+STAND_H, STAND_BOTTOM = 0.42, 1.0
+STAND_W = 0.45  # of the width at most (a figure with arms out); two never meet in the middle
 BADGE_XY = (0.04, 0.035)
 BADGE_SIZE = 0.026  # of the height: small enough to sit above the platforms' top bar
 NAME_SIZE, NAME_GAP = 0.034, 0.006  # a voiced character's name, just above their head
@@ -462,11 +465,13 @@ class Sprites:
                 continue
             if info is not None and info.cutout:
                 sprite = self._cached(
-                    ("stand", cid), lambda p=picture: cutout_sprite(p, round(0.56 * W), round(STAND_H * H))
+                    ("stand", cid),
+                    lambda p=picture: cutout_sprite(p, round(STAND_W * W), round(STAND_H * H)),
                 )
-            else:  # SAM missed: a framed portrait instead
+            else:  # SAM missed: a small framed portrait instead, no taller than a standing figure
                 sprite = self._cached(
-                    ("standcard", cid), lambda p=picture: card(p, round(0.46 * W), round(0.4 * H))
+                    ("standcard", cid),
+                    lambda p=picture: card(p, round(0.34 * W), round(0.8 * STAND_H * H)),
                 )
             x = round(SLOT_X[slot] * W) - sprite.width // 2
             y = round(STAND_BOTTOM * H) - sprite.height

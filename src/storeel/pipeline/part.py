@@ -46,6 +46,7 @@ VERSION = 1
 FACE_CONFIDENCE = 0.3
 SHAPE_SIZE = {"wide": LANDSCAPE, "tall": PORTRAIT, "square": SQUARE}
 PLAIN = "plain flat light grey background with nothing else in the picture"
+PERSON = "person"  # what SAM is asked for when a character's own word finds nothing
 
 
 # ---- the bible --------------------------------------------------------------------------------
@@ -224,6 +225,18 @@ class Painter:
             with Image.open(files.path(job.key)) as image:
                 picture.width, picture.height = image.size
                 picture.cutout = image.mode == "RGBA"
+            if not picture.cutout and job.subject and job.kind in ("character", "variant"):
+                # Drawn before SAM was asked for a person too: try the cut-out again (a SAM call,
+                # no new drawing), so the figure stands instead of showing as a framed card.
+                try:
+                    made = self._cut(job, files.path(job.key).read_bytes())
+                except MetaAPIError as exc:
+                    made = None
+                    self.ctx.log(f"SAM: cutting out {job.id} failed ({exc}); it stays a card")
+                if made is not None:
+                    files.write_bytes(job.key, made[0])
+                    picture.width, picture.height, picture.cutout = made[1], made[2], True
+                    self.ctx.log(f"SAM: {job.id} cut out as a person ({made[1]}x{made[2]})")
             before = self.earlier.get(job.id)
             if before is not None and before.key == job.key:  # checked when it was drawn
                 picture.checked, picture.problems = before.checked, before.problems
@@ -273,7 +286,7 @@ class Painter:
         if job.screen:  # drawn on a green screen: keyed out here
             png, width, height, cut = self._keyed(job, request, png, width, height)
         elif job.subject:
-            made = cut_out(self.ctx, png, job.subject)
+            made = self._cut(job, png)
             if made is not None:
                 png, width, height = made
                 cut = True
@@ -282,6 +295,15 @@ class Painter:
         shape = f"{width}x{height}" + (" cut out" if cut else "")
         self.ctx.log(f"Muse Image: {job.id} ({job.display}) {shape} in {seconds:.0f}s")
         return Take(png, width, height, cut)
+
+    def _cut(self, job: Job, png: bytes) -> tuple[bytes, int, int] | None:
+        """The subject cut out by SAM. A character SAM misses under its own word ("man") is
+        looked for as a "person": on the real API, SAM missed a young man drawn in a stylised 3D
+        look as "man" and found him as "person"."""
+        made = cut_out(self.ctx, png, job.subject)
+        if made is None and job.kind in ("character", "variant") and job.subject != PERSON:
+            made = cut_out(self.ctx, png, PERSON)
+        return made
 
     def _keyed(
         self, job: Job, request: Request, png: bytes, width: int, height: int
@@ -557,25 +579,24 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
 
     ctx.log(f"part {n}: {len(first) + len(second)} pictures to draw or reuse ({len(characters)} characters)")
     pictures: dict[str, PartPicture] = {}
-    earlier = project.part_pictures or {}
+    redrawn = {j.id for j in first if j.kind == "character"}
     for cid in characters:  # characters whose portrait for this chapter is already drawn
-        look = chapter_look(bible.characters[cid], n)
+        c = bible.characters[cid]
+        look = chapter_look(c, n)
         if look and look.image and painter.exists("novel", look.image):
-            before = earlier.get(cid)
-            checked = before is not None and before.key == look.image  # checked when it was drawn
-            with Image.open(painter.path("novel", look.image)) as image:
-                pictures[cid] = PartPicture(
-                    id=cid,
-                    kind="character",
-                    display="standing",
-                    scope="novel",
-                    key=look.image,
-                    cutout=image.mode == "RGBA",
-                    width=image.width,
-                    height=image.height,
-                    checked=checked and before.checked,
-                    problems=list(before.problems) if checked else [],
-                )
+            # Reused as it is (with its check), or cut out by SAM now if it never was. One about
+            # to be drawn again is not cut out first: it only stays if the new drawing fails.
+            stored = Job(
+                cid,
+                "character",
+                "standing",
+                "novel",
+                look.image,
+                Request([], PORTRAIT, False, []),
+                subject="" if cid in redrawn else c.subject,
+                name=c.name,
+            )
+            pictures[cid] = painter.draw(stored)
     with ThreadPoolExecutor(ctx.settings.image_parallel) as pool:
         for picture in pool.map(painter.draw, first):
             kept = pictures.get(picture.id)

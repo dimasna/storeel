@@ -18,9 +18,9 @@ CARD_WIDTH = 0.84  # of the width
 CARD_CENTER_Y = {"lower": 0.30, "middle": 0.27}
 CARD_MAX_HEIGHT = {"lower": 0.40, "middle": 0.34}
 OBJECT_BOX = {"lower": (0.64, 0.34, 0.33), "middle": (0.6, 0.28, 0.28)}  # width, height, centre y
-CHARACTER_HEIGHT = 0.50  # a standing cut-out: its feet just below the bottom edge
-CHARACTER_BOTTOM = 1.02
-CHARACTER_MAX_WIDTH = 0.56
+CHARACTER_HEIGHT = 0.42  # a standing cut-out, as in a novel part: its head about level with the mouth
+CHARACTER_BOTTOM = 1.0  # its feet on the bottom edge
+CHARACTER_MAX_WIDTH = 0.45
 CHARACTER_X = (0.27, 0.73)  # left or right slot, away from the speaker's face
 
 
