@@ -10,8 +10,8 @@ item (a note, chat bubbles, a photo card, a scene card or a cut-out object) in t
 and up to two characters standing at the bottom on their side. The first time the storyteller
 voices a character (a beat quoting them), that character's name shows over their head. The
 hook has no pictures and keeps the speaker sharp; after it the speaker is blurred behind the
-story (style permitting). The poll and the end card are fixed screens; a "Part N" badge is up
-from the first frame.
+story, or only while a card is up, as the style says. The poll and the end card are fixed
+screens; a "Part N" badge is up from the first frame.
 """
 
 from __future__ import annotations
@@ -382,6 +382,18 @@ class Sprites:
     def label(self, character: str) -> str:
         return self.labels.get(character) or self.labels.get(self.person(character)) or ""
 
+    def has_card(self, show: StoryShow) -> bool:
+        """Whether a beat's screen shows a framed picture: a photo, or a place (or a scene that
+        could not be cut out). Notes, chats, cut-outs and standing characters are not cards."""
+        if show.note.text or show.chat:
+            return False
+        if show.photo and self.image(show.photo) is not None:
+            return True
+        if show.prop and self.image(show.prop) is not None:
+            info = self.pictures.get(show.prop)
+            return not (info is not None and info.cutout)
+        return False
+
     def layers(
         self, show: StoryShow, name: str = "", sides: list[str] | None = None
     ) -> list[tuple[Image.Image, tuple[int, int]]]:
@@ -612,6 +624,8 @@ class PartCompositor(Compositor):
             live = now
             behind = style.speaker_behind
             blur = behind == "blur"
+            if behind == "card":
+                blur = line.kind == "beat" and line.show is not None and sprites.has_card(line.show)
             if behind == "auto":
                 boxes = faces.get(line.take)
                 if boxes is None:

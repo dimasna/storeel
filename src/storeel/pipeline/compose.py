@@ -101,10 +101,15 @@ class Placed:
     box: Region
 
 
+def is_card(moment: Moment) -> bool:
+    """Whether a moment's picture shows as a framed card (a cut-out SAM missed is one too)."""
+    return not (moment.display == "cutout" and moment.asset is not None and moment.asset.cutout)
+
+
 def place(moment: Moment, picture: Image.Image, style: Style) -> Placed:
     """A card or cut-out sprite for `moment`, placed where the layout puts it."""
     position = style.caption_position
-    if moment.display == "cutout" and moment.asset is not None and moment.asset.cutout:
+    if not is_card(moment):
         standing = picture.height >= picture.width * 1.15  # a tall cut-out: a character standing
         if standing:
             height = round(CHARACTER_HEIGHT * H)
@@ -332,7 +337,7 @@ class Compositor:
                 continue
             placed = place(moment, picture, style)
             self.cards.append(_Card(start, end, placed.image, placed.center, ident=len(self.cards) + 1))
-            blur = style.speaker_behind == "blur"
+            blur = style.speaker_behind == "blur" or (style.speaker_behind == "card" and is_card(moment))
             if style.speaker_behind == "auto":
                 hit = covered(placed.box, moment.faces)
                 if hit is None:

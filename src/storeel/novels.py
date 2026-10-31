@@ -43,14 +43,14 @@ def add_chapter(
 
 
 def chapter_style(novel: Novel) -> Style:
-    """A chapter reel's starting style: the novel's look and watermark; the speaker sharp for the
-    hook and blurred behind the story."""
+    """A chapter reel's starting style: the novel's look and watermark; the speaker sharp, and
+    blurred only while a card (a place or a photo) is up."""
     return Style(
         visual_style=novel.visual_style,
         watermark=novel.watermark,
         language=novel.language,
         picture_layout="cards",
-        speaker_behind="blur",
+        speaker_behind="card",
     )
 
 

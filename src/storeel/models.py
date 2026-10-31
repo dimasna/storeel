@@ -37,8 +37,9 @@ class Style(Strict):
     visuals: Literal["off", "few", "balanced", "many"] = "balanced"
     # "cards": pictures float over the speaker as cards and cut-outs; "full": they fill the screen.
     picture_layout: Literal["cards", "full"] = "cards"
-    # What the speaker looks like behind a card or cut-out: "auto" blurs only when it covers the face.
-    speaker_behind: Literal["blur", "sharp", "auto"] = "blur"
+    # What the speaker looks like behind a card or cut-out: "auto" blurs only when it covers the face,
+    # "card" only behind a framed picture (cut-outs and standing characters keep the speaker sharp).
+    speaker_behind: Literal["blur", "sharp", "auto", "card"] = "blur"
     captions: Literal["pill", "karaoke", "clean", "off"] = "pill"
     caption_color: str = Field("#E50914", pattern=HEX_COLOR)
     caption_position: Literal["lower", "middle"] = "lower"
