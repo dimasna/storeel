@@ -699,19 +699,30 @@ def validate(
             texting = any(
                 name and name in m.sender.casefold() for s in shows for m in s.chat
             )  # their message
-            need(
-                person in on or texting,
-                f"beat {i}: {b.speaker!r} is quoted but not on screen: show them while their words are said",
-            )
-            quoted = _quoted_show(b)  # and the biggest thing on screen while they are said
-            standing = [c for c in quoted.characters if who.get(c, c) != person]
-            need(
-                not (person in scene_people(quoted) and standing),
-                f"beat {i}: {b.speaker!r} speaks but is only a small figure inside the scene while"
-                f" {' and '.join(standing)} {'stand' if len(standing) > 1 else 'stands'} at the bottom:"
-                f" stand {b.speaker!r} at the bottom while their words are said (viewers take the"
-                " biggest figure for the one speaking), or show the scene with nobody standing",
-            )
+            quoted = _quoted_show(b)  # the screen up while their words are said
+            scene = props.get(quoted.prop)
+            face = scene is not None and scene.framing == "close-up" and scene_people(quoted) == {person}
+            if not texting and not face and person not in {who.get(c, c) for c in quoted.characters}:
+                others = [c for c in quoted.characters if who.get(c, c) != person]
+                instead = (
+                    f" ({' and '.join(others)} {'stand' if len(others) > 1 else 'stands'} there instead)"
+                )
+                need(
+                    False,
+                    f"beat {i}: {b.speaker!r} is quoted but does not stand at the bottom"
+                    + (instead if others else "")
+                    + f": stand {b.speaker!r} there while their words are said (viewers take the standing"
+                    " figure for the one speaking)"
+                    + ("; a scene shown then has the one they talk to, not them" if person in on else ""),
+                )
+    alone = [i for i, b in enumerate(out.beats, 1) if not b.show.characters]
+    allowed = max(2, -(-len(out.beats) // 4))  # one beat in four, rounded up
+    need(
+        len(alone) <= allowed,
+        f"nobody stands at the bottom in beats {', '.join(map(str, alone))} ({len(alone)} of"
+        f" {len(out.beats)}): build almost every beat on a character standing there (the one it is about,"
+        f" or the one who watches what the card shows), at most {allowed} beats without",
+    )
     for place, where in again.items():
         beats = ", ".join(map(str, where))
         need(
