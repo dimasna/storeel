@@ -1,0 +1,96 @@
+[
+ {
+  "novel": "Rumah Warisan",
+  "intro": "AN EXAMPLE of the structure and of how each beat's pictures are chosen, from another, made-up novel: Rumah Warisan, part two. Its part one ended with Sekar finding her late father's will folded in an old batik cloth; its bible already held sekar, arya, bu_laksmi and pak_wiryo. Take its shape - who stands in each beat, when a variant, prop, photo, note, tag or switch is used - never its story or its words. Fields it leaves out are empty in your answer.",
+  "script": {
+   "chapter_title": "Titipan Bapak",
+   "hook": "Lanjut part dua novel Rumah Warisan... surat wasiat yang disembunyiin bapaknya ternyata bukan rahasia paling besar di rumah itu.",
+   "hook_direction": "pelan, misterius",
+   "beats": [
+    {"act": "bridge", "text": "Di part satu, Sekar nemu surat wasiat almarhum bapaknya, kelipat di dalem kain batik tua. Isinya: \"Rumah ini untuk Sekar.\"", "speaker": "narrator", "see": "Sekar in her late father's bedroom, holding up the will she found folded in an old batik cloth", "show": {"characters": ["sekar"], "prop": "wasiat", "tag": "SEBELUMNYA"}},
+    {"act": "rise", "text": "Masalahnya, dari dulu semua orang tahu rumah joglo itu bakal jadi punya kakaknya, Mas Arya.", "speaker": "narrator", "see": "Arya, the elder brother, standing proudly in the joglo's open front hall", "show": {"characters": ["arya"], "photo": "joglo"}},
+    {"act": "setup", "text": "Malam itu Sekar nunjukin surat itu ke ibunya, Bu Laksmi. Belum selesai dibaca, ibunya udah pucat: \"Kamu nemu ini di mana?\"", "speaker": "bu_laksmi", "see": "Sekar showing the will to her mother Bu Laksmi at the dining table at night; Bu Laksmi turning pale", "show": {"characters": ["sekar", "bu_laksmi"]}},
+    {"act": "rise", "text": "Bukannya seneng, Bu Laksmi malah ngelipet surat itu, terus nyimpen di balik kebayanya: \"Jangan bilang siapa-siapa dulu.\"", "speaker": "bu_laksmi", "see": "Bu Laksmi folding the will and tucking it into her kebaya, glancing at the door", "direction": "berbisik", "show": {"characters": ["bu_laksmi"], "prop": "wasiat"}},
+    {"act": "rise", "text": "Tapi paginya, Mas Arya udah nungguin di pendopo, mukanya merah: \"Jadi kamu mau ngusir kakakmu sendiri?\"", "speaker": "arya", "see": "Arya waiting in the pendopo at dawn, red-faced with anger, confronting Sekar", "direction": "marah", "show": {"characters": ["arya", "sekar"]}},
+    {"act": "turn", "text": "Sekar kaget. Yang tahu soal surat itu cuma ibunya. Berarti... ibunya sendiri yang cerita.", "speaker": "narrator", "see": "Sekar realising, shocked; then Bu Laksmi turning away in the doorway", "direction": "kaget, pelan", "show": {"characters": ["sekar"]}, "then": {"at": "Berarti... ibunya", "show": {"characters": ["bu_laksmi"]}}},
+    {"act": "rise", "text": "Istri Mas Arya, Rina, langsung nyamber: \"Rumah ini dari dulu diurus Mas Arya. Kamu kan udah sepuluh tahun di Jakarta.\"", "speaker": "rina", "see": "Rina, Arya's wife, arms crossed beside her husband, siding with him", "show": {"characters": ["rina", "arya"]}},
+    {"act": "rise", "text": "Pas semua ribut, Mbah Karto, tukang kebun yang udah ikut keluarga itu empat puluh tahun, cuma diem di pojok pendopo.", "speaker": "narrator", "see": "Mbah Karto, the old gardener, standing silently in a corner of the pendopo", "show": {"characters": ["mbah_karto"]}},
+    {"act": "rise", "text": "Malamnya, Sekar mergokin Mas Arya sama Rina di kamar bapak, lagi ngebongkar lemari tua pakai senter.", "speaker": "narrator", "see": "Sekar at the bedroom door at night; then Arya and Rina rummaging through their father's old wardrobe by torchlight", "show": {"characters": ["sekar"]}, "then": {"at": "mergokin Mas Arya sama Rina", "show": {"prop": "bongkar_lemari"}}},
+    {"act": "rise", "text": "Mas Arya malah nyentak: \"Surat itu pasti palsu. Bapak nggak mungkin ninggalin rumah ini buat anak yang kabur.\"", "speaker": "arya", "see": "Arya, furious, pointing at Sekar across the dark bedroom", "direction": "teriak", "show": {"characters": ["arya"], "tag": "RED FLAG"}},
+    {"act": "rise", "text": "Kata \"kabur\" itu nyakitin. Sepuluh tahun lalu, bapaknya sendiri yang nganter Sekar ke stasiun, nyuruh dia kuliah setinggi-tingginya.", "speaker": "narrator", "see": "a memory: their father hugging the teenage Sekar goodbye on a railway platform", "direction": "lirih", "show": {"prop": "antar_stasiun", "tag": "10 TAHUN LALU"}},
+    {"act": "rise", "text": "Sekar balik ke kamarnya, nangis sambil megangin kain batik tempat surat itu dulu disembunyiin.", "speaker": "narrator", "see": "Sekar in tears in her room, holding the old batik cloth", "direction": "menahan tangis", "show": {"characters": ["sekar_nangis"], "prop": "batik_tua"}},
+    {"act": "rise", "text": "Pintunya diketuk pelan. Mbah Karto berdiri di situ, bawa kotak kayu kecil: \"Ini titipan bapak, Mbak. Pesannya, kasih kalau rumah ini mulai ribut.\"", "speaker": "mbah_karto", "see": "Mbah Karto at Sekar's door at night, holding out a small carved wooden box to the teary Sekar", "show": {"characters": ["mbah_karto", "sekar_nangis"], "prop": "kotak_kayu"}},
+    {"act": "turn", "text": "Isinya bukan uang, bukan perhiasan. Cuma foto lama: bapaknya lagi gendong bayi, yang bukan Sekar, bukan juga Mas Arya.", "speaker": "narrator", "see": "an old faded photograph: their father holding a baby who is neither Sekar nor Arya", "direction": "kaget", "show": {"prop": "foto_lama", "tag": "PLOT TWIST"}},
+    {"act": "rise", "text": "Di balik foto itu ada tulisan tangan bapaknya: \"Rumah ini untuk Sekar, supaya dia yang menjaga adiknya.\"", "speaker": "narrator", "see": "Sekar turning the photo over and reading her father's handwriting on the back", "show": {"characters": ["sekar"], "note": {"text": "Rumah ini untuk Sekar, supaya dia yang menjaga adiknya.", "style": "paper"}}},
+    {"act": "cliffhanger", "text": "Adik? Sekar nggak pernah punya adik. Dan dari balik pintu, Bu Laksmi ngeliatin mereka berdua... tangannya gemeteran.", "speaker": "narrator", "see": "Sekar staring at the photo; then Bu Laksmi watching from behind the half-open door, her hands trembling", "direction": "berbisik", "show": {"characters": ["sekar"]}, "then": {"at": "dari balik pintu", "show": {"characters": ["bu_laksmi"]}}}
+   ],
+   "poll": {"text": "Kalau lo jadi Sekar: tanya Ibu malam ini juga, atau cari adik itu diem-diem dulu? Komen A atau B.", "a": "Tanya Ibu malam ini", "b": "Cari adiknya diem-diem"},
+   "cta": "Part dua novel Rumah Warisan lengkapnya ada di link bio. Follow biar nggak ketinggalan part tiga.",
+   "characters": [
+    {"id": "rina", "name": "Rina", "label": "rina", "role": "istri Mas Arya", "description": "a slim Javanese woman in her early thirties, light brown skin, a sharp oval face with thin arched eyebrows, straight black hair to the shoulders", "outfit": "a cream silk blouse, a long dark batik skirt, gold bangles, low heels, empty hands", "subject": "woman", "slot": "right"},
+    {"id": "mbah_karto", "name": "Mbah Karto", "label": "mbah karto", "role": "tukang kebun keluarga selama empat puluh tahun", "description": "a thin, slightly stooped Javanese man in his early seventies, dark weathered skin, a lined gentle face with a sparse white moustache, short white hair", "outfit": "a faded brown lurik shirt, loose black trousers, rubber sandals, empty hands", "subject": "old man", "slot": "left"}
+   ],
+   "looks": [
+    {"id": "sekar", "outfit": "a plain white blouse with rolled sleeves, a long indigo batik skirt, a thin silver watch, flat sandals, empty hands"},
+    {"id": "arya", "outfit": "a dark green short-sleeved batik shirt, black trousers, a leather belt, black loafers, empty hands"},
+    {"id": "bu_laksmi", "outfit": "a lilac kebaya over a brown batik jarik, grey hair in a low bun, small gold earrings, flat slippers, empty hands"},
+    {"id": "pak_wiryo", "outfit": "a white short-sleeved shirt, grey trousers, a black peci, leather sandals, empty hands"}
+   ],
+   "variants": [
+    {"id": "sekar_remaja", "base": "sekar", "change": "ten years younger, about fourteen: a rounder face, hair in one long braid, a white school blouse and a navy skirt, black school shoes", "persistent": false},
+    {"id": "sekar_nangis", "base": "sekar", "change": "now in tears: eyes red and wet, cheeks streaked, lips pressed together, the same clothes", "persistent": false}
+   ],
+   "props": [
+    {"id": "bongkar_lemari", "description": "a dim bedroom at night lit by a torch: Arya kneels before an open carved teak wardrobe, pulling out folded cloths, while Rina holds the torch and searches a drawer", "shape": "wide", "size": "large", "refs": ["arya", "rina"], "people": 2, "framing": "full", "backdrop": true},
+    {"id": "antar_stasiun", "description": "on an old railway platform in the morning, Pak Wiryo hugs the teenage Sekar goodbye beside her small brown suitcase", "shape": "wide", "size": "large", "refs": ["pak_wiryo", "sekar_remaja"], "people": 2, "framing": "full"},
+    {"id": "wasiat", "description": "a folded will on old cream paper with a typed heading and a signature over a stamp, the writing too small to read", "subject": "folded will", "shape": "square", "size": "medium", "recurring": true},
+    {"id": "batik_tua", "description": "an old folded brown sogan batik cloth with a faded parang pattern", "subject": "folded batik cloth", "shape": "square", "size": "small", "recurring": true},
+    {"id": "kotak_kayu", "description": "a small carved teak box with a brass clasp, its lid closed", "subject": "wooden box", "shape": "square", "size": "small"},
+    {"id": "foto_lama", "description": "a faded black-and-white photograph with a white border: a man in a black peci holding a baby wrapped in batik cloth", "subject": "old photograph", "shape": "square", "size": "medium"}
+   ],
+   "photos": [
+    {"id": "joglo", "description": "the wide open front hall of an old Javanese joglo house at dawn, carved teak pillars, a polished tiled floor, a rattan bench, a frangipani tree in the garden beyond", "title": "Joglo Keluarga Wiryo"}
+   ],
+   "bible_notes": [
+    {"id": "sekar", "note": "Sekar menerima kotak titipan almarhum bapaknya dari Mbah Karto; isinya foto bapaknya menggendong bayi yang bukan Sekar maupun Arya."},
+    {"id": "arya", "note": "Arya menuduh surat wasiat itu palsu dan menggeledah kamar almarhum bapaknya bersama Rina."}
+   ]
+  }
+ },
+ {
+  "novel": "Kampung Cahaya",
+  "intro": "AN EXAMPLE of the structure and of how each beat's pictures are chosen, from another, made-up novel: Kampung Cahaya, part three. Its part two ended with Laras finding a letter under her door; its bible already held laras. Take its shape - who stands in each beat, when a prop, photo, note, tag or switch is used - never its story or its words. Fields it leaves out are empty in your answer.",
+  "script": {
+   "chapter_title": "Surat dari Pak RT",
+   "hook": "Lanjut part tiga novel Kampung Cahaya... surat kaleng buat cewek ini ternyata ditandatangani orang yang nggak mungkin nulis surat.",
+   "hook_direction": "misterius",
+   "beats": [
+    {"act": "bridge", "text": "Di part dua, Laras, cewek yang baru pindah ke kontrakan di gang sempit, nemu amplop nyelip di bawah pintunya. Isinya cuma: \"Jangan percaya Bu Tini.\"", "speaker": "narrator", "see": "Laras in her doorway holding up the anonymous letter", "show": {"characters": ["laras"], "note": {"text": "Jangan percaya Bu Tini.", "style": "paper"}, "tag": "SEBELUMNYA"}},
+    {"act": "setup", "text": "Besoknya, Bu Tini, tetangga sebelah, dateng bawa rendang. Senyumnya lebar banget: \"Neng, kalau butuh apa-apa, bilang Ibu ya.\"", "speaker": "bu_tini", "see": "Bu Tini smiling at Laras's green door, Laras facing her", "show": {"characters": ["laras", "bu_tini"], "photo": "kontrakan"}},
+    {"act": "rise", "text": "Laras cuma bisa senyum kaku: \"Makasih, Bu.\" Rendangnya dia taruh di meja... dan nggak disentuh sama sekali.", "speaker": "laras", "see": "Laras with a stiff smile, and the untouched plate of rendang", "show": {"characters": ["laras"], "prop": "rendang"}},
+    {"act": "rise", "text": "Malamnya, dia baca ulang surat itu di bawah lampu. Dan baru sadar, di paling bawah ada tanda tangan.", "speaker": "narrator", "see": "Laras reading the unfolded letter under a lamp", "show": {"characters": ["laras"], "prop": "surat"}},
+    {"act": "turn", "text": "Dan plot twist-nya... itu tanda tangan Pak RT. Pak RT yang udah meninggal tiga tahun lalu.", "speaker": "narrator", "see": "the letter and its signature: the reveal", "direction": "kaget", "show": {"prop": "surat", "tag": "PLOT TWIST"}},
+    {"act": "cliffhanger", "text": "Terus ada amplop kedua nyelip di bawah pintu. Isinya: \"Dia udah tahu kamu baca surat pertama.\"", "speaker": "narrator", "see": "Laras frozen, holding the second letter", "direction": "berbisik", "show": {"characters": ["laras"], "note": {"text": "Dia udah tahu kamu baca surat pertama.", "style": "paper"}}}
+   ],
+   "poll": {"text": "Kalau lo jadi Laras: lapor ke warga, atau pura-pura nggak tahu? Komen A atau B.", "a": "Lapor ke warga", "b": "Pura-pura nggak tahu"},
+   "cta": "Part tiga novel Kampung Cahaya lengkapnya ada di link bio. Follow biar nggak ketinggalan part empat.",
+   "characters": [
+    {"id": "bu_tini", "name": "Bu Tini", "label": "bu tini", "role": "tetangga sebelah Laras", "description": "a plump Indonesian woman in her fifties, light brown skin, a round face with a wide warm smile and laugh lines", "outfit": "a maroon hijab, a long floral batik house dress, plastic sandals, empty hands", "subject": "woman", "slot": "right"}
+   ],
+   "looks": [
+    {"id": "laras", "outfit": "a faded grey hoodie over a white t-shirt, black track pants, rubber sandals, empty hands"}
+   ],
+   "variants": [],
+   "props": [
+    {"id": "rendang", "description": "a white enamel plate of dark beef rendang half covered with a banana leaf", "subject": "plate of rendang", "shape": "square", "size": "small"},
+    {"id": "surat", "description": "an unfolded handwritten letter on lined paper with a smudged ink signature at the bottom, the writing too small to read", "subject": "letter", "shape": "square", "size": "medium", "recurring": true}
+   ],
+   "photos": [
+    {"id": "kontrakan", "description": "a small rented house with a green door in a narrow Jakarta alley in the morning, potted plants, a motorbike parked along the wall", "title": "Gang Kenanga"}
+   ],
+   "bible_notes": [
+    {"id": "laras", "note": "Surat pertama untuk Laras bertanda tangan Pak RT, yang sudah meninggal tiga tahun lalu; malamnya datang surat kedua."}
+   ]
+  }
+ }
+]

@@ -48,7 +48,7 @@ from ..models import (
     Turn,
     text_model_name,
 )
-from ..prompts import load_prompt
+from ..prompts import load_examples, load_prompt
 from . import story_review
 from .align import Text, align
 
@@ -278,7 +278,8 @@ def opens_correctly(hook: str, opening: str) -> bool:
 
 def system_prompt(novel: Novel, from_video: bool = False) -> str:
     """The script writer's rules: what to say (or, for a part made from the user's own video, how
-    to split what they said), then the rules for the pictures and the character bible."""
+    to split what they said), then the rules for the pictures and the character bible, then a
+    whole example answer from another novel."""
     w = wording(novel.language, novel.narration)
     values = {
         "PART_WORD": w.part_word,
@@ -298,7 +299,30 @@ def system_prompt(novel: Novel, from_video: bool = False) -> str:
     text = load_prompt("story_video" if from_video else "story") + "\n\n" + load_prompt("story_pictures")
     for key, value in values.items():
         text = text.replace(f"<<{key}>>", value)
-    return text
+    example = example_for(novel.title)
+    return f"{text}\n\n{example['intro']}\n{example_json(example['script'])}"
+
+
+def _same_novel(a: str, b: str) -> bool:
+    return " ".join(a.lower().split()) == " ".join(b.lower().split())
+
+
+def example_for(title: str) -> dict:
+    """The example answer from another novel than `title`: a novel shown its own example copies
+    it word for word, and would learn what its later parts say."""
+    return next(e for e in load_examples() if not _same_novel(e["novel"], title))
+
+
+def example_json(script: dict) -> str:
+    """An answer as JSON with one beat (and one list item) per line: valid, and easy to read."""
+    fields = []
+    for key, value in script.items():
+        if isinstance(value, list) and value and all(isinstance(x, dict) for x in value):
+            items = ",\n".join("  " + json.dumps(x, ensure_ascii=False) for x in value)
+            fields.append(f"{json.dumps(key)}: [\n{items}\n ]")
+        else:
+            fields.append(f"{json.dumps(key)}: {json.dumps(value, ensure_ascii=False)}")
+    return "{" + ",\n ".join(fields) + "}"
 
 
 # ---- what the model answers (lenient: every field has a default) ------------------------------
@@ -557,16 +581,6 @@ def _shown(out: StoryOut) -> set[str]:
     return ids
 
 
-def _quoted_show(b: BeatOut) -> ShowOut:
-    """The screen that is up while a beat's quoted words are said: the one after its switch when
-    the quote comes after the switch's words."""
-    at = b.then.at.strip().lower()
-    text = b.text.lower()
-    quote = min((k for k in (text.find('"'), text.find("\u201c")) if k >= 0), default=-1)
-    switch = text.find(at) if at else -1
-    return b.then.show if 0 <= switch <= quote else b.show
-
-
 def validate(
     out: StoryOut, novel: Novel, number: int, bible: Bible, continuing: bool, heard: list[str] | None = None
 ) -> list[str]:
@@ -691,23 +705,20 @@ def validate(
                 f"beat {i}: {len(named)} people on screen at once ({', '.join(sorted(named))}): with a scene"
                 " of people up, stand at most one person at the bottom",
             )
-        for s in shows:  # the card shows what happens: people acting together, or a face up close
+        for s in shows:  # one person alone in a scene is that person standing (a variant, if need be)
             card = props.get(s.prop)
-            if card is None:
-                continue
-            if card.backdrop and len(s.characters) == 2:
-                need(
-                    False,
-                    f"beat {i}: the empty place {s.prop!r} is behind two people standing: show what happens"
-                    " between them or what they talk about, or close on the face of the one the words hit",
-                )
-            elif (
-                not card.backdrop and card.framing != "close-up" and len(card.refs) == 1 and card.people <= 1
+            if (
+                card is not None
+                and not card.backdrop
+                and card.framing != "close-up"
+                and len(card.refs) == 1
+                and card.people <= 1
             ):
                 need(
                     False,
-                    f"beat {i}: the card {s.prop!r} shows {card.refs[0]} alone in a place: show them with the"
-                    " one they act with, or close on their face (framing close-up) as a reaction",
+                    f"beat {i}: the scene {s.prop!r} shows {card.refs[0]} alone: stand them at the bottom"
+                    " instead (a variant of them if they look different at that moment), or close on their"
+                    " face (framing close-up)",
                 )
         if b.speaker != "narrator" and b.speaker in people:  # the voiced character is on screen
             on = {who.get(c, c) for s in shows for c in s.characters}
@@ -717,49 +728,24 @@ def validate(
             texting = any(
                 name and name in m.sender.casefold() for s in shows for m in s.chat
             )  # their message
-            quoted = _quoted_show(b)  # the screen up while their words are said
-            scene = props.get(quoted.prop)
-            inside = scene_people(quoted)
-            face = scene is not None and scene.framing == "close-up" and inside == {person}
-            two_shot = not quoted.characters and person in inside and len(inside) > 1  # an act between two
-            standing = {who.get(c, c) for c in quoted.characters}
-            if not texting and not face and not two_shot and person not in standing:
-                others = [c for c in quoted.characters if who.get(c, c) != person]
-                instead = (
-                    f" ({' and '.join(others)} {'stand' if len(others) > 1 else 'stands'} there instead)"
-                )
-                need(
-                    False,
-                    f"beat {i}: {b.speaker!r} is quoted but does not stand at the bottom"
-                    + (instead if others else "")
-                    + f": stand {b.speaker!r} there while their words are said (viewers take the standing"
-                    " figure for the one speaking)"
-                    + (
-                        "; a scene shown then has the one they talk to, not them"
-                        if others and person in on
-                        else ""
-                    )
-                    + (
-                        "; only an act between two people (a whisper in the ear, a slap) may be a scene of"
-                        " the two of them, with nobody standing"
-                        if not others
-                        else ""
-                    ),
-                )
+            need(
+                person in on or texting,
+                f"beat {i}: {b.speaker!r} is quoted but not on screen: show them while their words are said",
+            )
     alone = [i for i, b in enumerate(out.beats, 1) if not b.show.characters]
     allowed = max(2, -(-len(out.beats) // 4))  # one beat in four, rounded up
     need(
         len(alone) <= allowed,
         f"nobody stands at the bottom in beats {', '.join(map(str, alone))} ({len(alone)} of"
-        f" {len(out.beats)}): build almost every beat on a character standing there (the one it is about,"
-        f" or the one who watches what the card shows), at most {allowed} beats without",
+        f" {len(out.beats)}): most beats are the characters themselves, standing (the one who speaks,"
+        f" is quoted or acts), at most {allowed} beats without",
     )
     for place, where in again.items():
         beats = ", ".join(map(str, where))
         need(
             False,
-            f"the empty place {place!r} is behind people again in beats {beats}: show what they do there"
-            " as a scene of them (refs, people, the action), one scene per moment",
+            f"the empty place {place!r} is behind people again in beats {beats}: show a place once, when"
+            " the story gets there; after that show the people themselves (or a scene of what they do)",
         )
     if video:
         if out.poll.text.strip():
