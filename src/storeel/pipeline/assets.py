@@ -25,6 +25,7 @@ from .detect import cut_out
 
 VERSION = 2  # 2: cards in 3:2, cut-outs on a plain background, cut by SAM
 STYLES = {
+    "realistic_3d": "realistic 3D character render, soft studio lighting",
     "cinematic": "cinematic photograph, natural light, realistic detail, shallow depth of field",
     "illustration": "clean modern digital illustration, soft shading, rich colours",
     "3d": "stylised 3D animated film still, soft global illumination, expressive characters",

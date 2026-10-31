@@ -31,7 +31,9 @@ def _one_line(value: str) -> str:
 
 
 class Style(Strict):
-    visual_style: Literal["cinematic", "illustration", "3d", "anime", "watercolor", "comic"] = "cinematic"
+    visual_style: Literal[
+        "realistic_3d", "cinematic", "illustration", "3d", "anime", "watercolor", "comic"
+    ] = "cinematic"
     visuals: Literal["off", "few", "balanced", "many"] = "balanced"
     # "cards": pictures float over the speaker as cards and cut-outs; "full": they fill the screen.
     picture_layout: Literal["cards", "full"] = "cards"
@@ -121,7 +123,7 @@ class Script(Strict):
 # chapters before it added, so writing a chapter again redesigns only its own additions.
 
 Narration = Literal["casual", "warm", "dramatic", "funny"]
-VisualStyle = Literal["cinematic", "illustration", "3d", "anime", "watercolor", "comic"]
+VisualStyle = Literal["realistic_3d", "cinematic", "illustration", "3d", "anime", "watercolor", "comic"]
 Act = Literal["hook", "bridge", "setup", "rise", "turn", "cliffhanger", "outro"]
 
 
@@ -195,7 +197,7 @@ class Novel(Strict):
     synopsis: str = Field("", max_length=4000)
     language: Literal["id", "en"] = "id"
     narration: Narration = "casual"
-    visual_style: VisualStyle = "cinematic"
+    visual_style: VisualStyle = "realistic_3d"  # a novel's characters as realistic 3D renders
     watermark: str = Field("", max_length=60)
     created_at: str
     updated_at: str
@@ -325,12 +327,12 @@ class Story(Strict):
 
 
 class PartPicture(Strict):
-    """A picture a novel part shows: a character standing (from the bible), an object cut out,
-    or a card (a photo, a scene, a place). `scope` says whose files hold it."""
+    """A picture a novel part shows: a character standing (from the bible), an object or a scene
+    cut out, or a card (a photo, a place). `scope` says whose files hold it."""
 
     id: str
     kind: Literal["character", "variant", "prop", "photo"]
-    display: Literal["standing", "object", "card"]
+    display: Literal["standing", "object", "scene", "card"]
     scope: Literal["novel", "project"]
     key: str | None = None
     cutout: bool = False

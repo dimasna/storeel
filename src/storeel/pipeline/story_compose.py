@@ -387,9 +387,10 @@ class Sprites:
         where each standing character stands (by default their usual side)."""
         out: list[tuple[Image.Image, tuple[int, int]]] = []
         shift = 0.0
+        tag_layer: tuple[Image.Image, tuple[int, int]] | None = None
         if show.tag:
             tag = self._cached(("tag", show.tag), lambda: pill(show.tag, round(0.04 * H)))
-            out.append((tag, (W // 2 - tag.width // 2, round(TAG_Y * H) - tag.height // 2)))
+            tag_layer = (tag, (W // 2 - tag.width // 2, round(TAG_Y * H) - tag.height // 2))
             shift = TAG_SHIFT
         chars = self.standing(show)
         slots = sides or arrange(chars, {}, self.slot)
@@ -426,6 +427,7 @@ class Sprites:
                 )
         elif show.photo and (picture := self.image(show.photo)) is not None:
             title = self.photos[show.photo].title if show.photo in self.photos else ""
+            picture = _wide(picture)
             width = _card_width(picture)
             centred(
                 self._cached(("photo", show.photo, width), lambda: photo_card(picture, width, title)),
@@ -446,6 +448,7 @@ class Sprites:
                     y = 0.4 if size == "large" else 0.35 + shift
                 centred(self._cached(("object", show.prop, size), lambda: cutout_sprite(picture, *box)), y)
             else:
+                picture = _wide(picture)
                 width = _card_width(picture)
                 centred(
                     self._cached(("scene", show.prop, width), lambda: photo_card(picture, width)),
@@ -470,6 +473,8 @@ class Sprites:
             out.append((sprite, (x, y)))
             if cid == name and (text := self.label(cid)):
                 named = self._name_over(text, sprite, x, y)
+        if tag_layer is not None:
+            out.append(tag_layer)  # over the card, so a picture never hides the reveal
         if named is not None:
             out.append(named)  # last, so nothing covers it
         return out
@@ -499,6 +504,19 @@ def _card_width(picture: Image.Image) -> int:
     """A card's width: the full card width, or narrower for a tall picture, so that the card is
     never taller than CARD_MAX_H of the frame (it would cover the speaker and the people)."""
     return min(round(CARD_W * W), round(CARD_MAX_H * H * picture.width / max(1, picture.height)))
+
+
+CARD_RATIO = 16 / 9  # cards are cropped to 16:9; Muse Image draws 3:2 at most
+
+
+def _wide(picture: Image.Image) -> Image.Image:
+    """A wide picture as a 16:9 card shows it: its middle, cropped at the top and bottom, so the
+    card is short enough to stay clear of a tag above it and the people below."""
+    if picture.width < picture.height or picture.width / picture.height >= CARD_RATIO - 0.01:
+        return picture
+    height = round(picture.width / CARD_RATIO)
+    top = (picture.height - height) // 2
+    return picture.crop((0, top, picture.width, top + height))
 
 
 class PartCompositor(Compositor):

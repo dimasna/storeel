@@ -10,6 +10,7 @@ const state = { config: null, project: null, poll: null, busy: false, uploads: [
 
 const LABELS = {
   visual_style: {
+    realistic_3d: "Realistic 3D render",
     cinematic: "Cinematic photo",
     illustration: "Illustration",
     "3d": "3D animation",
@@ -650,7 +651,7 @@ function novelMediaUrl(novelId, key) {
 // The novel's fields, for a new novel or an existing one. `onSave(fields)` stores them.
 function novelForm(novel, onSave, saveLabel) {
   const schema = state.config.novel;
-  const values = { title: "", synopsis: "", language: "id", narration: "casual", visual_style: "cinematic", watermark: "", ...(novel || {}) };
+  const values = { title: "", synopsis: "", language: "id", narration: "casual", visual_style: "realistic_3d", watermark: "", ...(novel || {}) };
   const title = el("input", { value: values.title, maxlength: 120, placeholder: "The novel's title" });
   const synopsis = el("textarea", { rows: 3, maxlength: 4000, placeholder: "A few sentences about the story (optional, helps the script)" }, values.synopsis);
   const language = el("select", {}, options("novel_language", enumOf(schema, "language"), values.language));
@@ -1013,7 +1014,7 @@ function partProcessSection(project) {
 function partPicturesSection(project) {
   const pictures = Object.values(project.part_pictures || {});
   const url = (p) => (p.scope === "novel" && project.novel ? novelMediaUrl(project.novel.id, p.key) : mediaUrl(project.id, p.key));
-  const how = { standing: "stands at the bottom", object: "cut-out object", card: "card" };
+  const how = { standing: "stands at the bottom", object: "cut-out object", scene: "cut-out scene", card: "card" };
   return section(
     "The part's pictures",
     el("p", { class: "muted small" }, "Characters come from the novel's bible; a returning character is redrawn in this part's outfit from their earlier portrait."),

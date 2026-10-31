@@ -39,6 +39,7 @@ from ..models import (
 from . import picture_check
 from .assets import LANDSCAPE, NO_TEXT, POLICY_TRIES, PORTRAIT, SQUARE, STYLES, Request, generate_allowed
 from .detect import _frame, _segment, cut_out
+from .screen import GREEN_AGAIN, GREEN_SCREEN, key_out_green
 from .story_compose import take_spans
 
 VERSION = 1
@@ -152,6 +153,7 @@ class Job:
     subject: str = ""  # cut out when set
     refs: list[str] = field(default_factory=list)  # ids of pictures this one is drawn from
     name: str = ""  # a character's name, for the portrait check
+    screen: bool = False  # drawn on a green screen and keyed out (a scene, a close-up)
 
 
 @dataclass
@@ -268,7 +270,9 @@ class Painter:
     def _take(self, job: Job, request: Request) -> Take:
         png, width, height, seconds = generate_allowed(self.ctx, request, job.id)
         cut = False
-        if job.subject:
+        if job.screen:  # drawn on a green screen: keyed out here
+            png, width, height, cut = self._keyed(job, request, png, width, height)
+        elif job.subject:
             made = cut_out(self.ctx, png, job.subject)
             if made is not None:
                 png, width, height = made
@@ -278,6 +282,32 @@ class Painter:
         shape = f"{width}x{height}" + (" cut out" if cut else "")
         self.ctx.log(f"Muse Image: {job.id} ({job.display}) {shape} in {seconds:.0f}s")
         return Take(png, width, height, cut)
+
+    def _keyed(
+        self, job: Job, request: Request, png: bytes, width: int, height: int
+    ) -> tuple[bytes, int, int, bool]:
+        """The picture with its green screen keyed out; drawn once more when the screen is not
+        there (the model filled the background), and shown as a card when it still is not."""
+        for attempt in range(2):
+            with Image.open(io.BytesIO(png)) as opened:
+                keyed = key_out_green(opened)
+            if keyed is not None:
+                buffer = io.BytesIO()
+                keyed.save(buffer, "PNG", optimize=True)
+                return buffer.getvalue(), keyed.width, keyed.height, True
+            if attempt:
+                break
+            self.ctx.log(f"Muse Image: {job.id} has no green screen around it; drawing it again")
+            content = [*request.content]
+            last = max(i for i, p in enumerate(content) if p["type"] == "input_text")
+            content[last] = _text(content[last]["text"] + GREEN_AGAIN)
+            try:
+                png, width, height, _ = generate_allowed(self.ctx, replace(request, content=content), job.id)
+            except MetaAPIError as exc:
+                self.ctx.log(f"Muse Image: {job.id} redraw failed: {exc}")
+                break
+        self.ctx.log(f"Muse Image: {job.id} kept its background; it is shown as a card")
+        return png, width, height, False
 
     def _checked(self, job: Job, take: Take) -> tuple[Take, picture_check.Check | None]:
         """The portrait as checked, drawn again with the checker's fix when it is wrong; the
@@ -353,8 +383,6 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
         c = bible.characters[cid]
         look = chapter_look(c, n)
         outfit = look.outfit if look else ""
-        if look and look.image and painter.exists("novel", look.image):
-            continue  # drawn already: this chapter's outfit, or the last one when the script kept it
         base = base_portrait(c, n)
         if c.created_in == n or not base or not painter.exists("novel", base):
             text = _portrait_text(c.name, c.description, outfit, c.subject, style)
@@ -370,6 +398,15 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
             )
             request = Request([_ref_part(painter.path("novel", base)), _text(text)], PORTRAIT, False, [cid])
             key = painter.key("novel", c.id, text, base)
+        if (
+            look
+            and look.image
+            and painter.exists("novel", look.image)
+            and (look.chapter != n or look.image == key)
+        ):
+            # Drawn already: this chapter's look as it would be drawn now, or an earlier chapter's
+            # that the script kept. One drawn otherwise (in another look style) is drawn again.
+            continue
         first.append(Job(cid, "character", "standing", "novel", key, request, subject=c.subject, name=c.name))
     for vid in sorted(v for v in shown if v in variants):
         v = variants[vid]
@@ -377,9 +414,12 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
         if c is None:
             continue
         text = (
-            f"The {c.subject} in the reference is {c.name}. Draw {c.name} again, the same person and clothes,"
-            f" but: {v.change.rstrip('.')}. One figure alone, the whole body visible, on a {PLAIN}."
-            f" Style: {style}. {NO_TEXT}"
+            f"The {c.subject} in the reference is {c.name}. Keep {c.name}'s face, hair, body and identity"
+            " exactly the same, and the clothes unless the change says otherwise. New image:"
+            f" {c.name} alone, drawn once, full body, standing upright facing the viewer, now"
+            f" {v.change.rstrip('.')}. Whatever the change covers stays hidden (nothing of the old outfit"
+            " or shoes shows), and nothing is added that the change does not describe. One figure alone,"
+            f" the whole body visible from head to feet, on a {PLAIN}. Style: {style}. {NO_TEXT}"
         )
         request = Request([_text(text)], PORTRAIT, False, [v.base])
         second.append(
@@ -395,12 +435,32 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
                 name=c.name,
             )
         )
+
+    def named(rid: str) -> str:
+        """What a scene calls a character or a variant (by the base character's name)."""
+        base = variants[rid].base if rid in variants else rid
+        c = bible.characters.get(base)
+        return c.name if c else rid
+
+    def looks(rid: str) -> str:
+        """How a character or a variant looks in this chapter, written out for a picture drawn
+        without their portrait."""
+        v = variants.get(rid)
+        c = bible.characters.get(v.base if v else rid)
+        if c is None:
+            return ""
+        look = chapter_look(c, n)
+        wearing = f", wearing {look.outfit.rstrip('.')}" if look and look.outfit else ""
+        change = f"; at this moment {v.change.rstrip('.')}" if v else ""
+        return f"{c.name} looks like this: {c.description.rstrip('.')}{wearing}{change}."
+
     for prop in story.props:
         if prop.id not in used_props:
             continue
         scope = "novel" if prop.id in bible.props else "project"
         size = SHAPE_SIZE[prop.shape]
-        is_object = not (prop.refs or prop.backdrop or prop.framing == "close-up" or prop.people)
+        close_up = prop.framing == "close-up"
+        is_object = not (prop.refs or prop.backdrop or close_up or prop.people)
         if is_object:
             text = (
                 f"{prop.description.rstrip('.')}. The object alone, whole and uncropped, centred with space"
@@ -417,40 +477,66 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
                     subject=prop.subject or prop.id.replace("_", " "),
                 )
             )
-        else:
-            # A scene, a place or a detail is a framed picture in the upper part of the screen, as
-            # the video path's cards are: always wide, with room for the place and the action (a
-            # tall one would cover most of the frame).
-            size = LANDSCAPE
-            figures = (
-                f" Exactly {prop.people} figure{'s' if prop.people != 1 else ''}." if prop.people else ""
+            continue
+        count = prop.people or len(prop.refs)
+        if close_up:
+            # A detail (hands gripping, a face) is drawn from its words alone, the looks written
+            # out: portraits pull the image model back to full bodies. Cut out like a scene.
+            who = "".join(f" {x}" for x in (looks(r) for r in prop.refs) if x)
+            text = (
+                f"Close-up detail shot: {prop.description.rstrip('.')}.{who} Only what the close-up"
+                f" frames is visible, no full bodies, isolated. Style: {style}. {NO_TEXT} {GREEN_SCREEN}"
             )
+            request = Request([_text(text)], size, False, [])
+            job = Job(prop.id, "prop", "scene", scope, painter.key(scope, prop.id, text, size), request)
+            job.screen = True
+            first.append(job)
+            continue
+        if prop.backdrop:
+            # A place, or a moment that needs its place, keeps its background: a framed picture in
+            # the upper part of the screen, always wide (a tall one would cover most of the frame).
+            size = LANDSCAPE
+            figures = f" Exactly {count} figure{'s' if count != 1 else ''}." if count else ""
             acting = (
                 " The people act the moment out in its place, caught in the middle of what they are"
                 " doing: not posed side by side facing the viewer like a portrait. A medium shot: the"
                 " people fill most of the picture's height, their faces and feelings clearly visible,"
                 " the place around them."
-                if (prop.refs or prop.people) and prop.framing != "close-up"
+                if count
                 else ""
             )
             text = (
                 f"Create one new image: {prop.description.rstrip('.')}.{figures}{acting}"
                 f" Style: {style}. {NO_TEXT}"
             )
-            job = Job(
-                prop.id,
-                "prop",
-                "card",
-                scope,
-                "",
-                Request([_text(text)], size, False, []),
-                refs=list(prop.refs),
+            job = Job(prop.id, "prop", "card", scope, "", Request([_text(text)], size, False, []))
+        else:
+            # A scene of people is cut out of its background:
+            # the figures and what they use float over the video. Drawn on a green screen and keyed
+            # out here (SAM cuts out one thing at a time, not two people and their bench).
+            names = [named(r) for r in prop.refs]
+            cast = ""
+            if names:
+                verb = "each appear" if len(names) > 1 else "appears"
+                cast = (
+                    f" {' and '.join(names)} {verb} exactly once, in the pose and place the scene describes."
+                    " Do not copy the reference pictures or their standing pose, and do not place them"
+                    " beside the scene."
+                )
+            text = (
+                f"Create one new image, one single scene: {prop.description.rstrip('.')}.{cast}"
+                f" {count} {'person' if count == 1 else 'people'} in total. Only the figures and what"
+                " they use, fully visible and centred: no walls, no floor, no room around them."
+                f" Style: {style}. {NO_TEXT} {GREEN_SCREEN}"
             )
-            if prop.refs:
-                second.append(job)  # its key depends on the portraits drawn first
-            else:
-                job.key = painter.key(scope, prop.id, text, size)
-                first.append(job)
+            job = Job(prop.id, "prop", "scene", scope, "", Request([_text(text)], size, False, []))
+            job.screen = True
+        job.refs = list(prop.refs)
+        if prop.refs:
+            second.append(job)  # its key depends on the portraits drawn first
+        else:
+            job.key = painter.key(scope, prop.id, text, job.request.size)
+            first.append(job)
     for prop_id in sorted(used_props - {p.id for p in story.props}):
         bp = bible.props.get(prop_id)  # a bible prop from an earlier chapter, shown again
         if bp and bp.image:
@@ -492,6 +578,10 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
                 )
     with ThreadPoolExecutor(ctx.settings.image_parallel) as pool:
         for picture in pool.map(painter.draw, first):
+            kept = pictures.get(picture.id)
+            if picture.error and kept is not None and kept.key:  # a redraw that failed: the old one stays
+                ctx.log(f"Muse Image: {picture.id} keeps the portrait it had ({picture.error})")
+                continue
             pictures[picture.id] = picture
     for job in second:  # scenes and variants are drawn from this part's portraits
         content: list[dict] = []
@@ -500,8 +590,7 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
             ref = pictures.get(rid)
             if ref is None or not ref.key:
                 continue
-            c = bible.characters.get(rid)
-            name = c.name if c else rid
+            name = named(rid)
             content += [
                 _text(f"Reference {number}: {name}. Use it only for how {name} looks."),
                 _ref_part(painter.path(ref.scope, ref.key)),

@@ -118,7 +118,7 @@ class NovelFields(Body):
     synopsis: str = Field("", max_length=4000)
     language: Literal["id", "en"] = "id"
     narration: Narration = "casual"
-    visual_style: VisualStyle = "cinematic"
+    visual_style: VisualStyle = "realistic_3d"
     watermark: str = Field("", max_length=60)
 
 
