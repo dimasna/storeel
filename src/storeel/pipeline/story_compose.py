@@ -10,7 +10,7 @@ item (a note, chat bubbles, a photo card, a scene card or a cut-out object) in t
 and up to two characters standing at the bottom on their side. The first time the storyteller
 voices a character (a beat quoting them), that character's name shows over their head. The
 hook has no pictures and keeps the speaker sharp; after it the speaker is blurred behind the
-story, or only while a card is up, as the style says. The poll and the end card are fixed
+story, or only while a picture is up top, as the style says. The poll and the end card are fixed
 screens; a "Part N" badge is up from the first frame.
 """
 
@@ -382,17 +382,13 @@ class Sprites:
     def label(self, character: str) -> str:
         return self.labels.get(character) or self.labels.get(self.person(character)) or ""
 
-    def has_card(self, show: StoryShow) -> bool:
-        """Whether a beat's screen shows a framed picture: a photo, or a place (or a scene that
-        could not be cut out). Notes, chats, cut-outs and standing characters are not cards."""
+    def has_top_picture(self, show: StoryShow) -> bool:
+        """Whether a beat's screen shows a picture in the upper part of the frame: a photo or place
+        card, a cut-out scene or a cut-out object. Notes, chats and the characters standing at
+        the bottom are not."""
         if show.note.text or show.chat:
             return False
-        if show.photo and self.image(show.photo) is not None:
-            return True
-        if show.prop and self.image(show.prop) is not None:
-            info = self.pictures.get(show.prop)
-            return not (info is not None and info.cutout)
-        return False
+        return any(x and self.image(x) is not None for x in (show.photo, show.prop))
 
     def layers(
         self, show: StoryShow, name: str = "", sides: list[str] | None = None
@@ -624,8 +620,8 @@ class PartCompositor(Compositor):
             live = now
             behind = style.speaker_behind
             blur = behind == "blur"
-            if behind == "card":
-                blur = line.kind == "beat" and line.show is not None and sprites.has_card(line.show)
+            if behind == "top":
+                blur = line.kind == "beat" and line.show is not None and sprites.has_top_picture(line.show)
             if behind == "auto":
                 boxes = faces.get(line.take)
                 if boxes is None:

@@ -28,7 +28,7 @@ const LABELS = {
   tone: { casual: "Casual", energetic: "Energetic", calm: "Calm", funny: "Funny", dramatic: "Dramatic" },
   idea_language: { id: "Indonesian", en: "English" },
   picture_layout: { cards: "Cards and cut-outs over the speaker", full: "Full screen" },
-  speaker_behind: { blur: "Blur the speaker", sharp: "Keep the speaker sharp", auto: "Blur only when the face is covered", card: "Blur only behind a card" },
+  speaker_behind: { blur: "Blur the speaker", sharp: "Keep the speaker sharp", auto: "Blur only when the face is covered", top: "Blur only behind a picture at the top" },
   display: { none: "Speaker only", overlay: "Card", cutout: "Cut-out", cutaway: "Full screen" },
   novel_language: { id: "Indonesian", en: "English" },
   narration: { casual: "Casual, like telling a friend", warm: "Warm and gentle", dramatic: "Dramatic narrator", funny: "Funny gossip" },

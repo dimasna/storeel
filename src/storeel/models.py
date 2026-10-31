@@ -38,8 +38,8 @@ class Style(Strict):
     # "cards": pictures float over the speaker as cards and cut-outs; "full": they fill the screen.
     picture_layout: Literal["cards", "full"] = "cards"
     # What the speaker looks like behind a card or cut-out: "auto" blurs only when it covers the face,
-    # "card" only behind a framed picture (cut-outs and standing characters keep the speaker sharp).
-    speaker_behind: Literal["blur", "sharp", "auto", "card"] = "blur"
+    # "top" only behind a picture in the upper part (characters standing at the bottom keep it sharp).
+    speaker_behind: Literal["blur", "sharp", "auto", "top"] = "blur"
     captions: Literal["pill", "karaoke", "clean", "off"] = "pill"
     caption_color: str = Field("#E50914", pattern=HEX_COLOR)
     caption_position: Literal["lower", "middle"] = "lower"
@@ -49,6 +49,11 @@ class Style(Strict):
     language: Literal["auto", "id", "en"] = "auto"
 
     _clean_watermark = field_validator("watermark")(_one_line)
+
+    @field_validator("speaker_behind", mode="before")
+    @classmethod
+    def _top_was_card(cls, value: object) -> object:
+        return "top" if value == "card" else value  # its name for a day, when it was cards only
 
 
 class Idea(Strict):

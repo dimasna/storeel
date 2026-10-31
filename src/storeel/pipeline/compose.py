@@ -101,17 +101,22 @@ class Placed:
     box: Region
 
 
-def is_card(moment: Moment) -> bool:
-    """Whether a moment's picture shows as a framed card (a cut-out SAM missed is one too)."""
-    return not (moment.display == "cutout" and moment.asset is not None and moment.asset.cutout)
+def is_cutout(moment: Moment) -> bool:
+    """Whether a moment's picture shows cut out (a cut-out SAM missed shows as a framed card)."""
+    return moment.display == "cutout" and moment.asset is not None and moment.asset.cutout
+
+
+def is_standing(moment: Moment, picture: Image.Image) -> bool:
+    """Whether a moment shows as a character standing at the bottom: a tall cut-out. Everything
+    else (a card, a cut-out object) goes in the upper part of the frame."""
+    return is_cutout(moment) and picture.height >= picture.width * 1.15
 
 
 def place(moment: Moment, picture: Image.Image, style: Style) -> Placed:
     """A card or cut-out sprite for `moment`, placed where the layout puts it."""
     position = style.caption_position
-    if not is_card(moment):
-        standing = picture.height >= picture.width * 1.15  # a tall cut-out: a character standing
-        if standing:
+    if is_cutout(moment):
+        if is_standing(moment, picture):
             height = round(CHARACTER_HEIGHT * H)
             sprite = cutout_sprite(picture, round(CHARACTER_MAX_WIDTH * W), height)
             inner = ImageOps.contain(picture, (round(CHARACTER_MAX_WIDTH * W), height)).size
@@ -337,7 +342,9 @@ class Compositor:
                 continue
             placed = place(moment, picture, style)
             self.cards.append(_Card(start, end, placed.image, placed.center, ident=len(self.cards) + 1))
-            blur = style.speaker_behind == "blur" or (style.speaker_behind == "card" and is_card(moment))
+            blur = style.speaker_behind == "blur" or (
+                style.speaker_behind == "top" and not is_standing(moment, picture)
+            )
             if style.speaker_behind == "auto":
                 hit = covered(placed.box, moment.faces)
                 if hit is None:
