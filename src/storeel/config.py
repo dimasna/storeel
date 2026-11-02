@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -14,6 +15,7 @@ LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]")
 SERVED_HOSTS = ("localhost", "127.0.0.1")  # Host headers the local server answers
 TEXT_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
 IMAGE_REASONING = ("low", "high")
+ID_RE = re.compile(r"^[0-9a-f]{32}$")  # a reel's or a novel's id
 
 
 class ConfigError(RuntimeError):
@@ -41,6 +43,32 @@ def _get_choice(name: str, default: str, choices: tuple[str, ...]) -> str:
     value = _get(name, default)
     if value not in choices:
         raise ConfigError(f"{name} must be one of {', '.join(choices)}, got {value!r}")
+    return value
+
+
+def _get_flag(name: str) -> bool:
+    value = _get(name, "0").lower()
+    if value not in ("0", "1", "true", "false", "yes", "no", "on", "off"):
+        raise ConfigError(f"{name} must be 1 or 0, got {value!r}")
+    return value in ("1", "true", "yes", "on")
+
+
+def _get_ids(name: str) -> frozenset[str]:
+    ids = frozenset(x.strip() for x in _get(name, "").split(",") if x.strip())
+    wrong = sorted(x for x in ids if not ID_RE.match(x))
+    if wrong:
+        raise ConfigError(f"{name} holds reel or novel ids (32 hex characters), got {', '.join(wrong)}")
+    return ids
+
+
+def _get_hours(name: str) -> float:
+    raw = _get(name, "0")
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be a number of hours, got {raw!r}") from exc
+    if value < 0:
+        raise ConfigError(f"{name} must be 0 (keep everything) or more, got {value}")
     return value
 
 
@@ -82,6 +110,12 @@ class Settings:
     max_upload_mb: int
     workers: int
     allowed_hosts: tuple[str, ...]
+    # Hosting: each browser sees only the reels and novels it made (no login: an id in a cookie).
+    private_projects: bool
+    # Reels and novels anyone may watch and none may change, kept by the cleanup (ids).
+    showcase: frozenset[str]
+    # Delete reels and novels untouched for this many hours (0: keep everything).
+    ttl_hours: float
 
     @property
     def has_api_key(self) -> bool:
@@ -122,4 +156,7 @@ def get_settings() -> Settings:
         max_upload_mb=_get_int("STOREEL_MAX_UPLOAD_MB", 1024),
         workers=_get_int("STOREEL_WORKERS", 2),
         allowed_hosts=SERVED_HOSTS + extra_hosts,
+        private_projects=_get_flag("STOREEL_PRIVATE_PROJECTS"),
+        showcase=_get_ids("STOREEL_SHOWCASE"),
+        ttl_hours=_get_hours("STOREEL_TTL_HOURS"),
     )

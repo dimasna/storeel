@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Film, Lightbulb, BookText, Plus } from "lucide-react";
+import { Film, Lightbulb, BookText, Plus, Sparkles } from "lucide-react";
 import { motion } from "motion/react";
 import { api, mediaUrl } from "@/lib/api";
 import type { NovelSummary, ProjectSummary } from "@/lib/types";
@@ -123,13 +123,14 @@ export function HomePage() {
                 <span className="grid size-10 place-items-center rounded-lg bg-background text-muted-foreground">
                   ❡
                 </span>
-                <span className="flex min-w-0 flex-col">
+                <span className="flex min-w-0 flex-1 flex-col">
                   <strong className="truncate text-sm">{n.title}</strong>
                   <small className="text-xs text-muted-foreground">
                     {n.chapters} chapter{n.chapters === 1 ? "" : "s"} · {n.characters} character
                     {n.characters === 1 ? "" : "s"} · {ago(n.updated_at)}
                   </small>
                 </span>
+                {n.read_only ? <ShowcasePill /> : null}
               </Link>
             ))}
           </div>
@@ -169,6 +170,7 @@ export function HomePage() {
                     {p.input_seconds ? ` · ${seconds(p.input_seconds)}` : ""} · {ago(p.updated_at)}
                   </small>
                 </span>
+                {p.read_only ? <ShowcasePill /> : null}
                 {p.renders ? (
                   <span className="shrink-0 rounded-full border border-success/40 px-2.5 py-0.5 text-xs text-success">
                     {p.renders} render{p.renders > 1 ? "s" : ""}
@@ -182,5 +184,14 @@ export function HomePage() {
 
       <NewNovelDialog open={novelOpen} onClose={() => setNovelOpen(false)} />
     </div>
+  );
+}
+
+/** Marks a reel or novel everyone can watch and nobody can change. */
+function ShowcasePill() {
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/40 bg-accent/5 px-2.5 py-0.5 text-xs text-accent">
+      <Sparkles className="size-3" /> Showcase
+    </span>
   );
 }

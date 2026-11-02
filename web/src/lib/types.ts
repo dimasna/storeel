@@ -273,6 +273,7 @@ export interface Project {
   usage: Usage;
   error: string | null;
   agent: { messages: AgentMessage[] };
+  read_only: boolean;
   stage: string;
   job: Job | null;
   input_seconds: number;
@@ -290,6 +291,7 @@ export interface ProjectSummary {
   input_seconds: number;
   renders: number;
   cover: string | null;
+  read_only: boolean;
 }
 
 export interface BibleCharacter {
@@ -332,6 +334,7 @@ export interface Novel {
   bible: { characters: Record<string, BibleCharacter>; props: Record<string, BibleProp> };
   chapters: Chapter[];
   next_chapter: number;
+  read_only: boolean;
 }
 
 export interface NovelSummary {
@@ -341,6 +344,7 @@ export interface NovelSummary {
   chapters: number;
   characters: number;
   updated_at: string;
+  read_only: boolean;
 }
 
 export interface JsonSchema {

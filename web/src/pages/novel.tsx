@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { Sparkles, X } from "lucide-react";
 import { api, novelMediaUrl } from "@/lib/api";
 import type { Novel } from "@/lib/types";
 import { useToast } from "@/lib/toast";
 import { requestKey } from "@/App";
+import { labelFor } from "@/lib/labels";
 import { Link, navigate } from "@/lib/router";
 import { Card, Field, Input, Textarea, Pill, Banner } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
@@ -61,6 +62,10 @@ export function NovelPage({ id }: { id: string }) {
       navigate(`/p/${project.id}`);
     });
 
+  // A showcase novel can't be changed, and opening a part is a POST that may create its reel,
+  // so its existing reels are opened directly.
+  const readOnly = novel.read_only;
+
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
@@ -69,6 +74,18 @@ export function NovelPage({ id }: { id: string }) {
         </Link>
         <h1 className="text-2xl font-bold tracking-tight">{novel.title}</h1>
       </div>
+
+      {readOnly ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-accent/40 bg-accent/5 px-4 py-3 text-sm">
+          <Sparkles className="size-4 shrink-0 text-accent" />
+          <span className="flex-1 text-foreground">
+            A showcase novel: open its parts to watch the reels. Start your own from the home page.
+          </span>
+          <Link to="/" className="font-semibold text-accent hover:underline">
+            Make your own
+          </Link>
+        </div>
+      ) : null}
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
         <div className="flex flex-col gap-5">
@@ -110,20 +127,30 @@ export function NovelPage({ id }: { id: string }) {
                         </td>
                         <td className="py-2">
                           <div className="flex items-center gap-1">
-                            <Button size="sm" variant="primary" onClick={() => openPart(c.number)}>
-                              {c.project_id ? "Open" : "Make the part"}
-                            </Button>
-                            <button
-                              title="Delete chapter"
-                              onClick={() =>
-                                confirm(
-                                  `Delete chapter ${c.number}${c.project_id ? " and its reel" : ""}? What it added to the bible goes too.`,
-                                ) && run(async () => { await api.deleteChapter(id, c.number); load(); }, "Chapter deleted")
-                              }
-                              className="grid size-8 place-items-center rounded-lg border border-border-strong text-muted-foreground hover:text-foreground"
-                            >
-                              <X className="size-4" />
-                            </button>
+                            {readOnly && !c.project_id ? null : (
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                onClick={() =>
+                                  readOnly ? navigate(`/p/${c.project_id}`) : openPart(c.number)
+                                }
+                              >
+                                {c.project_id ? "Open" : "Make the part"}
+                              </Button>
+                            )}
+                            {readOnly ? null : (
+                              <button
+                                title="Delete chapter"
+                                onClick={() =>
+                                  confirm(
+                                    `Delete chapter ${c.number}${c.project_id ? " and its reel" : ""}? What it added to the bible goes too.`,
+                                  ) && run(async () => { await api.deleteChapter(id, c.number); load(); }, "Chapter deleted")
+                                }
+                                className="grid size-8 place-items-center rounded-lg border border-border-strong text-muted-foreground hover:text-foreground"
+                              >
+                                <X className="size-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -136,36 +163,65 @@ export function NovelPage({ id }: { id: string }) {
             )}
           </Card>
 
-          <AddChapter novel={novel} onAdded={load} run={run} />
+          {readOnly ? null : <AddChapter novel={novel} onAdded={load} run={run} />}
           <BibleSection novel={novel} />
         </div>
 
         <div className="flex flex-col gap-5">
-          <Card title="The novel">
-            <NovelForm
-              novel={novel}
-              saveLabel="Save"
-              onSave={(fields) => run(async () => { await api.editNovel(id, fields); load(); }, "Saved")}
-            />
-          </Card>
-          <Card>
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() =>
-                confirm(`Delete “${novel.title}”, its character bible and every part's reel?`) &&
-                run(async () => {
-                  await api.deleteNovel(id);
-                  navigate("/");
-                }, "Novel deleted")
-              }
-            >
-              Delete novel
-            </Button>
-          </Card>
+          {readOnly ? (
+            <NovelDetails novel={novel} />
+          ) : (
+            <>
+              <Card title="The novel">
+                <NovelForm
+                  novel={novel}
+                  saveLabel="Save"
+                  onSave={(fields) => run(async () => { await api.editNovel(id, fields); load(); }, "Saved")}
+                />
+              </Card>
+              <Card>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() =>
+                    confirm(`Delete “${novel.title}”, its character bible and every part's reel?`) &&
+                    run(async () => {
+                      await api.deleteNovel(id);
+                      navigate("/");
+                    }, "Novel deleted")
+                  }
+                >
+                  Delete novel
+                </Button>
+              </Card>
+            </>
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+/** The novel's settings as text, for a showcase novel nobody may edit. */
+function NovelDetails({ novel }: { novel: Novel }) {
+  const rows: [string, string][] = [
+    ["Language", labelFor("novel_language", novel.language)],
+    ["Narration style", labelFor("narration", novel.narration)],
+    ["Picture look", labelFor("visual_style", novel.visual_style)],
+    ["Watermark", novel.watermark || "none"],
+  ];
+  return (
+    <Card title="The novel">
+      {novel.synopsis ? <p className="mb-3 text-sm text-muted-foreground">{novel.synopsis}</p> : null}
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+        {rows.map(([label, value]) => (
+          <div key={label} className="contents">
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
   );
 }
 

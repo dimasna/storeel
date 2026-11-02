@@ -15,6 +15,7 @@ import { TranscriptSection } from "./transcript-section";
 import { PicturesSection } from "./pictures-section";
 import { IdeaSection, ScriptSection } from "./idea-section";
 import { AgentDock } from "./agent-dock";
+import { ShowcaseView } from "./showcase-view";
 import {
   PartSection,
   StorySection,
@@ -33,6 +34,8 @@ export function ProjectView({ state }: { state: UseProject }) {
   const project = state.project as Project;
   const hasKey = useHasKey();
   const locked = jobActive(project);
+
+  if (project.read_only) return <ShowcaseView project={project} />;
 
   const inputsReady =
     project.path === "video"

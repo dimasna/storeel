@@ -76,6 +76,7 @@ def open_chapter(services: Services, novel_id: str, number: int) -> Project:
         style=chapter_style(novel),
         novel_id=novel.id,
         chapter=number,
+        owner=novel.owner,  # a chapter's reel belongs to whoever owns the novel
     )
     services.db.create_project(project)
 
@@ -90,6 +91,8 @@ def open_chapter(services: Services, novel_id: str, number: int) -> Project:
 
 def novel_view(services: Services, novel: Novel) -> dict[str, Any]:
     data = novel.model_dump(mode="json")
+    data.pop("owner", None)  # the browser's id is the server's business
+    data["read_only"] = novel.id in services.settings.showcase
     chapters = []
     for chapter in novel.chapters:
         row = {
@@ -116,7 +119,7 @@ def novel_view(services: Services, novel: Novel) -> dict[str, Any]:
     return data
 
 
-def novel_summary(novel: Novel) -> dict[str, Any]:
+def novel_summary(services: Services, novel: Novel) -> dict[str, Any]:
     return {
         "id": novel.id,
         "title": novel.title,
@@ -124,4 +127,5 @@ def novel_summary(novel: Novel) -> dict[str, Any]:
         "chapters": len(novel.chapters),
         "characters": len(novel.bible.characters),
         "updated_at": novel.updated_at,
+        "read_only": novel.id in services.settings.showcase,
     }

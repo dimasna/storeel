@@ -6,11 +6,16 @@ browser polls. That does not fit a scale-to-zero, many-instance serverless model
 runs it as ONE always-warm CPU container (`min_containers=1`, `max_containers=1`) backed by a
 persistent Modal Volume for its SQLite database and media files.
 
-Nothing is kept for long: a scheduled task deletes any project or novel left untouched for
-24 hours (see storeel.maintenance), so users download their reel within that window.
+Nothing is kept for long: the web app's own cleanup thread deletes any project or novel left
+untouched for 24 hours (see storeel.maintenance), so users download their reel within that
+window. The cleanup runs in the web container, not a separate scheduled one: a second
+container committing its copy of the SQLite file to the Volume would replace the web
+container's copy (last write wins), losing whatever was saved in between. The showcase reels
+are never deleted, and nobody can change them.
 
 Each user still brings their own Muse / Model API key from the browser; the server holds it
-in memory only for the job it starts (see storeel.services.KeyVault). There is no login.
+in memory only for the job it starts (see storeel.services.KeyVault). There is no login: each
+browser sees only its own reels and novels, plus the showcase (see storeel.web.owners).
 
 Deploy:   modal deploy modal_app.py
 Dev/test: modal serve modal_app.py      (hot-reloads; gives a temporary URL)
@@ -27,11 +32,14 @@ import modal
 
 APP_NAME = "storeel-studio"
 DATA_DIR = "/data"            # the Modal Volume mount: SQLite + all media live here
-TTL_HOURS = 24.0             # projects/novels untouched this long are purged
+TTL_HOURS = 24               # projects/novels untouched this long are deleted
+# Reels and novels everyone can watch and nobody can change, never deleted: the demo novel
+# (its chapter reels come with it) and its Part 1 reel.
+SHOWCASE = ("204efb9e5932405f85e606f87fa766c7", "9f62c525b6a04edebd197859f890107d")
 HERE = Path(__file__).parent
 
-# One image for both the web app and the cleanup task. It carries ffmpeg (required at startup),
-# the Python dependencies, the storeel source, and the built frontend.
+# The web app's image. It carries ffmpeg (required at startup), the Python dependencies, the
+# storeel source, and the built frontend.
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg")
@@ -53,6 +61,11 @@ image = (
             # Modal serves the app at https://<workspace>--...modal.run; allow that host (and the
             # same-site SPA served from it) past the TrustedHost / CSRF guards.
             "STOREEL_ALLOWED_HOSTS": "*.modal.run,*.modal.host",
+            # Hosted for other people: each browser gets only its own reels, plus the showcase,
+            # and everything else is deleted after TTL_HOURS untouched.
+            "STOREEL_PRIVATE_PROJECTS": "1",
+            "STOREEL_SHOWCASE": ",".join(SHOWCASE),
+            "STOREEL_TTL_HOURS": str(TTL_HOURS),
             "PYTHONPATH": "/app",
         }
     )
@@ -87,23 +100,3 @@ def web():
     from storeel.web.app import create_app
 
     return create_app()
-
-
-@app.function(
-    image=image,
-    volumes={DATA_DIR: volume},
-    cpu=1.0,
-    memory=2048,
-    timeout=60 * 10,
-    schedule=modal.Cron("0 * * * *"),  # hourly
-)
-def purge():
-    """Delete projects and novels older than the retention window, with their media."""
-    from storeel.config import get_settings
-    from storeel.maintenance import purge_expired
-    from storeel.services import Services
-
-    removed = purge_expired(Services.create(get_settings()), ttl_hours=TTL_HOURS)
-    volume.commit()  # persist the deletions to the Volume
-    print(f"purge: removed {removed['projects']} project(s), {removed['novels']} novel(s)")
-    return removed

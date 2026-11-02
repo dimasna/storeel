@@ -2,10 +2,11 @@
 
 Each user brings their own Model API key: the browser sends it with the requests that start
 a job, and the server keeps it in memory only until that job ends (see services.KeyVault).
-There is no login yet, so the studio is meant for this machine only. It binds to 127.0.0.1
-by default, accepts only known Host headers (blocking DNS-rebinding), and refuses
-state-changing requests sent by other web sites (Origin / Sec-Fetch-Site checks). Uploads
-are size-checked before they are read.
+There is no login. On your own machine the studio binds to 127.0.0.1 and everything is open;
+hosted, private projects give each browser only its own reels and novels (see owners.py). It
+accepts only known Host headers (blocking DNS-rebinding), and refuses state-changing requests
+sent by other web sites (Origin / Sec-Fetch-Site checks). Uploads are size-checked before
+they are read.
 
 Each step of the flow is an action on the backend; the UI only calls them. While a job runs,
 a project accepts no edits except cancelling, so a job never works on data that changes
@@ -28,12 +29,14 @@ from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ..common import now_iso
 from ..config import ConfigError, Settings, get_settings
 from ..db import Conflict, NotFound
 from ..jobs import PipelineError, Workers
+from ..maintenance import Cleaner
 from ..media import ffmpeg as ff
 from ..meta import MetaAPIError
 from ..models import (
@@ -58,8 +61,9 @@ from ..pipeline.render import FONT_FILE
 from ..pipeline.run import HANDLERS
 from ..pipeline.story import apply_edit, narration_options
 from ..pipeline.transcribe import retime
-from ..projects import create_project, import_clip, summary, view
+from ..projects import create_project, import_clip, is_showcase, summary, view
 from ..services import Services, valid_key
+from . import owners
 
 log = logging.getLogger(__name__)
 
@@ -196,9 +200,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.has_api_key:
             log.info("MODEL_API_KEY is only used by `storeel make`; the studio asks each user for theirs")
         workers.start()
+        cleaner = Cleaner(services, settings.ttl_hours, settings.showcase) if settings.ttl_hours else None
+        if cleaner is not None:
+            cleaner.start()
+            log.info("cleanup: reels and novels untouched for %gh are deleted", settings.ttl_hours)
         try:
             yield
         finally:
+            if cleaner is not None:
+                cleaner.stop()
             workers.stop()
 
     app = FastAPI(
@@ -209,6 +219,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/api/openapi.json",
     )
     app.state.services = services
+
+    def access(method: str, path: str, owner: str) -> JSONResponse | None:
+        """Refuse a request for someone else's reel or novel, or a change to the showcase."""
+        write = method not in SAFE_METHODS
+        what, item_owner, showcase = "", None, False
+        try:
+            if match := owners.PROJECT_PATH.match(path):
+                project = db.get_project(match[1])
+                what, item_owner, showcase = "reel", project.owner, is_showcase(services, project)
+            elif match := owners.NOVEL_PATH.match(path):
+                novel = db.get_novel(match[1])
+                what, item_owner, showcase = "novel", novel.owner, novel.id in settings.showcase
+            elif match := owners.JOB_PATH.match(path):
+                project = db.get_project(db.get_job(match[1]).project_id)
+                what, item_owner, showcase = "reel", project.owner, is_showcase(services, project)
+                write = True  # a job is only ever cancelled
+            else:
+                return None
+        except NotFound:
+            return None  # the route answers "not found" itself
+        verdict = owners.allowed(
+            owner, item_owner, private=settings.private_projects, showcase=showcase, write=write
+        )
+        if verdict == "read-only":
+            message = f"this {what} is a showcase: it can be watched, not changed"
+            return JSONResponse({"detail": message, "code": "showcase"}, status_code=403)
+        if verdict == "hidden":
+            return JSONResponse({"detail": f"no {what} with that id"}, status_code=404)
+        return None
+
+    # Defined before the guard, so it runs after it: a cross-site request is refused first.
+    @app.middleware("http")
+    async def ownership(request: Request, call_next: Callable) -> Response:
+        token, fresh = owners.token_from(request)
+        request.state.owner = owners.owner_of(token)
+        refused = None
+        if request.url.path.startswith("/api/"):
+            refused = await run_in_threadpool(access, request.method, request.url.path, request.state.owner)
+        response = refused or await call_next(request)
+        if fresh:
+            response.set_cookie(
+                owners.COOKIE,
+                token,
+                max_age=owners.MAX_AGE,
+                httponly=True,
+                samesite="lax",
+                secure=owners.served_over_https(request),
+                path="/",
+            )
+        return response
 
     @app.middleware("http")
     async def guard(request: Request, call_next: Callable) -> Response:
@@ -354,12 +414,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse({"ok": True, "models": models, "missing": [m for m in needed if m not in models]})
 
     @app.get("/api/projects")
-    def list_projects() -> list[dict[str, Any]]:
-        return [summary(services, p) for p in db.list_projects()]
+    def list_projects(request: Request) -> list[dict[str, Any]]:
+        owner = request.state.owner
+        return [
+            summary(services, p)
+            for p in db.list_projects()
+            if not settings.private_projects or p.owner == owner or is_showcase(services, p)
+        ]
 
     @app.post("/api/projects", status_code=201)
-    def new_project(body: NewProject) -> dict[str, Any]:
-        return view(services, create_project(services, body.path, body.title))
+    def new_project(body: NewProject, request: Request) -> dict[str, Any]:
+        return view(services, create_project(services, body.path, body.title, owner=request.state.owner))
 
     @app.get("/api/projects/{project_id}")
     def get_project(project_id: str) -> dict[str, Any]:
@@ -589,12 +654,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return db.get_novel(novel_id)
 
     @app.get("/api/novels")
-    def list_novels() -> list[dict[str, Any]]:
-        return [novel_summary(n) for n in db.list_novels()]
+    def list_novels(request: Request) -> list[dict[str, Any]]:
+        owner = request.state.owner
+        return [
+            novel_summary(services, n)
+            for n in db.list_novels()
+            if not settings.private_projects or n.owner == owner or n.id in settings.showcase
+        ]
 
     @app.post("/api/novels", status_code=201)
-    def new_novel(body: NovelFields) -> dict[str, Any]:
-        return novel_view(services, create_novel(services, **body.model_dump()))
+    def new_novel(body: NovelFields, request: Request) -> dict[str, Any]:
+        return novel_view(services, create_novel(services, **body.model_dump(), owner=request.state.owner))
 
     @app.get("/api/novels/{novel_id}")
     def get_novel(novel_id: str) -> dict[str, Any]:

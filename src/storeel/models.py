@@ -209,6 +209,7 @@ class Novel(Strict):
     updated_at: str
     chapters: list[Chapter] = Field(default_factory=list)
     bible: Bible = Field(default_factory=Bible)
+    owner: str | None = None  # the browser that made it (a hash of its cookie); None: made before owners
 
     _clean_watermark = field_validator("watermark")(_one_line)
 
@@ -623,6 +624,7 @@ class Project(Strict):
     usage: Usage = Field(default_factory=Usage)
     error: str | None = None  # why the last job failed
     agent: AgentChat = Field(default_factory=AgentChat)  # the editing agent's conversation
+    owner: str | None = None  # the browser that made it (a hash of its cookie); None: made before owners
 
     def inputs(self) -> list[Clip]:
         """The clips that make up the reel, in order."""

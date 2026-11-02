@@ -34,7 +34,11 @@ ACTIVE_STAGE = {
 
 
 def create_project(
-    services: Services, path: str, title: str = DEFAULT_TITLE, style: Style | None = None
+    services: Services,
+    path: str,
+    title: str = DEFAULT_TITLE,
+    style: Style | None = None,
+    owner: str | None = None,
 ) -> Project:
     stamp = now_iso()
     project = Project(
@@ -44,6 +48,7 @@ def create_project(
         created_at=stamp,
         updated_at=stamp,
         style=style or Style(),
+        owner=owner,
     )
     services.db.create_project(project)
     return project
@@ -146,6 +151,8 @@ def view(services: Services, project: Project) -> dict[str, Any]:
     """The project as the web UI sees it."""
     job = services.db.latest_job(project.id)
     data = project.model_dump(mode="json")
+    data.pop("owner", None)  # the browser's id is the server's business
+    data["read_only"] = is_showcase(services, project)
     data["stage"] = stage(project, job)
     data["job"] = job.view() if job else None
     data["usage"]["estimated_usd"] = project.usage.estimated_usd
@@ -191,4 +198,11 @@ def summary(services: Services, project: Project) -> dict[str, Any]:
         "input_seconds": round(sum(c.duration for c in project.inputs()), 1),
         "renders": len(project.renders),
         "cover": cover,
+        "read_only": is_showcase(services, project),
     }
+
+
+def is_showcase(services: Services, project: Project) -> bool:
+    """A reel everyone may watch and nobody may change: listed, or its novel listed."""
+    showcase = services.settings.showcase
+    return project.id in showcase or bool(project.novel_id and project.novel_id in showcase)
