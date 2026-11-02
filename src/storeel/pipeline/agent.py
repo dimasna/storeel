@@ -31,12 +31,15 @@ from ..models import (
     Display,
     Novel,
     Project,
+    StoryShow,
+    StorySwitch,
     Style,
     text_model_name,
 )
 from . import picture_check
 from .heard import caption_review
 from .part import outfit_entry, outfit_redraws
+from .story_compose import MIN_HOLD, calm, timeline
 from .transcribe import retime
 
 MAX_STEPS = 8  # model calls per request
@@ -59,23 +62,38 @@ wording (use_script_words). Captions are timed to the speech again automatically
 from a new prompt (change_picture).
 - A novel part's cast: propose changing what a character wears (change_outfit). Their portrait \
 is drawn again, with the pictures made from it.
+- A novel part's screens: who and what is on screen while each beat is said \
+(set_beat_screen), and the moment the screen changes inside a beat, on the words where it \
+should (set_beat_switch). This is how a character is made to appear when they are mentioned or \
+speak. Use only pictures listed in 'drawn'.
 - Style: captions, watermark, how the speaker looks behind a picture, the pictures' look and \
 amount (set_style).
 - Propose rendering the reel (render).
 
 Rules:
-- edit_caption, use_script_words, show_pictures and set_style apply immediately.
+- edit_caption, use_script_words, show_pictures, set_style, set_beat_screen and \
+set_beat_switch apply immediately.
 - change_picture, change_outfit and render only propose the work: the user approves it with a \
 button. Never say a picture was redrawn or a reel was rendered; say it is waiting for their \
 approval.
 - For change_outfit, write the whole outfit in English, like the current one, and change only \
 what the user asked for (a new colour keeps the rest of the outfit). Pass on the notes \
 change_outfit returns.
+- A novel part's timing: compare each beat's 'says' with its 'screens'. A character is on \
+screen at the wrong time when they stand there while another is talked about, when a planned \
+screen was too short to show ('not_shown'), or when they come in late because a short screen \
+kept the one before (kept_from_a_nearby_beat). To bring a character in as their name is said, \
+use set_beat_switch on the words that name them; to have them for the whole beat, use \
+set_beat_screen. When the user does not say which beat, start with the beats that have \
+'not_shown', then the ones whose words name or quote someone who is not on screen then; fix \
+those and say which beats you changed. Keep what already fits. A prop that 'already_shows' \
+people is a scene of them: do not also stand those people at the bottom. Check 'screens_now' \
+in each result: a screen under two seconds flashes by, so pick earlier words.
 - Call render only when the user asks for the reel to be rendered or exported.
 - To have fewer pictures, hide the least useful ones instead of proposing new ones.
 - visual_style, visuals, picture_layout and language only change the reel after the user \
-presses "Update pictures" on the page. Caption, watermark and speaker settings show in the \
-next render. Tell the user when this applies.
+presses "Update pictures" on the page. Caption, watermark, speaker and screen changes show in \
+the next render. Tell the user when this applies.
 - You cannot upload or record video, undo, delete anything, or redo every picture. Say so \
 briefly and point to the page.
 - Times are seconds from the start of the reel. Use the ids from the reel data.
@@ -190,6 +208,39 @@ class Render(_Args):
     )
 
 
+_CHARACTERS = (
+    "Ids of up to two drawn characters or variants (from 'drawn') who stand at the bottom: [] for"
+    " nobody. Leave out to keep who stands there."
+)
+_PROP = "Id of a drawn prop shown in the upper half ('' for none). Leave out to keep it."
+_PHOTO = "Id of a drawn photo card shown in the upper half ('' for none). Leave out to keep it."
+_TAG = "A short red tag at the top, in the reel's language ('' for none). Leave out to keep it."
+
+
+class SetBeatScreen(_Args):
+    beat: int = Field(ge=1, description="The beat's number from the reel data.")
+    characters: list[str] | None = Field(None, max_length=2, description=_CHARACTERS)
+    prop: str | None = Field(None, max_length=40, description=_PROP)
+    photo: str | None = Field(None, max_length=40, description=_PHOTO)
+    tag: str | None = Field(None, max_length=40, description=_TAG)
+
+
+class SetBeatSwitch(_Args):
+    beat: int = Field(ge=1, description="The beat's number from the reel data.")
+    at: str = Field(
+        max_length=200,
+        description=(
+            "Words of the beat, copied from its 'says', where the screen changes: the new screen"
+            " comes in when they are spoken. Pick words a few seconds into the beat. '' removes"
+            " the change, so the beat keeps its first screen throughout."
+        ),
+    )
+    characters: list[str] | None = Field(None, max_length=2, description=_CHARACTERS)
+    prop: str | None = Field(None, max_length=40, description=_PROP)
+    photo: str | None = Field(None, max_length=40, description=_PHOTO)
+    tag: str | None = Field(None, max_length=40, description=_TAG)
+
+
 def _clean_schema(node: Any, names: bool = False) -> Any:
     """A Pydantic JSON schema without its "title" and "default" labels (`names`: `node` maps
     property names to schemas, so its keys are kept)."""
@@ -257,6 +308,22 @@ TOOLS: list[dict[str, Any]] = [
         " approval. Only when the user asks to render or export.",
         Render,
     ),
+    _tool(
+        "set_beat_screen",
+        "A novel part: change what the screen shows while a beat is said (before its change, if it"
+        " has one): who stands at the bottom, the prop or photo up top, the red tag. Only drawn"
+        " pictures. Applies immediately and shows in the next render; the beat keeps its screens"
+        " even when they are short.",
+        SetBeatScreen,
+    ),
+    _tool(
+        "set_beat_switch",
+        "A novel part: make the screen change in the middle of a beat, when the given words are"
+        " spoken (e.g. a character appears as their name is said), or remove the change. Fields"
+        " left out are kept from the screen after the change (or, if the beat had none, from its"
+        " first screen). Applies immediately and shows in the next render.",
+        SetBeatSwitch,
+    ),
 ]
 
 
@@ -317,11 +384,96 @@ def reel_data(project: Project, novel: Novel | None = None) -> dict[str, Any]:
     }
     if project.path == "novel":
         data["cast"] = _cast(project, novel)
+        data["beats"] = _beats(project)
+        data["drawn"] = _drawn(project)
         data["pictures_note"] = (
-            "A novel part's pictures come from its part script. What a character in the cast wears"
-            " can be changed with change_outfit; no other picture of a novel part can be changed here."
+            "A novel part's pictures follow its beats. Each beat's 'screens' are what the viewer sees"
+            " while it is said, with times; 'set' is what the beat asks for. A screen shorter than"
+            f" {MIN_HOLD:g}s keeps the one before it unless the beat is pinned (any edit pins it)."
+            " Change a beat's screen with set_beat_screen and the moment it changes with"
+            " set_beat_switch. What a cast member wears is changed with change_outfit."
         )
     return data
+
+
+def _show_data(show: StoryShow) -> dict[str, Any]:
+    """What one screen shows, without its empty parts."""
+    out: dict[str, Any] = {}
+    if show.characters:
+        out["characters"] = list(show.characters)
+    for name in ("prop", "photo", "tag"):
+        if getattr(show, name):
+            out[name] = getattr(show, name)
+    if show.note.text:
+        out["note"] = show.note.text
+    if show.chat:
+        out["chat_messages"] = len(show.chat)
+    return out
+
+
+def _beats(project: Project) -> list[dict[str, Any]]:
+    """Each beat of a novel part: what is said, when, and what the screen shows meanwhile."""
+    story = project.story
+    if story is None:
+        return []
+    lines = timeline(project)
+    shown = calm(lines)
+    out = []
+    for number, beat in enumerate(story.beats, 1):
+        own = [line for line in lines if line.beat is beat]
+        item: dict[str, Any] = {"beat": number, "says": beat.text}
+        if beat.speaker and beat.speaker != "narrator":
+            item["quotes"] = beat.speaker
+        if own:
+            item["start"], item["end"] = round(own[0].start, 1), round(own[-1].end, 1)
+        screens = []
+        for line in (line for line in shown if line.beat is beat):
+            screen: dict[str, Any] = {"from": round(line.start, 1), "to": round(line.end, 1)}
+            screen.update(_show_data(line.show) if line.show else {})
+            own_show = line.show is beat.show or (beat.switch is not None and line.show is beat.switch.show)
+            if not own_show:
+                screen["kept_from_a_nearby_beat"] = True
+            screens.append(screen)
+        if screens:
+            item["screens"] = screens
+        item["set"] = {"shows": _show_data(beat.show)}
+        if beat.switch is not None:
+            item["set"]["then_at"] = beat.switch.at
+            item["set"]["then_shows"] = _show_data(beat.switch.show)
+        seen = [line.show for line in shown if line.beat is beat]
+        planned = [beat.show] + ([beat.switch.show] if beat.switch is not None else [])
+        missing = [_show_data(show) for show in planned if own and not any(s is show for s in seen)]
+        if missing:
+            item["not_shown"] = {
+                "screens": missing,
+                "why": f"too short (under {MIN_HOLD:g}s) on this recording, so another screen took its place",
+            }
+        if beat.pinned:
+            item["pinned"] = True
+        out.append(item)
+    return out
+
+
+def _drawn(project: Project) -> list[dict[str, Any]]:
+    """The pictures this part has drawn, which its beats can show. A scene prop already shows the
+    people in it."""
+    story = project.story
+    bases = {v.id: v.base for v in story.variants} if story else {}
+    props = {p.id: p for p in story.props} if story else {}
+    out = []
+    for picture in (project.part_pictures or {}).values():
+        if not picture.key or picture.error:
+            continue
+        item: dict[str, Any] = {"id": picture.id, "kind": picture.kind}
+        if picture.id in bases:
+            item["variant_of"] = bases[picture.id]
+        prop = props.get(picture.id)
+        if prop is not None:
+            item["is"] = _short(prop.description, 120)
+            if prop.refs:
+                item["already_shows"] = list(prop.refs)
+        out.append(item)
+    return out
 
 
 def _cast(project: Project, novel: Novel | None) -> list[dict[str, Any]]:
@@ -591,6 +743,194 @@ def _render(ctx: JobContext, raw: dict[str, Any], actions: list[AgentAction]) ->
     return {"ok": True, "waiting_for_approval": True, "summary": summary}
 
 
+# ---- a novel part's screens -----------------------------------------------------------------
+
+SHORT_SCREEN = 1.5  # seconds: a pinned screen shorter than this flashes by
+
+
+def _screen_change(
+    project: Project, show: StoryShow, args: SetBeatScreen | SetBeatSwitch
+) -> tuple[StoryShow, list[str]]:
+    """`show` with the arguments' changes, checked against the part's drawn pictures. Returns
+    the new screen and notes for the model (what was dropped to make room)."""
+    pictures = {p.id: p for p in (project.part_pictures or {}).values() if p.key and not p.error}
+    out = show.model_copy(deep=True)
+    notes: list[str] = []
+
+    def drawn(picture_id: str, kinds: tuple[str, ...], what: str) -> str:
+        picture = pictures.get(picture_id)
+        if picture is None or picture.kind not in kinds:
+            choices = sorted(p.id for p in pictures.values() if p.kind in kinds)
+            raise ToolError(
+                f"{picture_id} is not a drawn {what} of this part"
+                + (f" (drawn: {', '.join(choices)})" if choices else f" (it has no {what}s)")
+            )
+        return picture_id
+
+    if args.characters is not None:
+        people = list(dict.fromkeys(c.strip() for c in args.characters if c.strip()))
+        out.characters = [drawn(c, ("character", "variant"), "character") for c in people][:2]
+    for name, kind in (("prop", "prop"), ("photo", "photo")):
+        value = getattr(args, name)
+        if value is None:
+            continue
+        value = value.strip()
+        setattr(out, name, drawn(value, (kind,), kind) if value else "")
+        if value:  # one main picture up top: the new one takes the place of the others
+            other = "photo" if name == "prop" else "prop"
+            if getattr(out, other):
+                notes.append(f"the {other} {getattr(out, other)} was replaced by the {name}")
+                setattr(out, other, "")
+            if out.note.text or out.chat:
+                notes.append("the note or chat up top was replaced")
+                out.note = type(out.note)()
+                out.chat = []
+    if args.tag is not None:
+        out.tag = " ".join(args.tag.split())[:40]
+    return out, notes
+
+
+def _beat_screens(project: Project, number: int) -> list[dict[str, Any]]:
+    beat = project.story.beats[number - 1] if project.story else None
+    out = []
+    for line in calm(timeline(project)):
+        if beat is not None and line.beat is beat:
+            screen = {"from": round(line.start, 1), "to": round(line.end, 1)}
+            screen.update(_show_data(line.show) if line.show else {})
+            out.append(screen)
+    return out
+
+
+def _who(project: Project, show: StoryShow, names: dict[str, str] | None = None) -> str:
+    """A screen in a few words, by what viewers call the characters, for the chat."""
+    story = project.story
+    names = {**({c.id: _called(c.label, c.name) for c in story.characters} if story else {}), **(names or {})}
+    bases = {v.id: v.base for v in story.variants} if story else {}
+    people = [names.get(c) or names.get(bases.get(c, ""), c.replace("_", " ")) for c in show.characters]
+    parts = [" and ".join(people)] if people else []
+    if show.prop:
+        parts.append(show.prop.replace("_", " "))
+    if show.photo:
+        parts.append(show.photo.replace("_", " "))
+    return ", ".join(parts) or "no pictures"
+
+
+def _part_beat(project: Project, number: int):
+    story = project.story
+    if project.path != "novel" or story is None:
+        raise ToolError("only a novel part has beats")
+    if project.transcript is None or project.part_pictures is None:
+        raise ToolError("the part has not been processed yet")
+    if not 1 <= number <= len(story.beats):
+        raise ToolError(f"there is no beat {number} (the part has {len(story.beats)})")
+    return story.beats[number - 1]
+
+
+def _screen_result(project: Project, number: int, notes: list[str]) -> dict[str, Any]:
+    screens = _beat_screens(project, number)
+    out: dict[str, Any] = {"ok": True, "screens_now": screens}
+    short = [s for s in screens if s["to"] - s["from"] < SHORT_SCREEN]
+    if short:
+        notes.append(
+            f"a screen lasts under {SHORT_SCREEN:g}s, so it flashes by: change it a few words earlier"
+        )
+    if notes:
+        out["notes"] = notes
+    out["note"] = "shows in the next render"
+    return out
+
+
+def _called(label: str, name: str) -> str:
+    """What viewers call a character ("Mara"), or their full name when they have no label."""
+    label = label.strip()
+    return label[:1].upper() + label[1:] if label else name
+
+
+def _names(ctx: JobContext, project: Project) -> dict[str, str]:
+    """The novel's characters by id, as viewers call them, for the chat's summaries."""
+    novel = _novel(ctx, project)
+    return {cid: _called(c.label, c.name) for cid, c in novel.bible.characters.items()} if novel else {}
+
+
+def _set_beat_screen(ctx: JobContext, raw: dict[str, Any], actions: list[AgentAction]) -> dict[str, Any]:
+    args = SetBeatScreen.model_validate(raw)
+    if all(getattr(args, f) is None for f in ("characters", "prop", "photo", "tag")):
+        raise ToolError("send what the screen should show: characters, prop, photo or tag")
+    _part_beat(ctx.project(), args.beat)
+    notes: list[str] = []
+
+    def change(p: Project) -> bool:
+        beat = _part_beat(p, args.beat)
+        show, why = _screen_change(p, beat.show, args)
+        notes.extend(why)
+        if show == beat.show and beat.pinned:
+            return False
+        beat.show, beat.pinned = show, True
+        return True
+
+    project, changed = ctx.update(change)
+    if not changed:
+        screens = _beat_screens(project, args.beat)
+        return {"ok": True, "note": "the beat already shows that", "screens_now": screens}
+    beat = project.story.beats[args.beat - 1]
+    screens = _beat_screens(project, args.beat)
+    start = screens[0]["from"] if screens else 0.0
+    who = _who(project, beat.show, _names(ctx, project))
+    actions.append(_action("screen", f"Beat {args.beat} at {_clock(start)} shows {who}"))
+    return _screen_result(project, args.beat, notes)
+
+
+def _set_beat_switch(ctx: JobContext, raw: dict[str, Any], actions: list[AgentAction]) -> dict[str, Any]:
+    args = SetBeatSwitch.model_validate(raw)
+    at = " ".join(args.at.split())
+    beat = _part_beat(ctx.project(), args.beat)
+    if at:
+        where = beat.text.lower().find(at.lower())
+        if where < 0:
+            raise ToolError(f"beat {args.beat} does not say {at!r}: copy words from its 'says'")
+        if where == 0:
+            raise ToolError("those words start the beat: use set_beat_screen to change its first screen")
+        at = beat.text[where : where + len(at)]  # as the beat writes them
+    notes: list[str] = []
+
+    def change(p: Project) -> bool:
+        beat = _part_beat(p, args.beat)
+        if not at:
+            if beat.switch is None:
+                return False
+            beat.switch, beat.pinned = None, True
+            return True
+        base = beat.switch.show if beat.switch is not None else beat.show
+        show, why = _screen_change(p, base, args)
+        notes.extend(why)
+        new = StorySwitch(at=at, show=show)
+        if beat.switch == new and beat.pinned:
+            return False
+        beat.switch, beat.pinned = new, True
+        return True
+
+    project, changed = ctx.update(change)
+    if not changed:
+        screens = _beat_screens(project, args.beat)
+        return {"ok": True, "note": "the beat already does that", "screens_now": screens}
+    beat = project.story.beats[args.beat - 1]
+    screens = _beat_screens(project, args.beat)
+    names = _names(ctx, project)
+    if beat.switch is None:
+        summary = f"Beat {args.beat} keeps one screen: {_who(project, beat.show, names)}"
+    else:
+        when = f" at {_clock(screens[1]['from'])}" if len(screens) > 1 else ""
+        who = _who(project, beat.switch.show, names)
+        summary = f'Beat {args.beat} switches to {who} on "{_short(at, 40)}"{when}'
+        if len(screens) < 2:
+            notes.append(
+                "the change could not be placed: those words were not heard inside the beat, or they"
+                " come too near its start or end"
+            )
+    actions.append(_action("screen", summary))
+    return _screen_result(project, args.beat, notes)
+
+
 TOOL_FUNCTIONS: dict[str, Tool] = {
     "edit_caption": _edit_caption,
     "use_script_words": _use_script_words,
@@ -599,6 +939,8 @@ TOOL_FUNCTIONS: dict[str, Tool] = {
     "change_picture": _change_picture,
     "change_outfit": _change_outfit,
     "render": _render,
+    "set_beat_screen": _set_beat_screen,
+    "set_beat_switch": _set_beat_switch,
 }
 
 

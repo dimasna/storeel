@@ -246,7 +246,7 @@ export type AgentActionStatus = "done" | "pending" | "approved" | "dismissed" | 
 
 export interface AgentAction {
   id: string;
-  kind: "caption" | "pictures" | "style" | "picture" | "outfit" | "render";
+  kind: "caption" | "pictures" | "style" | "picture" | "outfit" | "render" | "screen";
   summary: string;
   status: AgentActionStatus;
   moment_id: string | null;

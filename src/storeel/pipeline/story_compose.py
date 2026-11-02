@@ -238,14 +238,19 @@ def calm(lines: list[Line]) -> list[Line]:
     that would leave a part that short is dropped: the beat keeps the picture of its longer part.
     A beat that short keeps the picture before it (or, right after the hook, takes the next one),
     so the screen does not flash; short beats in a row that together last long enough share the
-    first one's picture instead (a memory told in two quick beats still gets its picture)."""
+    first one's picture instead (a memory told in two quick beats still gets its picture). A beat
+    the creator pinned keeps its own screens however short they are."""
+
+    def pinned(line: Line) -> bool:
+        return line.beat is not None and line.beat.pinned
+
     out: list[Line] = []
     i = 0
     while i < len(lines):
         line, after = lines[i], lines[i + 1] if i + 1 < len(lines) else None
         if after is not None and line.kind == after.kind == "beat" and after.beat is line.beat:
             first, second = line.end - line.start, after.end - after.start
-            if min(first, second) < MIN_HOLD:
+            if min(first, second) < MIN_HOLD and not pinned(line):
                 show = after.show if second > first else line.show
                 out.append(replace(line, end=after.end, show=show))
                 i += 2
@@ -254,7 +259,7 @@ def calm(lines: list[Line]) -> list[Line]:
         i += 1
 
     def short(k: int) -> bool:
-        return out[k].kind == "beat" and out[k].end - out[k].start < MIN_HOLD
+        return out[k].kind == "beat" and out[k].end - out[k].start < MIN_HOLD and not pinned(out[k])
 
     k = 0
     while k < len(out):

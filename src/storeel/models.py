@@ -255,6 +255,9 @@ class Beat(Strict):
     show: StoryShow = Field(default_factory=StoryShow)
     switch: StorySwitch | None = None
     take: str = ""  # the scene (take) this beat is recorded in
+    # The creator chose what this beat shows and when (in the editor's chat): its screens stay
+    # even when they are shorter than the compositor would otherwise allow.
+    pinned: bool = False
 
 
 class StoryCharacter(Strict):
@@ -568,7 +571,7 @@ class AgentAction(Strict):
     """
 
     id: str
-    kind: Literal["caption", "pictures", "style", "picture", "outfit", "render"]
+    kind: Literal["caption", "pictures", "style", "picture", "outfit", "render", "screen"]
     summary: str  # what the chat shows, e.g. 'Caption at 0:12: "..."'
     status: Literal["done", "pending", "approved", "dismissed", "failed"] = "done"
     moment_id: str | None = None  # "picture": the moment to draw again
