@@ -59,7 +59,25 @@ from ..projects import create_project, import_clip, summary, view
 from ..services import Services, valid_key
 
 log = logging.getLogger(__name__)
-STATIC = Path(__file__).resolve().parent / "static"
+
+
+def _frontend_dir() -> Path:
+    """Where the single-page app is served from.
+
+    Defaults to the bundled `static/` folder; a deployment (e.g. Modal) can point
+    STOREEL_FRONTEND_DIR at a built Vite app instead. The chosen folder must hold an
+    `index.html`; its `assets/` sub-folder (Vite's hashed bundles) is served if present.
+    """
+    import os
+
+    override = os.environ.get("STOREEL_FRONTEND_DIR", "").strip()
+    bundled = Path(__file__).resolve().parent / "static"
+    if override and (Path(override) / "index.html").is_file():
+        return Path(override)
+    return bundled
+
+
+STATIC = _frontend_dir()
 MEDIA_PREFIXES = ("uploads/", "refs/", "assets/", "renders/", "part/")
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 UPLOAD_SUFFIXES = ("/clips", "/take")
@@ -187,9 +205,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return JSONResponse({"detail": "cross-site requests are not allowed"}, status_code=403)
             if request.url.path.endswith(UPLOAD_SUFFIXES):
                 length = request.headers.get("content-length", "")
-                if not length.isdigit():
-                    return JSONResponse({"detail": "uploads need a Content-Length"}, status_code=411)
-                if int(length) > settings.max_upload_mb * 1_000_000 + 1_000_000:
+                # Reject an oversized body up front when the length is declared. A missing or
+                # non-numeric length (e.g. a chunked upload behind a proxy) is allowed through:
+                # import_clip streams the body in chunks and enforces max_upload_mb itself.
+                if length.isdigit() and int(length) > settings.max_upload_mb * 1_000_000 + 1_000_000:
                     return JSONResponse(
                         {"detail": f"the file is larger than {settings.max_upload_mb} MB"}, status_code=413
                     )
@@ -719,6 +738,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
+    # A built Vite app references its hashed bundles under /assets; serve them when present.
+    assets_dir = STATIC / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
     @app.get("/font.ttf", include_in_schema=False)
     def font() -> FileResponse:
         return FileResponse(
@@ -728,5 +752,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
         return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+
+    # Serve files Vite emits at the web root (favicon, icons, manifest, …) without a catch-all:
+    # the SPA uses hash routing, so no non-asset path needs to resolve to index.html.
+    @app.get("/{filename}", include_in_schema=False)
+    def root_file(filename: str) -> FileResponse:
+        candidate = (STATIC / filename).resolve()
+        if candidate.is_file() and candidate.is_relative_to(STATIC.resolve()) and "/" not in filename:
+            media_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+            return FileResponse(candidate, media_type=media_type, headers={"Cache-Control": "no-cache"})
+        raise NotFound("no such file")
 
     return app
