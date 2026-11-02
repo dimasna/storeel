@@ -6,8 +6,8 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Storeel's palette. The neutrals lean a little cool, toward the accent gradient (teal to
- * violet); the accent is its teal, the primary a blue between the two. Light first, then dark.
+ * Storeel's palette. The neutrals lean a little cool, toward the brand gradient (the logo's:
+ * teal, blue, violet); the accent is its teal and the primary its blue. Light first, then dark.
  */
 :root {
   color-scheme: light;
@@ -34,8 +34,8 @@
   --glass-line: #10111414;
   --glass-solid: #ffffffc4;
 
-  /* The accent gradient: teal to violet. */
-  --gradient-accent: linear-gradient(to right, #00c6cf 0%, #7b5cfa 100%);
+  /* The brand gradient, the same as the logo's (web/src/components/brand/logo.tsx). */
+  --gradient-accent: linear-gradient(to right, #00c6cf 0%, #3d7bf7 55%, #7b5cfa 100%);
 }
 
 .dark {

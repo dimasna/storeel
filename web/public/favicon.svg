@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="storeel" x1="3" y1="2" x2="45" y2="46" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00C6CF"/>
+      <stop offset="0.55" stop-color="#3D7BF7"/>
+      <stop offset="1" stop-color="#7B5CFA"/>
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="12" fill="url(#storeel)"/>
+  <g transform="translate(-0.8 0)">
+    <g opacity="0.58">
+      <path d="M22 15.6C18.8 13.7 15 12.9 11.4 13.3V34.5C15 34.1 18.8 34.9 22 36.8Z" fill="#fff" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+    </g>
+    <path d="M28 17.6V34.4L38.6 26Z" fill="#fff" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>
+  </g>
+</svg>

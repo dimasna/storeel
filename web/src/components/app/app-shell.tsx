@@ -4,6 +4,7 @@ import { api, apiKey } from "@/lib/api";
 import type { ProjectSummary } from "@/lib/types";
 import { Link, PANEL_ID, useHashPath } from "@/lib/router";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { LogoLockup } from "@/components/brand/logo";
 import { cn } from "@/lib/utils";
 
 // The app frame, as in OpusClip's studio: on large screens a dark sidebar (navigation, your
@@ -32,16 +33,8 @@ function useRecentReels(path: string): ProjectSummary[] | null {
 
 export function Logo({ className }: { className?: string }) {
   return (
-    <Link to="/" className={cn("flex items-center gap-2.5", className)} aria-label="Storeel Studio home">
-      <span className="grid size-8 place-items-center rounded-xl" style={{ background: "var(--gradient-accent)" }}>
-        <svg viewBox="0 0 32 32" className="size-4" aria-hidden>
-          <path d="M12 9l12 7-12 7z" fill="white" />
-        </svg>
-      </span>
-      <span className="flex flex-col leading-none">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Storeel</span>
-        <span className="text-[17px] font-bold tracking-tight text-foreground">Studio</span>
-      </span>
+    <Link to="/" className={cn("flex items-center", className)} aria-label="Storeel Studio home">
+      <LogoLockup />
     </Link>
   );
 }
@@ -53,7 +46,7 @@ function KeyButton({ onClick, full }: { onClick: () => void; full?: boolean }) {
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex h-10 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition-colors",
+        "inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-4 text-sm font-semibold transition-colors max-sm:px-3",
         full && "w-full",
         hint
           ? "border border-border-strong text-foreground hover:border-accent/60"
@@ -61,7 +54,16 @@ function KeyButton({ onClick, full }: { onClick: () => void; full?: boolean }) {
       )}
     >
       <KeyRound className="size-4" />
-      {hint ? `API key ${hint}` : "Add API key"}
+      {hint ? (
+        <span>
+          <span className="max-sm:hidden">API key </span>
+          {hint}
+        </span>
+      ) : (
+        <span>
+          Add <span className="max-sm:hidden">API </span>key
+        </span>
+      )}
     </button>
   );
 }

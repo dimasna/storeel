@@ -280,7 +280,7 @@ export function ChapterComposer({
           value={novel ? novel.language : language}
           disabled={Boolean(novel)}
           options={[
-            ["auto", chars >= MIN_CHARS ? `${labelFor("novel_language", lang)} (auto)` : "Detect language"],
+            ["auto", chars >= MIN_CHARS ? `${labelFor("novel_language", lang)} (auto)` : "Auto-detect"],
             ...options("language", "novel_language"),
           ]}
           onChange={setLanguage}
