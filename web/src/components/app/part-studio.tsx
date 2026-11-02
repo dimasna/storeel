@@ -100,6 +100,7 @@ export function PartStudio({ state }: { state: UseProject }) {
   const nextTake = useRef<number | null>(null);
   const videoInput = useRef<HTMLInputElement>(null);
   const [rewrite, setRewrite] = useState<string | null>(null);
+  const [uploading, setUploading] = useState<number | null>(null); // the video's upload, 0..1
 
   // Start approved the whole first pass: once every take is in (or one video is), the reel is
   // transcribed, drawn and rendered without asking again. A run the user stopped is not
@@ -123,8 +124,17 @@ export function PartStudio({ state }: { state: UseProject }) {
     setTakeAt(at >= 0 ? at : 0);
   };
 
-  const uploadVideo = (file: File) =>
-    state.act(() => upload(`/api/projects/${project.id}/clips`, file, file.name), "Video added");
+  const uploadVideo = async (file: File) => {
+    setUploading(0);
+    try {
+      await state.act(
+        () => upload(`/api/projects/${project.id}/clips`, file, file.name, setUploading),
+        "Video added",
+      );
+    } finally {
+      setUploading(null);
+    }
+  };
 
   const retry = (step: FlowStep) => {
     if (step.id === "write" || step.id === "check") return start();
@@ -217,6 +227,7 @@ export function PartStudio({ state }: { state: UseProject }) {
               {story && !writing && !rec.complete ? (
                 <YourTurn
                   project={project}
+                  uploading={uploading}
                   onRecord={() => record()}
                   onUpload={() => videoInput.current?.click()}
                 />
@@ -339,7 +350,7 @@ function Plan({ project, estimate }: { project: Project; estimate: PartEstimate 
       {`Voice: ${labelFor("narration", part.narration)}. Pictures: ${labelFor("visual_style", part.visual_style)}. Language: ${labelFor("novel_language", part.language)}.\n\n`}
       {"Then it's your turn to record it from a teleprompter, line by line. I transcribe your narration, draw the characters and scenes, and render the reel.\n\n"}
       <span className="text-muted-foreground">
-        {`Estimated ≈ ${usd(estimate.total_usd)} at Meta's list prices: writing ${usd(estimate.write_usd)}, about ${estimate.pictures} pictures ${usd(estimate.draw_usd)}, transcription ${transcribe}. Rendering is free.`}
+        {`Writing and checking take 2 to 4 minutes. Estimated ≈ ${usd(estimate.total_usd)} at Meta's list prices: writing ${usd(estimate.write_usd)}, about ${estimate.pictures} pictures ${usd(estimate.draw_usd)}, transcription ${transcribe}. Rendering is free.`}
       </span>
     </AssistantBubble>
   );
@@ -468,10 +479,12 @@ function Written({ project }: { project: Project }) {
 
 function YourTurn({
   project,
+  uploading,
   onRecord,
   onUpload,
 }: {
   project: Project;
+  uploading: number | null;
   onRecord: () => void;
   onUpload: () => void;
 }) {
@@ -485,7 +498,8 @@ function YourTurn({
       <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
         {rec.takes} short takes, each a line or two read from the teleprompter in one go.{" "}
         {rec.recorded ? `${rec.recorded} of ${rec.takes} done. ` : ""}
-        After the last one, the reel is made on its own.
+        After the last one, the reel is made on its own. Or upload one video of you reading the
+        whole part.
       </p>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-border-strong">
         <div
@@ -493,14 +507,23 @@ function YourTurn({
           style={{ width: `${rec.takes ? Math.round((rec.recorded / rec.takes) * 100) : 0}%` }}
         />
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button variant="primary" className="h-11" onClick={onRecord}>
-          <Mic className="size-4" /> {rec.recorded ? `Record take ${next + 1}` : "Start recording"}
-        </Button>
-        <Button className="h-11" onClick={onUpload}>
-          <Upload className="size-4" /> Upload one video
-        </Button>
-      </div>
+      {uploading !== null ? (
+        <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-4 shrink-0 animate-spin text-accent" />
+          <span className="shrink-0">Uploading your video</span>
+          <ProgressBar value={uploading} />
+          <span className="shrink-0 tabular-nums">{Math.round(uploading * 100)}%</span>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button variant="primary" className="h-11" onClick={onRecord}>
+            <Mic className="size-4" /> {rec.recorded ? `Record take ${next + 1}` : "Start recording"}
+          </Button>
+          <Button className="h-11" onClick={onUpload}>
+            <Upload className="size-4" /> Upload one video
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

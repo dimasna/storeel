@@ -661,14 +661,22 @@ class PartCompositor(Compositor):
             f"Part {story.part}", story.chapter_title, novel_title, round(0.88 * W), round(0.05 * H)
         )
         out = [(titles, (W // 2 - titles.width // 2, round(END_TOP * H)))]
+        end = pill(words["end"], round(0.032 * H), WHITE, INK)
+        pill_top = round(END_PILL_Y * H) - end.height // 2
         key_prop = next((p.id for p in story.props if not p.refs and sprites.image(p.id) is not None), None)
         if key_prop:
             picture = sprites.image(key_prop)
             info = sprites.pictures.get(key_prop)
-            if picture is not None:
-                box = (round(0.6 * W), round(0.22 * H))
+            # Between the titles and the pill: a two-line chapter title pushes the object down
+            # (or makes it smaller) instead of drawing it over the novel's name.
+            gap = round(0.02 * H)
+            title_bottom = round(END_TOP * H) + titles.height
+            room = pill_top - title_bottom - 2 * gap
+            if picture is not None and room >= round(0.06 * H):
+                box = (round(0.6 * W), min(round(0.22 * H), room))
                 sprite = cutout_sprite(picture, *box) if info and info.cutout else card(picture, *box)
-                out.append((sprite, (W // 2 - sprite.width // 2, round(END_PROP_Y * H) - sprite.height // 2)))
-        end = pill(words["end"], round(0.032 * H), WHITE, INK)
-        out.append((end, (W // 2 - end.width // 2, round(END_PILL_Y * H) - end.height // 2)))
+                top = round(END_PROP_Y * H) - sprite.height // 2
+                top = min(max(top, title_bottom + gap), pill_top - gap - sprite.height)
+                out.append((sprite, (W // 2 - sprite.width // 2, top)))
+        out.append((end, (W // 2 - end.width // 2, pill_top)))
         return out
