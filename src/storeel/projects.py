@@ -19,6 +19,7 @@ from .media import ffmpeg as ff
 from .models import DEFAULT_TITLE, Clip, Project, Style
 from .pipeline.heard import caption_review, heard_report
 from .pipeline.story import hook_opening
+from .pipeline.story_compose import calm, timeline
 from .services import Services
 
 log = logging.getLogger(__name__)
@@ -163,7 +164,32 @@ def view(services: Services, project: Project) -> dict[str, Any]:
     data["caption_notes"] = {str(turn): asdict(note) for turn, note in caption_review(project).items()}
     if project.path == "novel" and project.novel_id:
         data["novel"] = _novel_part(services, project)
+        data["screens"] = part_screens(project)
     return data
+
+
+def part_screens(project: Project) -> list[dict[str, Any]]:
+    """What a novel part's reel shows when: the hook, each beat's screens (as the render cuts
+    them), the poll and the call to action, on the reel's timeline. Empty until it is processed."""
+    story = project.story
+    if story is None or project.source is None or project.transcript is None:
+        return []
+    number = {id(beat): n for n, beat in enumerate(story.beats, 1)}
+    try:
+        lines = calm(timeline(project))
+    except Exception:  # a half-rewritten part must not break its page: the timeline waits
+        log.exception("part %s: no timeline", project.id)
+        return []
+    out = []
+    for line in lines:
+        show = line.show
+        item: dict[str, Any] = {"kind": line.kind, "start": round(line.start, 2), "end": round(line.end, 2)}
+        if line.beat is not None:
+            item["beat"] = number.get(id(line.beat))
+        if show is not None:
+            item.update(characters=list(show.characters), prop=show.prop, photo=show.photo, tag=show.tag)
+        out.append(item)
+    return out
 
 
 def _novel_part(services: Services, project: Project) -> dict[str, Any] | None:

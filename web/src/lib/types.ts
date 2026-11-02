@@ -295,6 +295,19 @@ export interface Project {
   heard: Record<string, HeardNote>;
   caption_notes: Record<string, CaptionNote>;
   novel: NovelPart | null;
+  /** A novel part's timeline: what the reel shows when (empty until it is processed). */
+  screens?: PartScreen[];
+}
+
+export interface PartScreen {
+  kind: "hook" | "beat" | "poll" | "cta";
+  start: number;
+  end: number;
+  beat?: number;
+  characters?: string[];
+  prop?: string;
+  photo?: string;
+  tag?: string;
 }
 
 export interface ProjectSummary {

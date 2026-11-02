@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { AnimatePresence, motion, useDragControls, useReducedMotion } from "motion/react";
 import { AlertCircle, ArrowUp, Check, Clock, Loader2, RotateCcw, Sparkles, X } from "lucide-react";
 import { api } from "@/lib/api";
@@ -495,9 +495,15 @@ export function ChatMessage({ message, applying }: { message: AgentMessage; appl
 }
 
 export function UserBubble({ children }: { children: ReactNode }) {
+  const plain = useContext(ChatLook) === "plain";
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-[15px] leading-snug text-primary-foreground lg:text-sm">
+      <div
+        className={cn(
+          "max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md px-3.5 py-2 text-[15px] leading-snug lg:text-sm",
+          plain ? "bg-panel-tile text-foreground" : "bg-primary text-primary-foreground",
+        )}
+      >
         {children}
       </div>
     </div>
@@ -505,10 +511,12 @@ export function UserBubble({ children }: { children: ReactNode }) {
 }
 
 export function AssistantBubble({ children, className }: { children: ReactNode; className?: string }) {
+  const plain = useContext(ChatLook) === "plain";
   return (
     <div
       className={cn(
-        "max-w-[92%] whitespace-pre-wrap break-words rounded-2xl rounded-bl-md border border-border bg-card px-3.5 py-2 text-[15px] leading-snug text-foreground lg:text-sm",
+        "whitespace-pre-wrap break-words text-[15px] leading-relaxed text-foreground lg:text-sm",
+        plain ? "px-1" : "max-w-[92%] rounded-2xl rounded-bl-md border border-border bg-card px-3.5 py-2 leading-snug",
         className,
       )}
     >
@@ -516,6 +524,10 @@ export function AssistantBubble({ children, className }: { children: ReactNode; 
     </div>
   );
 }
+
+/** How the chat draws messages: in bubbles (the editor's sheet) or as plain text beside a
+ * neutral bubble for the user (the part studio, after OpusClip's editor). */
+export const ChatLook = createContext<"bubbles" | "plain">("bubbles");
 
 function ActionLine({ action, applying }: { action: AgentAction; applying: boolean }) {
   const icon =
