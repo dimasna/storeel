@@ -19,6 +19,7 @@ import type { PartEstimate, Project, Scene } from "@/lib/types";
 import { jobActive, type UseProject } from "@/lib/use-project";
 import { partSteps, recording, type FlowStep } from "@/lib/part-flow";
 import { labelFor } from "@/lib/labels";
+import { useConfig } from "@/lib/config";
 import { Link } from "@/lib/router";
 import { expiresIn, megabytes, seconds } from "@/lib/format";
 import { useToast } from "@/lib/toast";
@@ -198,7 +199,7 @@ export function PartStudio({ state }: { state: UseProject }) {
         </Link>
       </div>
 
-      <div className="grid gap-5 lg:h-[calc(100dvh-10.5rem)] lg:min-h-[34rem] lg:grid-cols-[minmax(0,27rem)_minmax(0,1fr)]">
+      <div className="grid gap-5 lg:h-[calc(100dvh-9.5rem)] lg:min-h-[34rem] lg:grid-cols-[minmax(0,27rem)_minmax(0,1fr)]">
         {/* Chat */}
         <section className="order-2 flex min-h-0 flex-col rounded-3xl border border-border bg-card/60 lg:order-1">
           <div className="flex-1 overflow-y-auto overscroll-contain p-4">
@@ -596,11 +597,14 @@ function RewriteCard({
 }
 
 function ReelReady({ project, estimate }: { project: Project; estimate: PartEstimate }) {
+  const config = useConfig();
+  const ttl = config.ttl_hours ?? 0;
   const last = project.renders[project.renders.length - 1];
   return (
     <div className="flex flex-col items-start gap-2">
       <AssistantBubble>
-        {`Your reel is ready: ${seconds(last.duration)}, ${megabytes(last.size)}. It's kept for 24 hours (${expiresIn(project.updated_at)}), so download it. `}
+        {`Your reel is ready: ${seconds(last.duration)}, ${megabytes(last.size)}. `}
+        {ttl ? `It's kept for ${ttl} hours (${expiresIn(project.updated_at, ttl)}), so download it. ` : ""}
         {`Spent ≈ ${usd(project.usage.estimated_usd)} (estimated ${usd(estimate.total_usd)}).`}
       </AssistantBubble>
       <a

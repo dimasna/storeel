@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { ConfigProvider } from "@/lib/config";
 import { ToastProvider } from "@/lib/toast";
 import { useHashPath, parseRoute } from "@/lib/router";
-import { Header } from "@/components/app/header";
+import { AppShell } from "@/components/app/app-shell";
 import { KeyDialog } from "@/components/app/key-dialog";
 import { ErrorBoundary } from "@/components/app/error-boundary";
 import { HomePage } from "@/pages/home";
+import { ReelsPage } from "@/pages/reels";
 import { ProjectPage } from "@/pages/project";
 import { NovelPage } from "@/pages/novel";
 
@@ -37,15 +38,13 @@ function Shell() {
   }, []);
 
   return (
-    <div className="min-h-dvh">
-      <Header onKeyClick={openKey} />
-      <main className="mx-auto max-w-6xl px-4 pb-24 pt-6 sm:px-6">
-        {route.page === "home" && <HomePage />}
-        {route.page === "project" && <ProjectPage key={route.id} id={route.id} />}
-        {route.page === "novel" && <NovelPage key={route.id} id={route.id} />}
-      </main>
+    <AppShell onKeyClick={openKey}>
+      {route.page === "home" && <HomePage />}
+      {route.page === "reels" && <ReelsPage />}
+      {route.page === "project" && <ProjectPage key={route.id} id={route.id} />}
+      {route.page === "novel" && <NovelPage key={route.id} id={route.id} />}
       <KeyDialog open={keyOpen} reason={keyReason} onClose={() => setKeyOpen(false)} />
-    </div>
+    </AppShell>
   );
 }
 

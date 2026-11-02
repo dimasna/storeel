@@ -16,6 +16,8 @@
   --foreground: #101114;
   --muted-foreground: #5f636e;
   --card: #f2f3f6;
+  --frame: #e9eaee; /* the app frame around the panels */
+  --panel-tile: #e4e5ea; /* tiles and bubbles inside a panel */
   --border: #1011140f;
   --border-strong: #10111421;
 
@@ -43,6 +45,8 @@
   --foreground: #f3f4f6;
   --muted-foreground: #8a8d96;
   --card: #1a1b1f;
+  --frame: #000000;
+  --panel-tile: #26272c;
   --border: #ffffff0f;
   --border-strong: #ffffff1f;
 
@@ -70,6 +74,8 @@
   --color-popover-foreground: var(--foreground);
   --color-secondary: var(--card);
   --color-secondary-foreground: var(--foreground);
+  --color-frame: var(--frame);
+  --color-panel-tile: var(--panel-tile);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-input: var(--border);
@@ -96,7 +102,7 @@
   }
   body {
     @apply bg-background font-sans text-foreground antialiased;
-    overflow-x: clip;
+    overflow-x: clip; /* the headline's texture and the gallery run past the edge */
   }
   /* Tailwind 4 gives buttons the default arrow; anything clickable gets the hand. */
   button,
@@ -108,29 +114,38 @@
   }
 }
 
-/* A thin gradient edge on a rounded element, drawn as a ring masked to its border so the
-   element's own fill stays as it is. */
-.gradient-ring {
+/* The hero's badge: a pill with a thin rainbow edge, drawn as a ring masked to its border so the
+   pill itself stays see-through. */
+.rainbow-ring {
   position: relative;
 }
-.gradient-ring::after {
+.rainbow-ring::after {
   content: "";
   position: absolute;
   inset: 0;
   border: 1px solid transparent;
   border-radius: inherit;
-  background: var(--gradient-accent) border-box;
+  background: conic-gradient(from 200deg, #00c6cf, #3d7bf7, #7b5cfa, #ff7ab2, #00c6cf) border-box;
   mask:
     linear-gradient(#000 0 0) padding-box exclude,
     linear-gradient(#000 0 0) border-box;
-  opacity: 0.6;
   pointer-events: none;
 }
 
-/* Words painted with the accent gradient. */
-.gradient-text {
-  background-image: var(--gradient-accent);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+/* Gallery tiles play like short videos: a slow push-in (the caption is read word by word in JS). */
+@keyframes tile-push {
+  from {
+    transform: scale(1.02) translateY(0);
+  }
+  to {
+    transform: scale(1.12) translateY(-2%);
+  }
+}
+.tile-push {
+  animation: tile-push 9s ease-in-out infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile-push {
+    animation: none;
+  }
 }

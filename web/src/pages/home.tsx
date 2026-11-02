@@ -1,33 +1,80 @@
-import { useEffect, useState } from "react";
-import { BookText, Film, Lightbulb, Play, Plus, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, Film, Lightbulb, Play } from "lucide-react";
 import { motion } from "motion/react";
-import { api, mediaUrl } from "@/lib/api";
-import type { NovelSummary, ProjectSummary } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { ProjectSummary } from "@/lib/types";
 import { useToast } from "@/lib/toast";
-import { navigate, Link } from "@/lib/router";
-import { ago, seconds } from "@/lib/format";
-import { Card, Banner } from "@/components/ui/primitives";
-import { NewNovelDialog } from "@/components/app/new-novel-dialog";
-import { ChapterComposer } from "@/components/app/chapter-composer";
+import { labelFor } from "@/lib/labels";
+import { Link, navigate } from "@/lib/router";
 import { EASE_OUT } from "@/lib/ease";
+import { ChapterComposer } from "@/components/app/chapter-composer";
+import { Gallery } from "@/components/app/gallery";
 
-const PATH_LABEL: Record<string, string> = {
-  idea: "From an idea",
-  novel: "Novel part",
-  video: "From a video",
-};
+// The home page, after OpusClip's AI Producer: a badge, one line of headline, the card, the
+// gallery of looks, the questions people ask, and a short footer.
+
+// Lines from the stories in the gallery, set as a faint texture behind the headline.
+const TEXTURE = (
+  "THE BELL RANG ONCE MORE THOUGH NO ONE WAS AT THE DOOR · BESOK DIA MENIKAHI ORANG LAIN · " +
+  "SHE NEVER SENT THE LETTER · THE WITNESS WAS ALREADY GONE · ONE JUMP ONE CHANCE · THE QUEEN " +
+  "WOULD NOT KNEEL · THE CAT ATE THE WEDDING CAKE · IT PLAYED BY ITSELF AT MIDNIGHT · I WOKE UP " +
+  "AS THE VILLAIN · SIGN IT OR LOSE EVERYTHING · "
+).repeat(9);
+
+const FAQ: [string, string][] = [
+  [
+    "What is Storeel?",
+    "A studio that turns a chapter of your novel into a short vertical reel you narrate. Muse Spark writes the part (a hook, the story in short beats, a poll and a call to action), you read it from a teleprompter, and the reel comes out with captions, the novel's characters drawn by Muse Image, a Part badge and an end card. Each chapter is one part of a series, and the characters look the same from part to part.",
+  ],
+  [
+    "What do I need?",
+    "A chapter of your novel (in Indonesian or English), a phone or laptop camera to read it on, and your own Meta Model API key. Recording works in the browser, line by line, or you can upload one video of you reading the whole part.",
+  ],
+  [
+    "Which Meta models does it use?",
+    "Muse Spark writes the part, checks its storyboard against the chapter and edits the reel when you ask in the chat. Muse Image draws the characters, objects and places. SAM 3.1 cuts them out of their background. Muse Voice Transcribe hears your narration for the captions.",
+  ],
+  [
+    "What does a reel cost?",
+    "About $0.25 to $0.35 at Meta's list prices for a first part, billed to your key: writing and checking the part, eight to twelve pictures and the transcription. The card shows the estimate before you send. Rendering is free, and later parts reuse the characters already drawn.",
+  ],
+  [
+    "Where do my key and my videos go?",
+    "Your key stays in this browser and travels only with the request that starts a job; the server keeps it in memory until the job ends. There is no login: each browser sees only the reels it made. Reels and recordings are deleted 24 hours after you last touch them, so download yours.",
+  ],
+  [
+    "What does the finished reel look like?",
+    "An MP4 at 1080×1920, usually one and a half to two minutes long, with word-by-word captions, the pictures, a poll screen and an end card that sends viewers to the full chapter. Ask the chat for changes (caption colours, a character's outfit, a picture) and render again.",
+  ],
+];
+
+function useShowcase(): ProjectSummary | null {
+  const [reel, setReel] = useState<ProjectSummary | null>(null);
+  useEffect(() => {
+    api
+      .listProjects()
+      .then((all) => setReel(all.find((p) => p.read_only && p.renders > 0) ?? null))
+      .catch(() => setReel(null));
+  }, []);
+  return reel;
+}
 
 export function HomePage() {
   const { toast } = useToast();
-  const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
-  const [novels, setNovels] = useState<NovelSummary[] | null>(null);
-  const [novelOpen, setNovelOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const showcase = useShowcase();
+  const [look, setLook] = useState<string | null>(null);
+  const [flash, setFlash] = useState(false);
+  const card = useRef<HTMLDivElement>(null);
+  const flashTimer = useRef<number | null>(null);
 
-  useEffect(() => {
-    api.listProjects().then(setProjects).catch((e) => setError(String(e.message || e)));
-    api.listNovels().then(setNovels).catch(() => setNovels([]));
-  }, []);
+  const pickLook = (value: string) => {
+    setLook(value);
+    card.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlash(true);
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlash(false), 1800);
+    toast(`${labelFor("visual_style", value)} it is. Paste a chapter to start.`, "info");
+  };
 
   const create = async (path: "video" | "idea") => {
     try {
@@ -38,173 +85,129 @@ export function HomePage() {
     }
   };
 
-  const showcase = (projects ?? []).filter((p) => p.read_only);
-  const mine = (projects ?? []).filter((p) => !p.read_only);
-  const myNovels = (novels ?? []).filter((n) => !n.read_only);
-
   return (
-    <div className="flex flex-col gap-8">
-      <section className="mx-auto flex w-full max-w-3xl flex-col gap-5 pt-2 sm:pt-6">
-        <div className="text-center">
-          <motion.h1
-            initial={{ opacity: 0, y: 12, filter: "blur(6px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            transition={{ duration: 0.5, ease: EASE_OUT }}
-            className="text-3xl font-bold tracking-tight sm:text-4xl"
-          >
-            Turn a chapter into a <span className="gradient-text">reel</span>
-          </motion.h1>
-          <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Paste a chapter of your novel. Muse Spark writes the part, you narrate it from a
-            teleprompter, Muse Image draws the characters, and the reel is rendered for you.
-          </p>
-        </div>
+    <div className="relative flex flex-col">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 -top-8 h-[24rem] select-none overflow-hidden break-all font-mono text-[12px] font-medium leading-[1.3] tracking-[0.24em] text-foreground/[0.045] [mask-image:radial-gradient(ellipse_58%_52%_at_50%_38%,black_10%,transparent)]"
+      >
+        {TEXTURE}
+      </div>
+
+      <section className="relative mx-auto flex w-full max-w-3xl flex-col items-center pt-6 text-center sm:pt-10">
+        <motion.span
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: EASE_OUT }}
+          className="rainbow-ring rounded-full bg-background/60 px-3.5 py-1 text-sm font-medium text-foreground backdrop-blur-sm"
+        >
+          Storeel Studio · made with Meta Muse
+        </motion.span>
+        <motion.h1
+          initial={{ opacity: 0, y: 12, filter: "blur(6px)" }}
+          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          transition={{ duration: 0.5, delay: 0.05, ease: EASE_OUT }}
+          className="mt-5 text-balance text-[2.6rem] font-bold leading-[1.08] tracking-[-0.03em] sm:text-4xl"
+        >
+          Turn your novel into reels by chatting with AI
+        </motion.h1>
+        <motion.p
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1, ease: EASE_OUT }}
+          className="mt-3 max-w-xl text-balance text-base text-muted-foreground sm:text-lg"
+        >
+          Paste a chapter, read the part from a teleprompter, and get a reel with captions and drawn
+          characters in minutes.
+        </motion.p>
 
         <motion.div
-          initial={{ opacity: 0, y: 14 }}
+          ref={card}
+          initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45, delay: 0.05, ease: EASE_OUT }}
+          transition={{ duration: 0.5, delay: 0.15, ease: EASE_OUT }}
+          className="mt-8 w-full scroll-mt-24 text-left"
         >
-          <ChapterComposer />
+          <ChapterComposer look={look} onLook={setLook} highlightLook={flash} />
         </motion.div>
 
-        <p className="text-center text-xs leading-relaxed text-muted-foreground">
-          Your Muse / Model API key stays in this browser. Reels are kept for 24 hours: download
-          yours before then.
-        </p>
-      </section>
-
-      {showcase.length ? (
-        <section className="flex flex-col gap-3">
-          <h2 className="flex items-center gap-2 text-base font-semibold">
-            <Sparkles className="size-4 text-accent" /> See one made with Storeel
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {showcase.map((p) => (
-              <Link
-                key={p.id}
-                to={`/p/${p.id}`}
-                className="group flex items-center gap-4 rounded-3xl border border-border bg-card/60 p-4 transition-colors hover:border-accent/50"
-              >
-                <span
-                  className="grid size-14 shrink-0 place-items-center rounded-2xl text-white"
-                  style={{ background: "var(--gradient-accent)" }}
-                >
-                  <Play className="size-6 fill-white" />
-                </span>
-                <span className="flex min-w-0 flex-col">
-                  <strong className="truncate text-sm">{p.title}</strong>
-                  <small className="text-xs text-muted-foreground">
-                    {PATH_LABEL[p.path]}
-                    {p.input_seconds ? ` · ${seconds(p.input_seconds)}` : ""} · watch and download
-                  </small>
-                </span>
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      <Card title="Your reels">
-        {error ? (
-          <Banner tone="error">{error}</Banner>
-        ) : projects === null ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : mine.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No reels yet. Paste a chapter above to make your first.</p>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {mine.map((p) => (
-              <Link
-                key={p.id}
-                to={`/p/${p.id}`}
-                className="flex items-center gap-3 rounded-xl border border-transparent p-2.5 transition-colors hover:border-border hover:bg-background"
-              >
-                {p.cover ? (
-                  <img src={mediaUrl(p.id, p.cover)} alt="" className="h-14 w-10 shrink-0 rounded-md object-cover" />
-                ) : (
-                  <span className="grid h-14 w-10 shrink-0 place-items-center rounded-md bg-background text-muted-foreground">
-                    {p.path === "idea" ? "✎" : p.path === "novel" ? "❡" : "▶"}
-                  </span>
-                )}
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <strong className="truncate text-sm">{p.title}</strong>
-                  <small className="text-xs text-muted-foreground">
-                    {PATH_LABEL[p.path]} · {p.stage}
-                    {p.input_seconds ? ` · ${seconds(p.input_seconds)}` : ""} · {ago(p.updated_at)}
-                  </small>
-                </span>
-                {p.renders ? (
-                  <span className="shrink-0 rounded-full border border-success/40 px-2.5 py-0.5 text-xs text-success">
-                    {p.renders} render{p.renders > 1 ? "s" : ""}
-                  </span>
-                ) : null}
-              </Link>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      <Card
-        title="Your novels"
-        actions={
-          <button
-            onClick={() => setNovelOpen(true)}
-            className="inline-flex min-h-9 items-center gap-1 text-sm text-accent hover:underline"
-          >
-            <Plus className="size-4" /> New novel
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
+          {showcase ? (
+            <Link to={`/p/${showcase.id}`} className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground">
+              <Play className="size-3.5" /> Watch a finished part
+            </Link>
+          ) : null}
+          <button onClick={() => create("video")} className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground">
+            <Film className="size-3.5" /> Or start from your video
           </button>
-        }
-      >
-        {novels === null ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : myNovels.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            None yet. A novel keeps its characters the same from part to part.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {myNovels.map((n) => (
-              <Link
-                key={n.id}
-                to={`/n/${n.id}`}
-                className="flex items-center gap-3 rounded-xl border border-transparent p-2.5 transition-colors hover:border-border hover:bg-background"
-              >
-                <span className="grid size-10 place-items-center rounded-lg bg-background text-muted-foreground">
-                  <BookText className="size-4" />
-                </span>
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <strong className="truncate text-sm">{n.title}</strong>
-                  <small className="text-xs text-muted-foreground">
-                    {n.chapters} chapter{n.chapters === 1 ? "" : "s"} · {n.characters} character
-                    {n.characters === 1 ? "" : "s"} · {ago(n.updated_at)}
-                  </small>
-                </span>
-              </Link>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      <section className="flex flex-col items-center gap-3 border-t border-border pt-6 text-center">
-        <p className="text-sm text-muted-foreground">Not a novel? Storeel also makes reels:</p>
-        <div className="flex flex-wrap justify-center gap-2">
-          <button
-            onClick={() => create("video")}
-            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border-strong px-4 text-sm font-semibold transition-colors hover:border-accent/60"
-          >
-            <Film className="size-4 text-accent" /> From your video
-          </button>
-          <button
-            onClick={() => create("idea")}
-            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border-strong px-4 text-sm font-semibold transition-colors hover:border-accent/60"
-          >
-            <Lightbulb className="size-4 text-accent" /> From an idea
+          <button onClick={() => create("idea")} className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground">
+            <Lightbulb className="size-3.5" /> From an idea
           </button>
         </div>
       </section>
 
-      <NewNovelDialog open={novelOpen} onClose={() => setNovelOpen(false)} />
+      <section className="mt-16 sm:mt-24">
+        <h2 className="text-2xl font-semibold tracking-tight">Choose a look for your story</h2>
+        <p className="mb-5 mt-1 text-sm text-muted-foreground">
+          Frames of novel parts, drawn by Muse Image. Pick one and every part of your novel is drawn that way.
+        </p>
+        <Gallery onUse={pickLook} />
+      </section>
+
+      <section className="mt-20 grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-10 sm:mt-28">
+        <div>
+          <h2 className="text-3xl font-semibold tracking-tight">Before you start</h2>
+          <p className="mt-2 text-lg text-muted-foreground">What Storeel needs, what it makes and what it costs.</p>
+        </div>
+        <div className="flex flex-col gap-1">
+          {FAQ.map(([q, a], i) => (
+            <details key={q} open={i === 0} className="group rounded-2xl px-5 py-4 transition-colors open:bg-card sm:px-6">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-base font-semibold text-foreground sm:text-lg [&::-webkit-details-marker]:hidden">
+                {q}
+                <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+              </summary>
+              <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground">{a}</p>
+            </details>
+          ))}
+        </div>
+      </section>
+
+      <footer className="mt-16 grid gap-8 border-t border-border pt-10 text-sm sm:grid-cols-3">
+        <div className="flex flex-col gap-3">
+          <p className="font-semibold text-foreground">Make</p>
+          <button onClick={() => card.current?.scrollIntoView({ behavior: "smooth", block: "center" })} className="w-fit text-muted-foreground hover:text-foreground">
+            A novel part
+          </button>
+          <button onClick={() => create("video")} className="w-fit text-muted-foreground hover:text-foreground">
+            A reel from your video
+          </button>
+          <button onClick={() => create("idea")} className="w-fit text-muted-foreground hover:text-foreground">
+            A reel from an idea
+          </button>
+        </div>
+        <div className="flex flex-col gap-3">
+          <p className="font-semibold text-foreground">Made with</p>
+          <span className="text-muted-foreground">Muse Spark: writing, checks and the chat</span>
+          <span className="text-muted-foreground">Muse Image: characters and scenes</span>
+          <span className="text-muted-foreground">SAM 3.1: cut-outs</span>
+          <span className="text-muted-foreground">Muse Voice Transcribe: captions</span>
+        </div>
+        <div className="flex flex-col gap-3">
+          <p className="font-semibold text-foreground">About</p>
+          <a
+            href="https://cerebralvalley.ai/e/meta-ai-developer-hackathon"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-fit text-muted-foreground hover:text-foreground"
+          >
+            Built for the Meta AI Developer Hackathon
+          </a>
+          <Link to="/reels" className="w-fit text-muted-foreground hover:text-foreground">
+            My reels
+          </Link>
+          <span className="text-muted-foreground">Reels are kept for 24 hours</span>
+        </div>
+      </footer>
     </div>
   );
 }

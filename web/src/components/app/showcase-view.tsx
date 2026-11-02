@@ -17,7 +17,7 @@ export function ShowcaseView({ project }: { project: Project }) {
           to={project.novel ? `/n/${project.novel.id}` : "/"}
           className="w-fit text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
-          {project.novel ? `← ${project.novel.title}` : "← All reels"}
+          {project.novel ? `← ${project.novel.title}` : "← Home"}
         </Link>
         <h1 className="text-2xl font-bold tracking-tight">{project.title}</h1>
       </div>

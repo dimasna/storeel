@@ -22,10 +22,15 @@ export function navigate(to: string): void {
   if (currentHash() === path) return;
   window.location.hash = path;
   window.scrollTo({ top: 0 });
+  document.getElementById(PANEL_ID)?.scrollTo({ top: 0 }); // the desktop frame scrolls its panel
 }
+
+/** The id of the element that scrolls the page on large screens (the app frame's panel). */
+export const PANEL_ID = "panel";
 
 export type Route =
   | { page: "home" }
+  | { page: "reels" }
   | { page: "project"; id: string }
   | { page: "novel"; id: string };
 
@@ -34,6 +39,7 @@ export function parseRoute(path: string): Route {
   if (project) return { page: "project", id: project[1] };
   const novel = path.match(/^\/n\/([0-9a-f]{32})/);
   if (novel) return { page: "novel", id: novel[1] };
+  if (path.startsWith("/reels")) return { page: "reels" };
   return { page: "home" };
 }
 

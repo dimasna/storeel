@@ -69,8 +69,8 @@ export function NovelPage({ id }: { id: string }) {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
-        <Link to="/" className="w-fit text-sm text-muted-foreground hover:text-foreground">
-          ← All reels
+        <Link to={novel.read_only ? "/" : "/reels"} className="w-fit text-sm text-muted-foreground hover:text-foreground">
+          {novel.read_only ? "← Home" : "← My reels"}
         </Link>
         <h1 className="text-2xl font-bold tracking-tight">{novel.title}</h1>
       </div>

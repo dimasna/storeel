@@ -370,6 +370,8 @@ export interface Config {
   bring_your_own_key: boolean;
   max_input_seconds: number;
   max_upload_mb: number;
+  /** Hours a reel is kept after it was last touched; 0 keeps everything (a local studio). */
+  ttl_hours?: number;
   models: {
     script: string;
     script_name: string;

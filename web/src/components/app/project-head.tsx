@@ -20,10 +20,10 @@ export function ProjectHead({ project, state }: { project: Project; state: UsePr
   return (
     <div className="flex flex-col gap-3">
       <Link
-        to={project.novel ? `/n/${project.novel.id}` : "/"}
+        to={project.novel ? `/n/${project.novel.id}` : "/reels"}
         className="w-fit text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
-        {project.novel ? `← ${project.novel.title}` : "← All reels"}
+        {project.novel ? `← ${project.novel.title}` : "← My reels"}
       </Link>
       <input
         aria-label="Reel title"

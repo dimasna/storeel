@@ -1,17 +1,21 @@
-import { useEffect, useRef, useState, type ComponentType } from "react";
-import { ArrowUp, BookText, ChevronDown, Languages, Loader2, Mic, Palette, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { BookText, Check, ChevronDown, FileUp, Languages, Loader2, Mic, Palette, Sparkles } from "lucide-react";
 import { api, ApiError, apiKey } from "@/lib/api";
 import type { Novel, NovelSummary, PartEstimate } from "@/lib/types";
 import { useConfig } from "@/lib/config";
 import { enumOf, labelFor } from "@/lib/labels";
+import { lookPicture } from "@/lib/gallery";
 import { useToast } from "@/lib/toast";
 import { navigate } from "@/lib/router";
 import { requestKey } from "@/App";
 import { cn } from "@/lib/utils";
+import { Modal } from "@/components/ui/modal";
+import { Button } from "@/components/ui/button";
+import { Field, Input, Select, Textarea } from "@/components/ui/primitives";
 
-// The home page's input card: paste a chapter (of a new novel, or the next one of yours), pick
-// the look and the voice, optionally say what the part should focus on, and send. Send makes
-// the novel, the chapter and its part, and starts writing it; the part's page takes over.
+// The home page's card, after OpusClip's: two large tiles (the chapter, and an optional look),
+// a row of chips (the voice and the language) and a send button. Send makes the novel, the
+// chapter and its part, and starts writing it; the part's page takes over from there.
 
 const DRAFT = "storeel.chapterDraft";
 const MIN_CHARS = 200;
@@ -38,29 +42,30 @@ function ChipSelect({
   value,
   options,
   onChange,
-  className,
+  disabled,
 }: {
   icon: ComponentType<{ className?: string }>;
   label: string;
   value: string;
   options: [string, string][];
   onChange: (value: string) => void;
-  className?: string;
+  disabled?: boolean;
 }) {
   return (
     <label
-      className={cn(
-        "relative inline-flex h-9 min-w-0 items-center gap-1.5 rounded-full border border-border-strong bg-background pl-3 pr-7 text-xs font-semibold text-foreground transition-colors hover:border-accent/60 focus-within:border-accent",
-        className,
-      )}
       title={label}
+      className={cn(
+        "relative inline-flex h-10 min-w-0 items-center gap-2 rounded-xl bg-panel-tile pl-3 pr-8 text-sm font-medium text-foreground transition-colors focus-within:ring-2 focus-within:ring-accent/40 max-sm:w-full",
+        disabled ? "opacity-70" : "hover:brightness-110",
+      )}
     >
-      <Icon className="size-3.5 shrink-0 text-accent" />
+      <Icon className="size-4 shrink-0 text-muted-foreground" />
       <span className="sr-only">{label}</span>
       <select
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
-        className="min-w-0 cursor-pointer appearance-none truncate bg-transparent outline-none"
+        className="min-w-0 flex-1 cursor-pointer appearance-none truncate bg-transparent outline-none disabled:cursor-default"
       >
         {options.map(([v, text]) => (
           <option key={v} value={v}>
@@ -68,12 +73,62 @@ function ChipSelect({
           </option>
         ))}
       </select>
-      <ChevronDown className="pointer-events-none absolute right-2.5 size-3.5 text-muted-foreground" />
+      <ChevronDown className="pointer-events-none absolute right-2.5 size-4 text-muted-foreground" />
     </label>
   );
 }
 
-export function ChapterComposer() {
+/** One of the card's two large tiles. */
+function Tile({
+  icon: Icon,
+  title,
+  subtitle,
+  onClick,
+  done,
+  picture,
+  highlight,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  title: ReactNode;
+  subtitle: ReactNode;
+  onClick: () => void;
+  done?: boolean;
+  picture?: string;
+  highlight?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "group relative flex min-h-[7.5rem] flex-col items-center justify-center gap-1 overflow-hidden rounded-2xl bg-panel-tile px-4 py-5 text-center transition-[filter,box-shadow] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+        highlight && "ring-2 ring-accent/70",
+      )}
+    >
+      {picture ? (
+        <>
+          <img src={picture} alt="" className="absolute inset-0 size-full object-cover object-[50%_28%] opacity-60 transition-transform duration-500 group-hover:scale-105" />
+          <span className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/45 to-black/20" />
+        </>
+      ) : null}
+      <span className={cn("relative mb-1 grid size-7 place-items-center rounded-lg", done ? "bg-success/20 text-success" : picture ? "text-white" : "text-foreground")}>
+        {done ? <Check className="size-4" /> : <Icon className="size-5" />}
+      </span>
+      <span className={cn("relative text-base font-medium", picture ? "text-white" : "text-foreground")}>{title}</span>
+      <span className={cn("relative text-xs leading-snug", picture ? "text-white/80" : "text-muted-foreground")}>{subtitle}</span>
+    </button>
+  );
+}
+
+export function ChapterComposer({
+  look,
+  onLook,
+  highlightLook,
+}: {
+  look: string | null;
+  onLook: (look: string) => void;
+  highlightLook?: boolean;
+}) {
   const config = useConfig();
   const { toast } = useToast();
   const [novels, setNovels] = useState<NovelSummary[]>([]);
@@ -82,16 +137,17 @@ export function ChapterComposer() {
   const [title, setTitle] = useState("");
   const [text, setText] = useState(() => sessionStorage.getItem(DRAFT) || "");
   const [brief, setBrief] = useState("");
-  const [look, setLook] = useState("realistic_3d");
   const [voice, setVoice] = useState("casual");
   const [language, setLanguage] = useState<string>("auto");
   const [estimate, setEstimate] = useState<PartEstimate | null>(null);
   const [sending, setSending] = useState(false);
-  const titleRef = useRef<HTMLInputElement>(null);
-  const textRef = useRef<HTMLTextAreaElement>(null);
+  const [pasting, setPasting] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   const chars = text.trim().length;
   const lang = language === "auto" ? guessLanguage(text) : language;
+  const ready = chars >= MIN_CHARS && (target !== "new" || Boolean(title.trim()));
+  const chosenLook = novel ? novel.visual_style : look;
 
   useEffect(() => {
     api
@@ -137,15 +193,8 @@ export function ChapterComposer() {
 
   const send = async () => {
     if (sending) return;
-    const chapter = text.trim();
-    if (chapter.length < MIN_CHARS) {
-      toast("Paste the whole chapter: at least a few paragraphs.", "error");
-      textRef.current?.focus();
-      return;
-    }
-    if (target === "new" && !title.trim()) {
-      toast("Give the novel a title: the reel's call to action names it.", "error");
-      titleRef.current?.focus();
+    if (!ready) {
+      setPasting(true);
       return;
     }
     if (!apiKey.get()) {
@@ -161,13 +210,13 @@ export function ChapterComposer() {
           title: title.trim(),
           language: lang,
           narration: voice,
-          visual_style: look,
+          visual_style: look ?? "realistic_3d",
           watermark: "",
         });
         novelId = made.id;
         setTarget(made.id); // a retry adds the chapter to this novel instead of making another
       }
-      const updated = await api.addChapter(novelId, { text: chapter, title: "", number: null });
+      const updated = await api.addChapter(novelId, { text: text.trim(), title: "", number: null });
       const number = Math.max(...updated.chapters.map((c) => c.number));
       const part = await api.openChapterReel(novelId, number);
       partId = part.id;
@@ -186,111 +235,288 @@ export function ChapterComposer() {
     }
   };
 
-  const novelOptions: [string, string][] = [
-    ["new", "New novel"],
-    ...novels.map((n): [string, string] => [n.id, n.title]),
-  ];
-  const settings = novel
-    ? `${labelFor("visual_style", novel.visual_style)} · ${labelFor("narration", novel.narration)} · ${labelFor("novel_language", novel.language)}`
-    : "";
+  const chapterTitle = ready
+    ? novel
+      ? `${novel.title}, part ${novel.next_chapter}`
+      : title.trim()
+    : chars >= MIN_CHARS
+      ? "Add the novel's title"
+      : "Paste a chapter";
+  const chapterSub = ready
+    ? `${chars.toLocaleString()} characters · ${labelFor("novel_language", novel ? novel.language : lang)} · tap to edit`
+    : chars >= MIN_CHARS
+      ? `${chars.toLocaleString()} characters pasted · tap to finish`
+      : "Of a new novel, or the next part of yours";
+  const cost = estimate && chars >= MIN_CHARS ? `≈ $${estimate.total_usd.toFixed(2)}` : "";
 
   return (
-    <div className="gradient-ring rounded-3xl bg-card/80 p-3 shadow-xl shadow-black/5 backdrop-blur-sm sm:p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <ChipSelect
-          icon={BookText}
-          label="Novel"
-          value={target}
-          options={novelOptions}
-          onChange={setTarget}
-          className="max-w-full"
+    <div className="rounded-[28px] bg-card p-3 shadow-2xl shadow-black/10 sm:p-3.5">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Tile icon={BookText} title={chapterTitle} subtitle={chapterSub} done={ready} onClick={() => setPasting(true)} />
+        <Tile
+          icon={Palette}
+          title={chosenLook ? `Look: ${labelFor("visual_style", chosenLook)}` : "(Optional) Pick a look"}
+          subtitle={
+            novel ? "Every part of a novel keeps its look" : chosenLook ? "Tap to change" : "Show Storeel the picture style you'd like"
+          }
+          picture={chosenLook ? lookPicture(chosenLook) : undefined}
+          highlight={highlightLook}
+          onClick={() => (novel ? toast("This novel's parts all keep its look.", "info") : setPicking(true))}
         />
-        {target === "new" ? (
-          <input
-            ref={titleRef}
-            value={title}
-            maxLength={120}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Novel title"
-            aria-label="Novel title"
-            className="h-9 min-w-0 flex-1 rounded-full border border-border-strong bg-background px-3.5 text-base text-foreground placeholder:text-muted-foreground/70 focus:border-accent focus:outline-none sm:text-sm"
-          />
-        ) : (
-          <span className="text-sm text-muted-foreground">
-            {novel ? `Part ${novel.next_chapter}` : "…"}
-          </span>
-        )}
       </div>
 
-      <textarea
-        ref={textRef}
-        value={text}
-        maxLength={200000}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Paste a chapter of your novel…"
-        aria-label="Chapter text"
-        rows={7}
-        className="mt-3 max-h-[45dvh] min-h-40 w-full resize-y rounded-2xl bg-transparent px-1.5 py-1 text-base leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:outline-none sm:text-sm"
-      />
-
-      <label className="mt-2 flex items-center gap-2 rounded-2xl border border-border bg-background px-3 py-2">
-        <Sparkles className="size-4 shrink-0 text-accent" />
-        <input
-          value={brief}
-          maxLength={600}
-          onChange={(e) => setBrief(e.target.value)}
-          placeholder="What to focus on? (optional)"
-          aria-label="Request for the writer"
-          className="min-w-0 flex-1 bg-transparent text-base text-foreground placeholder:text-muted-foreground/70 focus:outline-none sm:text-sm"
+      <div className="mt-3 grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap">
+        <ChipSelect
+          icon={Mic}
+          label="Voice"
+          value={novel ? novel.narration : voice}
+          disabled={Boolean(novel)}
+          options={enumOf(config.novel, "narration").map((v): [string, string] => [v, VOICE_CHIP[v] ?? labelFor("narration", v)])}
+          onChange={setVoice}
         />
-      </label>
-
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {target === "new" ? (
-          <>
-            <ChipSelect icon={Palette} label="Look" value={look} options={options("visual_style")} onChange={setLook} />
-            <ChipSelect
-              icon={Mic}
-              label="Voice"
-              value={voice}
-              options={enumOf(config.novel, "narration").map((v): [string, string] => [v, VOICE_CHIP[v] ?? labelFor("narration", v)])}
-              onChange={setVoice}
-            />
-            <ChipSelect
-              icon={Languages}
-              label="Language"
-              value={language}
-              options={[
-                ["auto", chars >= MIN_CHARS ? `${labelFor("novel_language", lang)} (detected)` : "Detect language"],
-                ...options("language", "novel_language"),
-              ]}
-              onChange={setLanguage}
-            />
-          </>
-        ) : (
-          <span className="text-xs text-muted-foreground">{settings}</span>
-        )}
-        <div className="ml-auto flex items-center gap-3">
-          <span className="text-right text-xs leading-tight text-muted-foreground">
-            {chars ? `${chars.toLocaleString()} chars` : "No text yet"}
-            {estimate && chars >= MIN_CHARS ? (
-              <>
-                <br />≈ ${estimate.total_usd.toFixed(2)}
-              </>
-            ) : null}
-          </span>
+        <ChipSelect
+          icon={Languages}
+          label="Language"
+          value={novel ? novel.language : language}
+          disabled={Boolean(novel)}
+          options={[
+            ["auto", chars >= MIN_CHARS ? `${labelFor("novel_language", lang)} (auto)` : "Detect language"],
+            ...options("language", "novel_language"),
+          ]}
+          onChange={setLanguage}
+        />
+        <div className="hidden flex-1 items-center justify-end gap-3 sm:flex">
+          {cost ? <span className="text-xs text-muted-foreground">{cost}</span> : null}
           <button
             type="button"
             onClick={send}
             disabled={sending}
-            className="inline-flex h-11 items-center gap-1.5 rounded-full px-5 text-sm font-semibold text-white shadow-md transition-opacity disabled:opacity-60"
-            style={{ background: "var(--gradient-accent)" }}
+            aria-label="Send"
+            title={ready ? "Send: write the part" : "Paste a chapter first"}
+            className={cn(
+              "grid size-10 place-items-center rounded-xl transition-[opacity,filter]",
+              ready ? "text-white hover:brightness-110" : "bg-panel-tile text-muted-foreground",
+            )}
+            style={ready ? { background: "var(--gradient-accent)" } : undefined}
           >
-            {sending ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
-            {sending ? "Starting" : "Send"}
+            {sending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
           </button>
         </div>
       </div>
+      {/* Phones: one wide button, as on OpusClip. */}
+      <button
+        type="button"
+        onClick={send}
+        disabled={sending}
+        className={cn(
+          "mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-base font-semibold transition-[opacity,filter] sm:hidden",
+          ready ? "text-white" : "bg-panel-tile text-muted-foreground",
+        )}
+        style={ready ? { background: "var(--gradient-accent)" } : undefined}
+      >
+        {sending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+        {sending
+          ? "Starting…"
+          : ready
+            ? `Send & write the part${cost ? ` · ${cost}` : ""}`
+            : chars >= MIN_CHARS
+              ? "Add the novel's title first"
+              : "Paste a chapter first"}
+      </button>
+
+      <PasteDialog
+        open={pasting}
+        onClose={() => setPasting(false)}
+        novels={novels}
+        target={target}
+        setTarget={setTarget}
+        novel={novel}
+        title={title}
+        setTitle={setTitle}
+        text={text}
+        setText={setText}
+        brief={brief}
+        setBrief={setBrief}
+      />
+      <LookDialog
+        open={picking}
+        onClose={() => setPicking(false)}
+        value={look}
+        onPick={(v) => {
+          onLook(v);
+          setPicking(false);
+        }}
+      />
     </div>
+  );
+}
+
+function PasteDialog({
+  open,
+  onClose,
+  novels,
+  target,
+  setTarget,
+  novel,
+  title,
+  setTitle,
+  text,
+  setText,
+  brief,
+  setBrief,
+}: {
+  open: boolean;
+  onClose: () => void;
+  novels: NovelSummary[];
+  target: string;
+  setTarget: (v: string) => void;
+  novel: Novel | null;
+  title: string;
+  setTitle: (v: string) => void;
+  text: string;
+  setText: (v: string) => void;
+  brief: string;
+  setBrief: (v: string) => void;
+}) {
+  const { toast } = useToast();
+  const file = useRef<HTMLInputElement>(null);
+  const chars = text.trim().length;
+
+  const done = () => {
+    if (chars < MIN_CHARS) return toast("Paste the whole chapter: at least a few paragraphs.", "error");
+    if (target === "new" && !title.trim()) return toast("Give the novel a title: the reel's call to action names it.", "error");
+    onClose();
+  };
+
+  return (
+    <Modal open={open} onClose={onClose} title="Paste a chapter" className="max-w-2xl">
+      <div className="flex flex-col gap-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Novel">
+            <Select value={target} onChange={(e) => setTarget(e.target.value)}>
+              <option value="new">New novel</option>
+              {novels.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.title}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {target === "new" ? (
+            <Field label="Novel title">
+              <Input value={title} maxLength={120} placeholder="The Light at Gull Point" onChange={(e) => setTitle(e.target.value)} />
+            </Field>
+          ) : (
+            <Field label="This chapter becomes">
+              <p className="flex h-[38px] items-center text-sm text-foreground">
+                {novel ? `Part ${novel.next_chapter}` : "…"}
+              </p>
+            </Field>
+          )}
+        </div>
+        <Field
+          label={
+            <span className="flex items-center justify-between gap-2">
+              <span>Chapter text</span>
+              <button
+                type="button"
+                onClick={() => file.current?.click()}
+                className="inline-flex items-center gap-1 font-semibold text-accent hover:underline"
+              >
+                <FileUp className="size-3.5" /> Load a .txt file
+              </button>
+            </span>
+          }
+          hint={chars ? `${chars.toLocaleString()} characters` : "The whole chapter: the part is written from it."}
+        >
+          <Textarea
+            rows={12}
+            autoFocus
+            maxLength={200000}
+            value={text}
+            placeholder="Paste the chapter here…"
+            onChange={(e) => setText(e.target.value)}
+            className="max-h-[50dvh] text-base sm:text-sm"
+          />
+        </Field>
+        <Field label="What should this part focus on? (optional)">
+          <Input
+            value={brief}
+            maxLength={600}
+            placeholder="e.g. end on the bell ringing with no one at the door"
+            onChange={(e) => setBrief(e.target.value)}
+          />
+        </Field>
+        <div className="flex justify-end">
+          <Button variant="primary" className="h-11 px-6" onClick={done}>
+            Done
+          </Button>
+        </div>
+      </div>
+      <input
+        ref={file}
+        type="file"
+        accept=".txt,.md,text/plain,text/markdown"
+        hidden
+        onChange={async (e) => {
+          const picked = e.target.files?.[0];
+          e.target.value = "";
+          if (!picked) return;
+          if (picked.size > 400_000) return toast("That file is too large for one chapter.", "error");
+          setText(await picked.text());
+        }}
+      />
+    </Modal>
+  );
+}
+
+function LookDialog({
+  open,
+  onClose,
+  value,
+  onPick,
+}: {
+  open: boolean;
+  onClose: () => void;
+  value: string | null;
+  onPick: (look: string) => void;
+}) {
+  const config = useConfig();
+  const looks = enumOf(config.novel, "visual_style");
+  return (
+    <Modal open={open} onClose={onClose} title="Pick a look" className="max-w-2xl">
+      <p className="-mt-2 mb-4 text-sm text-muted-foreground">
+        How Muse Image draws the characters and scenes of every part of this novel.
+      </p>
+      <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4">
+        {looks.map((look) => {
+          const picture = lookPicture(look);
+          return (
+            <button
+              key={look}
+              type="button"
+              onClick={() => onPick(look)}
+              className={cn(
+                "group relative aspect-[3/4] overflow-hidden rounded-xl bg-panel-tile text-left transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent",
+                value === look && "ring-2 ring-accent",
+              )}
+            >
+              {picture ? (
+                <img src={picture} alt="" className="absolute inset-0 size-full object-cover transition-transform duration-300 group-hover:scale-105" />
+              ) : null}
+              <span className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+              <span className="absolute inset-x-2 bottom-2 text-xs font-semibold leading-tight text-white">
+                {labelFor("visual_style", look)}
+              </span>
+              {value === look ? (
+                <span className="absolute right-2 top-2 grid size-6 place-items-center rounded-full bg-accent text-accent-foreground">
+                  <Check className="size-3.5" />
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </Modal>
   );
 }

@@ -377,6 +377,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "bring_your_own_key": True,
             "max_input_seconds": settings.max_input_seconds,
             "max_upload_mb": settings.max_upload_mb,
+            "ttl_hours": settings.ttl_hours,  # 0: reels are kept until deleted
             "models": {
                 "script": settings.script_model,
                 "script_name": text_model_name(settings.script_model),
