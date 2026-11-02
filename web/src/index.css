@@ -1,0 +1,136 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+/* Dark mode is a `.dark` class on <html>, set by next-themes. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Storeel's palette. The neutrals lean a little cool, toward the accent gradient (teal to
+ * violet); the accent is its teal, the primary a blue between the two. Light first, then dark.
+ */
+:root {
+  color-scheme: light;
+
+  --background: #fbfbfd;
+  --foreground: #101114;
+  --muted-foreground: #5f636e;
+  --card: #f2f3f6;
+  --border: #1011140f;
+  --border-strong: #10111421;
+
+  --primary: #2f6df0;
+  --primary-foreground: #ffffff;
+  --accent: #00939d;
+  --accent-foreground: #061417;
+  --danger: #e5484d;
+  --success: #13a05a;
+  --warning: #e8930c;
+
+  /* Frosted surfaces over the video and the gallery. */
+  --glass: #fbfbfda3;
+  --glass-line: #10111414;
+  --glass-solid: #ffffffc4;
+
+  /* The accent gradient: teal to violet. */
+  --gradient-accent: linear-gradient(to right, #00c6cf 0%, #7b5cfa 100%);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: #121316;
+  --foreground: #f3f4f6;
+  --muted-foreground: #8a8d96;
+  --card: #1a1b1f;
+  --border: #ffffff0f;
+  --border-strong: #ffffff1f;
+
+  --primary: #3d7bf7;
+  --accent: #00c6cf;
+
+  --glass: #1a1b1f99;
+  --glass-line: #ffffff17;
+  --glass-solid: #1a1b1fb8;
+}
+
+/* The Tailwind colour utilities (bg-card, text-muted-foreground, border-border-strong…). The names
+   follow shadcn/ui; several are aliases of the palette above. */
+@theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--card);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--foreground);
+  --color-secondary: var(--card);
+  --color-secondary-foreground: var(--foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--border);
+  --color-ring: var(--border-strong);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-danger: var(--danger);
+  --color-destructive: var(--danger);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --color-glass: var(--glass);
+  --color-glass-border: var(--glass-line);
+  --color-glass-strong: var(--glass-solid);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+    scrollbar-width: thin;
+  }
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+    overflow-x: clip;
+  }
+  /* Tailwind 4 gives buttons the default arrow; anything clickable gets the hand. */
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+  :disabled {
+    cursor: default;
+  }
+}
+
+/* A thin gradient edge on a rounded element, drawn as a ring masked to its border so the
+   element's own fill stays as it is. */
+.gradient-ring {
+  position: relative;
+}
+.gradient-ring::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  background: var(--gradient-accent) border-box;
+  mask:
+    linear-gradient(#000 0 0) padding-box exclude,
+    linear-gradient(#000 0 0) border-box;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Words painted with the accent gradient. */
+.gradient-text {
+  background-image: var(--gradient-accent);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
