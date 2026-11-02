@@ -20,3 +20,7 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# Local BMad workflow files
+/_bmad/
+/_bmad-output/
