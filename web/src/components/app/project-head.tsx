@@ -11,6 +11,7 @@ export function ProjectHead({ project, state }: { project: Project; state: UsePr
   const aliases: Record<string, string> = {
     scripting: project.path === "novel" ? "story" : "idea",
     regenerating: "review",
+    editing: "review",
     rendering: "done",
   };
   const current = aliases[project.stage] || project.stage;

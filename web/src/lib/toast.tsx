@@ -62,7 +62,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <ol className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-[min(92vw,22rem)] flex-col gap-2">
+      <ol className="pointer-events-none fixed left-1/2 top-[calc(env(safe-area-inset-top)+4.5rem)] z-[100] flex w-[min(92vw,22rem)] -translate-x-1/2 flex-col gap-2 sm:left-auto sm:right-4 sm:translate-x-0">
         <AnimatePresence mode="popLayout">
           {toasts.map((t) => {
             const Icon = ICONS[t.kind];
@@ -70,9 +70,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <motion.li
                 key={t.id}
                 layout
-                initial={reduce ? { opacity: 0 } : { opacity: 0, y: 16, filter: "blur(6px)" }}
+                initial={reduce ? { opacity: 0 } : { opacity: 0, y: -12, filter: "blur(6px)" }}
                 animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)" }}
-                exit={reduce ? { opacity: 0 } : { opacity: 0, y: 8, filter: "blur(6px)" }}
+                exit={reduce ? { opacity: 0 } : { opacity: 0, y: -8, filter: "blur(6px)" }}
                 transition={SPRING_PANEL}
                 className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-glass-border bg-glass-strong px-4 py-3 shadow-lg backdrop-blur-xl"
               >

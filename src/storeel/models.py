@@ -554,6 +554,53 @@ class Usage(Strict):
         )
 
 
+# ---- the editing agent ----------------------------------------------------------------------
+
+
+class AgentAction(Strict):
+    """One change the editing agent made, or one it proposes and the user has to approve.
+
+    Free edits (a caption, showing or hiding pictures, the style) are applied at once and
+    stored as "done". A new picture or a render costs money or time, so it is stored as
+    "pending" and runs only once the user approves it.
+    """
+
+    id: str
+    kind: Literal["caption", "pictures", "style", "picture", "outfit", "render"]
+    summary: str  # what the chat shows, e.g. 'Caption at 0:12: "..."'
+    status: Literal["done", "pending", "approved", "dismissed", "failed"] = "done"
+    moment_id: str | None = None  # "picture": the moment to draw again
+    display: Display | None = None  # "picture": its new shape
+    prompt: str | None = None  # "picture": its new prompt
+    character: str | None = None  # "outfit": the novel character, by id
+    outfit: str | None = None  # "outfit": what they wear in this part from now on
+    fit_mb: int | None = None  # "render": keep the file under this size
+    cost_usd: float = 0.0  # an estimate at list prices
+    error: str | None = None
+
+
+class AgentMessage(Strict):
+    role: Literal["user", "assistant"]
+    text: str
+    created_at: str
+    actions: list[AgentAction] = Field(default_factory=list)
+
+
+class AgentChat(Strict):
+    messages: list[AgentMessage] = Field(default_factory=list)
+
+    def latest_actions(self, status: str) -> list[AgentAction]:
+        """The actions with `status` in the agent's latest reply (older replies are history)."""
+        reply = next((m for m in reversed(self.messages) if m.role == "assistant"), None)
+        return [a for a in reply.actions if a.status == status] if reply else []
+
+    def dismiss_pending(self) -> None:
+        for message in self.messages:
+            for action in message.actions:
+                if action.status == "pending":
+                    action.status = "dismissed"
+
+
 class Project(Strict):
     id: str
     title: str = Field(max_length=120)
@@ -575,6 +622,7 @@ class Project(Strict):
     renders: list[Render] = Field(default_factory=list)
     usage: Usage = Field(default_factory=Usage)
     error: str | None = None  # why the last job failed
+    agent: AgentChat = Field(default_factory=AgentChat)  # the editing agent's conversation
 
     def inputs(self) -> list[Clip]:
         """The clips that make up the reel, in order."""
@@ -590,3 +638,4 @@ class Project(Strict):
         self.transcript = None
         self.analysis = None
         self.part_faces = {}
+        self.agent.dismiss_pending()  # its proposals name captions and pictures that are gone

@@ -69,6 +69,10 @@ class Settings:
     check_model: str
     picture_check_effort: str
     story_review_effort: str
+    # The editing agent in the studio's chat: it turns a request into caption, picture and
+    # style edits, so a fast model at low effort is enough.
+    agent_model: str
+    agent_effort: str
     image_model: str
     image_reasoning: str
     image_parallel: int
@@ -107,6 +111,8 @@ def get_settings() -> Settings:
         check_model=_get("STOREEL_CHECK_MODEL", "muse-spark-1.3"),
         picture_check_effort=_get_choice("STOREEL_PICTURE_CHECK_EFFORT", "low", (*TEXT_EFFORTS, "off")),
         story_review_effort=_get_choice("STOREEL_STORY_REVIEW_EFFORT", "high", (*TEXT_EFFORTS, "off")),
+        agent_model=_get("STOREEL_AGENT_MODEL", "muse-spark-1.3"),
+        agent_effort=_get_choice("STOREEL_AGENT_EFFORT", "low", TEXT_EFFORTS),
         image_model=_get("STOREEL_IMAGE_MODEL", "muse-image-1.0"),
         image_reasoning=_get_choice("STOREEL_IMAGE_REASONING", "high", IMAGE_REASONING),
         image_parallel=_get_int("STOREEL_IMAGE_PARALLEL", 4),

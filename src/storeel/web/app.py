@@ -30,6 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from ..common import now_iso
 from ..config import ConfigError, Settings, get_settings
 from ..db import Conflict, NotFound
 from ..jobs import PipelineError, Workers
@@ -37,6 +38,8 @@ from ..media import ffmpeg as ff
 from ..meta import MetaAPIError
 from ..models import (
     DEFAULT_TITLE,
+    AgentChat,
+    AgentMessage,
     Display,
     Idea,
     Narration,
@@ -82,7 +85,8 @@ MEDIA_PREFIXES = ("uploads/", "refs/", "assets/", "renders/", "part/")
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 UPLOAD_SUFFIXES = ("/clips", "/take")
 KEY_HEADER = "x-model-api-key"
-KEYED_JOBS = frozenset({"script", "story", "process", "regenerate"})  # the jobs that call the Model API
+# The jobs that call the Model API ("agent_apply" carries a key only when it draws pictures).
+KEYED_JOBS = frozenset({"script", "story", "process", "regenerate", "agent"})
 
 
 class KeyRequired(Exception):
@@ -129,6 +133,14 @@ class Regenerate(Body):
 
 class RenderRequest(Body):
     fit_mb: int | None = Field(None, ge=5, le=500)
+
+
+class AgentRequest(Body):
+    message: str = Field(min_length=1, max_length=2000)
+
+
+class AgentDecision(Body):
+    approve: list[str] = Field(default_factory=list, max_length=50)  # the rest are dismissed
 
 
 class NovelFields(Body):
@@ -275,10 +287,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         project_id: str, kind: str, params: dict[str, Any] | None = None, key: str | None = None
     ) -> dict[str, Any]:
         job_id = uuid.uuid4().hex
-        if kind in KEYED_JOBS:
-            if key is None:
-                raise KeyRequired()
-            services.keys.put(job_id, key)  # before the job exists, so no worker can run it keyless
+        if kind in KEYED_JOBS and key is None:
+            raise KeyRequired()
+        if key is not None:  # held before the job exists, so no worker can run it keyless
+            services.keys.put(job_id, key)
         try:
             db.enqueue(project_id, kind, params, job_id=job_id)
         except BaseException:
@@ -717,6 +729,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def cancel(job_id: str) -> dict[str, Any]:
         job = db.cancel(job_id)
         return view(services, load(job.project_id))
+
+    # ---- the editing agent ------------------------------------------------------------------
+
+    @app.post("/api/projects/{project_id}/agent")
+    def agent_message(project_id: str, body: AgentRequest, request: Request) -> dict[str, Any]:
+        project = load(project_id)
+        if project.transcript is None:
+            raise PipelineError("process the video first: the editor works on its captions and pictures")
+        key = user_key(request)  # before anything changes, so a missing key loses nothing
+        text = body.message.strip()
+        if not text:
+            raise PipelineError("write what to change")
+
+        def add(p: Project) -> None:
+            p.agent.dismiss_pending()  # a new request replaces the proposals not yet approved
+            p.agent.messages.append(AgentMessage(role="user", text=text, created_at=now_iso()))
+
+        edit(project_id, add)
+        return start(project_id, "agent", key=key)
+
+    @app.post("/api/projects/{project_id}/agent/decide")
+    def agent_decide(project_id: str, body: AgentDecision, request: Request) -> dict[str, Any]:
+        project = load(project_id)
+        approve = set(body.approve)
+        pending = project.agent.latest_actions("pending")
+        chosen = [a for a in pending if a.id in approve]
+        # A new picture or outfit calls Muse Image; a render alone needs no key.
+        key = user_key(request) if any(a.kind in ("picture", "outfit") for a in chosen) else None
+
+        def decide(p: Project) -> None:
+            for action in p.agent.latest_actions("pending"):
+                action.status = "approved" if action.id in approve else "dismissed"
+
+        result = edit(project_id, decide)
+        if not chosen:
+            return result
+        return start(project_id, "agent_apply", key=key)
+
+    @app.delete("/api/projects/{project_id}/agent")
+    def agent_clear(project_id: str) -> dict[str, Any]:
+        return edit(project_id, lambda p: setattr(p, "agent", AgentChat()))
 
     # ---- media and the UI -------------------------------------------------------------------
 

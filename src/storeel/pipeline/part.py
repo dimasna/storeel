@@ -35,6 +35,8 @@ from ..models import (
     Project,
     Region,
     Story,
+    StoryCharacter,
+    StoryLook,
 )
 from . import picture_check
 from .assets import LANDSCAPE, NO_TEXT, POLICY_TRIES, PORTRAIT, SQUARE, STYLES, Request, generate_allowed
@@ -128,6 +130,28 @@ def chapter_look(c: BibleCharacter, n: int) -> BibleLook | None:
     current = [x for x in looks if x.chapter == n]
     earlier = [x for x in looks if x.chapter < n]
     return current[-1] if current else (earlier[-1] if earlier else None)
+
+
+def outfit_entry(story: Story, cid: str) -> StoryCharacter | StoryLook | None:
+    """Where the part script keeps what a character wears in this part: their entry if they are
+    new in it, their look if they return. A returning character shown only as a variant has no
+    look of their own here (the variant is drawn from an earlier part's portrait)."""
+    entry = next((c for c in story.characters if c.id == cid), None)
+    if entry is not None:
+        return entry
+    look = next((x for x in story.looks if x.id == cid), None)
+    return look if look is not None and cid in people_shown(story) else None
+
+
+def outfit_redraws(story: Story, cid: str) -> set[str]:
+    """The pictures drawn again when a character's outfit changes: their portrait, the variants
+    drawn from it, and the scenes the part shows with them in it."""
+    shown = people_shown(story)
+    variants = {v.id for v in story.variants if v.base == cid and v.id in shown}
+    used = {b.show.prop for b in story.beats} | {b.switch.show.prop for b in story.beats if b.switch}
+    people = {cid} | variants
+    props = {p.id for p in story.props if p.id in used and people & set(p.refs)}
+    return {cid} | variants | props
 
 
 def base_portrait(c: BibleCharacter, before: int) -> str | None:
@@ -375,8 +399,12 @@ def _portrait_text(name: str, description: str, outfit: str, subject: str, style
     )
 
 
-def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
-    """Update the bible and draw (or reuse) every picture the part shows."""
+def make_part_pictures(ctx: JobContext, only: set[str] | None = None) -> dict[str, PartPicture]:
+    """Update the bible and draw (or reuse) every picture the part shows.
+
+    With `only` (picture ids), only those may be drawn: any other picture without a file keeps
+    what the part had before instead of being drawn now, so nothing outside the user's request
+    is drawn (and billed) without them asking."""
     project = ctx.project()
     story = project.story
     if story is None or project.novel_id is None:
@@ -579,6 +607,18 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
 
     ctx.log(f"part {n}: {len(first) + len(second)} pictures to draw or reuse ({len(characters)} characters)")
     pictures: dict[str, PartPicture] = {}
+    earlier = project.part_pictures or {}
+
+    def held(job: Job) -> bool:
+        """A picture outside `only` that would be drawn now: it keeps its earlier version."""
+        if only is None or job.id in only or painter.exists(job.scope, job.key):
+            return False
+        before = earlier.get(job.id)
+        if before is not None:
+            pictures[job.id] = before
+        return True
+
+    first = [job for job in first if not held(job)]
     redrawn = {j.id for j in first if j.kind == "character"}
     for cid in characters:  # characters whose portrait for this chapter is already drawn
         c = bible.characters[cid]
@@ -620,6 +660,7 @@ def make_part_pictures(ctx: JobContext) -> dict[str, PartPicture]:
         job.request = Request([*content, *job.request.content], job.request.size, False, job.refs)
         drawn = [job.request.size] if job.kind == "prop" else []  # scenes became wide: draw them again
         job.key = painter.key(job.scope, job.id, [p.get("text") for p in job.request.content], refs, *drawn)
+    second = [job for job in second if not held(job)]
     with ThreadPoolExecutor(ctx.settings.image_parallel) as pool:
         for picture in pool.map(painter.draw, second):
             pictures[picture.id] = picture

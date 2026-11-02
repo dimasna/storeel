@@ -228,6 +228,30 @@ export interface CaptionNote {
   differs: string[];
 }
 
+export type AgentActionStatus = "done" | "pending" | "approved" | "dismissed" | "failed";
+
+export interface AgentAction {
+  id: string;
+  kind: "caption" | "pictures" | "style" | "picture" | "outfit" | "render";
+  summary: string;
+  status: AgentActionStatus;
+  moment_id: string | null;
+  display: Display | null;
+  prompt: string | null;
+  character: string | null;
+  outfit: string | null;
+  fit_mb: number | null;
+  cost_usd: number;
+  error: string | null;
+}
+
+export interface AgentMessage {
+  role: "user" | "assistant";
+  text: string;
+  created_at: string;
+  actions: AgentAction[];
+}
+
 export interface Project {
   id: string;
   title: string;
@@ -248,6 +272,7 @@ export interface Project {
   renders: Render[];
   usage: Usage;
   error: string | null;
+  agent: { messages: AgentMessage[] };
   stage: string;
   job: Job | null;
   input_seconds: number;

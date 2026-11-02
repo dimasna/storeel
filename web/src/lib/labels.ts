@@ -52,6 +52,8 @@ export const JOB_NAMES: Record<string, string> = {
   process: "Processing",
   regenerate: "Regenerating a picture",
   render: "Rendering the reel",
+  agent: "Editor",
+  agent_apply: "Running the approved changes",
 };
 
 export const STAGES: Record<string, [string, string][]> = {

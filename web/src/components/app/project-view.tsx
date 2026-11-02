@@ -14,6 +14,7 @@ import { ClipsSection } from "./clips-section";
 import { TranscriptSection } from "./transcript-section";
 import { PicturesSection } from "./pictures-section";
 import { IdeaSection, ScriptSection } from "./idea-section";
+import { AgentDock } from "./agent-dock";
 import {
   PartSection,
   StorySection,
@@ -70,7 +71,7 @@ export function ProjectView({ state }: { state: UseProject }) {
         </Banner>
       ) : null}
 
-      {project.job && (locked || project.job.status === "failed") ? (
+      {project.job && project.job.kind !== "agent" && (locked || project.job.status === "failed") ? (
         <JobPanel project={project} state={state} />
       ) : null}
 
@@ -121,6 +122,9 @@ export function ProjectView({ state }: { state: UseProject }) {
           <UsageSection project={project} state={state} />
         </div>
       </div>
+
+      {/* The editor works on captions and pictures, so it appears once the reel is processed. */}
+      {project.transcript ? <AgentDock project={project} state={state} /> : null}
     </div>
   );
 }

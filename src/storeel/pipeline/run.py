@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import contextlib
 
-from ..jobs import Handler, JobContext, PipelineError
-from ..models import Analysis, BibleCharacter, Project
+from ..common import Cancelled
+from ..jobs import Handler, JobContext, PipelineError, describe_error
+from ..models import AgentAction, Analysis, BibleCharacter, Novel, PartPicture, Project
+from .agent import handle_agent
 from .analyze import analyze
 from .assets import make_anchors, make_pictures
 from .compose import compose
 from .detect import find_faces, references
 from .ingest import ingest
-from .part import find_part_faces, make_part_pictures
+from .part import find_part_faces, make_part_pictures, outfit_entry, outfit_redraws
 from .script import write_script
 from .story import write_story
 from .story_compose import PartCompositor
@@ -33,7 +35,15 @@ def _keywords(project: Project) -> list[str]:
     return [e.name for e in project.script.entities if e.name]
 
 
-def _pictures(ctx: JobContext, project: Project, analysis: Analysis, only: set[str] | None) -> None:
+def _pictures(
+    ctx: JobContext,
+    project: Project,
+    analysis: Analysis,
+    only: set[str] | None,
+    span: tuple[float, float] = (0.55, 1.0),
+) -> None:
+    """Faces, references and pictures for the moments in `only` (all when None), over `span`
+    of the job's progress bar."""
     source = project.source
     if source is None:
         raise PipelineError("process the clips first")
@@ -47,11 +57,13 @@ def _pictures(ctx: JobContext, project: Project, analysis: Analysis, only: set[s
 
         ctx.update(relayout)
         ctx.log(f"layout {style.picture_layout}: {len(changed)} picture(s) change shape")
-    ctx.step("Finding faces and references", 0.55, 0.65)
+    start, end = span
+    middle = start + (end - start) * 0.22
+    ctx.step("Finding faces and references", start, middle)
     references(ctx, source, analysis)
     find_faces(ctx, source, analysis, style, only)
     ctx.flush_usage()
-    ctx.step("Generating pictures", 0.65, 1.0)
+    ctx.step("Generating pictures", middle, end)
     make_anchors(ctx, analysis, style, only)
     make_pictures(ctx, analysis, style, only)
 
@@ -153,10 +165,14 @@ def handle_regenerate(ctx: JobContext) -> None:
 
 def handle_render(ctx: JobContext) -> None:
     ctx.step("Rendering the reel", 0.0, 1.0)
+    fit = ctx.params.get("fit_mb")
+    _render(ctx, int(fit) if fit else None)
+
+
+def _render(ctx: JobContext, fit_mb: int | None) -> None:
     project = ctx.project()
     if project.transcript is None or project.analysis is None:
         raise PipelineError("process the clips before rendering")
-    fit = ctx.params.get("fit_mb")
     compositor = None
     if project.path == "novel":
         if project.style.speaker_behind == "auto" and not project.part_faces:
@@ -169,7 +185,174 @@ def handle_render(ctx: JobContext) -> None:
             with contextlib.suppress(LookupError):  # the novel is gone: the part's own cast only
                 cast = ctx.services.db.get_novel(project.novel_id).bible.characters
         compositor = PartCompositor(project, ctx.files, novel_files, cast)
-    compose(ctx, project, fit_mb=int(fit) if fit else None, compositor=compositor)
+    compose(ctx, project, fit_mb=fit_mb, compositor=compositor)
+
+
+def handle_agent_apply(ctx: JobContext) -> None:
+    """Run what the user approved from the editing agent: new pictures and outfits first, so
+    the render after them shows them."""
+    approved = ctx.project().agent.latest_actions("approved")
+    if not approved:
+        raise PipelineError("there is nothing approved to run")
+    pictures = [a for a in approved if a.kind == "picture"]
+    outfits = [a for a in approved if a.kind == "outfit"]
+    render = next((a for a in approved if a.kind == "render"), None)
+    drawn_by = 0.7 if render else 1.0  # where drawing ends on the progress bar
+    errors: dict[str, str | None] = {}  # action id -> why it failed (None: done)
+    try:
+        if pictures:
+            ids = _prepare_pictures(ctx, pictures, errors)
+            if ids:
+                project = ctx.project()
+                assert project.analysis is not None
+                _pictures(ctx, project, project.analysis, ids, span=(0.0, drawn_by))
+                after = ctx.project().analysis
+                moments = {m.id: m for m in (after.moments if after else [])}
+                for action in pictures:
+                    if action.id not in errors:
+                        moment = moments.get(action.moment_id or "")
+                        errors[action.id] = "the picture is gone" if moment is None else moment.error
+            ctx.flush_usage()
+            ctx.check()
+        if outfits:
+            ctx.step("Drawing the new outfits", 0.0, drawn_by)
+            _apply_outfits(ctx, outfits, errors)
+            ctx.flush_usage()
+            ctx.check()
+        if render is not None:
+            ctx.step("Rendering the reel", drawn_by if pictures or outfits else 0.0, 1.0)
+            _render(ctx, render.fit_mb)
+            errors[render.id] = None
+    except BaseException as exc:
+        reason = "cancelled" if isinstance(exc, Cancelled) else describe_error(exc)
+        for action in approved:
+            errors.setdefault(action.id, reason)
+        _mark_actions(ctx, errors)
+        raise
+    _mark_actions(ctx, errors)
+
+
+def _prepare_pictures(ctx: JobContext, actions: list[AgentAction], errors: dict[str, str | None]) -> set[str]:
+    """Give each approved picture its new shape or prompt, as the Review page's edits do."""
+
+    def change(p: Project) -> set[str]:
+        moments = {m.id: m for m in (p.analysis.moments if p.analysis else [])}
+        ids: set[str] = set()
+        for action in actions:
+            moment = moments.get(action.moment_id or "")
+            if moment is None:
+                errors[action.id] = "the picture is gone"
+                continue
+            if action.display and action.display != moment.display:
+                moment.display = action.display
+                moment.chosen = True  # the layout setting no longer overrides this picture
+                moment.note = None
+            if action.prompt:
+                moment.prompt = action.prompt
+            if action.prompt or not action.display:
+                moment.take += 1  # a new version, even when the request is the same
+            moment.enabled = True
+            ids.add(moment.id)
+        return ids
+
+    _, ids = ctx.update(change)
+    return ids
+
+
+def _apply_outfits(ctx: JobContext, actions: list[AgentAction], errors: dict[str, str | None]) -> None:
+    """Give approved characters their new outfits and draw their pictures again: the portrait,
+    its variants and the scenes they are in, nothing else. A character whose portrait cannot be
+    drawn keeps their old outfit and pictures (no drawing is needed to put them back)."""
+    project = ctx.project()
+    if project.path != "novel" or project.story is None or project.novel_id is None:
+        for action in actions:
+            errors[action.id] = "this reel is not a novel part"
+        return
+    novel_id, part = project.novel_id, project.story.part
+    earlier = dict(project.part_pictures or {})
+    old: dict[str, str] = {}  # character id -> the outfit they wore
+
+    def wear(p: Project) -> None:
+        for action in actions:
+            entry = outfit_entry(p.story, action.character or "") if p.story else None
+            if entry is None or not action.outfit:
+                errors[action.id] = f"{action.character} is no longer in this part's cast"
+                continue
+            old.setdefault(entry.id, entry.outfit)
+            entry.outfit = action.outfit
+
+    project, _ = ctx.update(wear)
+    if not old:
+        return
+    assert project.story is not None
+    only = set().union(*(outfit_redraws(project.story, cid) for cid in old))
+    try:
+        pictures = make_part_pictures(ctx, only=only)
+    except BaseException:
+        _undo_outfits(ctx, old, earlier, novel_id, part)
+        raise
+    failed = {cid for cid in old if not (cid in pictures and pictures[cid].key)}
+    if failed:
+        _undo_outfits(ctx, {cid: old[cid] for cid in failed}, earlier, novel_id, part)
+        ctx.log(f"outfits: {', '.join(sorted(failed))} keep their old outfit (the portrait failed)")
+    kept = {pid for pid in only if pictures.get(pid) and pictures[pid].error and pid in earlier}
+    if kept - failed:  # a variant or a scene that failed: the old one is better than none
+
+        def keep(p: Project) -> None:
+            for pid in kept - failed:
+                if p.part_pictures is not None:
+                    p.part_pictures[pid] = earlier[pid]
+
+        ctx.update(keep)
+        ctx.log(f"outfits: {', '.join(sorted(kept - failed))} keep their old picture (drawing failed)")
+    for action in actions:
+        if action.id in errors or not action.character:
+            continue
+        picture = pictures.get(action.character)
+        errors[action.id] = (
+            (picture.error if picture else None) or "the portrait could not be drawn"
+            if action.character in failed
+            else None
+        )
+
+
+def _undo_outfits(
+    ctx: JobContext, old: dict[str, str], earlier: dict[str, PartPicture], novel_id: str, part: int
+) -> None:
+    """Put characters back in their old outfits, with the pictures they had."""
+
+    def story_back(p: Project) -> None:
+        if p.story is None:
+            return
+        for cid, outfit in old.items():
+            entry = outfit_entry(p.story, cid)
+            if entry is not None:
+                entry.outfit = outfit
+            for pid in outfit_redraws(p.story, cid):
+                if pid in earlier and p.part_pictures is not None:
+                    p.part_pictures[pid] = earlier[pid]
+
+    def bible_back(novel: Novel) -> None:
+        for cid, outfit in old.items():
+            character = novel.bible.characters.get(cid)
+            for look in character.looks if character else []:
+                if look.chapter == part:
+                    look.outfit = outfit
+                    if cid in earlier and earlier[cid].key:
+                        look.image = earlier[cid].key
+
+    ctx.update(story_back)
+    ctx.services.db.update_novel(novel_id, bible_back)
+
+
+def _mark_actions(ctx: JobContext, errors: dict[str, str | None]) -> None:
+    def change(p: Project) -> None:
+        for action in p.agent.latest_actions("approved"):
+            if action.id in errors:
+                error = errors[action.id]
+                action.status, action.error = ("failed", error) if error else ("done", None)
+
+    ctx.update(change)
 
 
 HANDLERS: dict[str, Handler] = {
@@ -178,4 +361,6 @@ HANDLERS: dict[str, Handler] = {
     "process": handle_process,
     "regenerate": handle_regenerate,
     "render": handle_render,
+    "agent": handle_agent,
+    "agent_apply": handle_agent_apply,
 }

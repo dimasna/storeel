@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api";
+import { JOB_NAMES } from "./labels";
 import type { Project } from "./types";
 import { useToast } from "./toast";
 
@@ -59,10 +60,12 @@ export function useProject(id: string, onNeedKey: (reason?: string) => void): Us
         setProject(after);
         const changed =
           after.job?.id !== before.job?.id || after.job?.status !== before.job?.status;
-        if (changed && after.job) {
-          const name = after.job.kind === "story" && after.job.step ? after.job.step : after.job.kind;
-          if (after.job.status === "done") toast(`${name}: done`, "ok");
-          if (after.job.status === "failed") toast(`${name} failed`, "error");
+        // The editor's chat shows its own replies, so its jobs need no toast.
+        if (changed && after.job && after.job.kind !== "agent") {
+          const job = after.job;
+          const name = job.kind === "story" && job.step ? job.step : (JOB_NAMES[job.kind] ?? job.kind);
+          if (job.status === "done") toast(`${name}: done`, "ok");
+          if (job.status === "failed") toast(`${name} failed`, "error");
         }
         schedulePoll(after);
       }, delay);

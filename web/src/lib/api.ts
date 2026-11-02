@@ -158,6 +158,13 @@ export const api = {
     request<Project>("POST", `/api/projects/${id}/story`, { from_video: fromVideo }),
   editPart: (id: string, body: Record<string, unknown>) =>
     request<Project>("PUT", `/api/projects/${id}/story`, body),
+
+  // Editing agent
+  agentSend: (id: string, message: string) =>
+    request<Project>("POST", `/api/projects/${id}/agent`, { message }),
+  agentDecide: (id: string, approve: string[]) =>
+    request<Project>("POST", `/api/projects/${id}/agent/decide`, { approve }),
+  agentClear: (id: string) => request<Project>("DELETE", `/api/projects/${id}/agent`),
 };
 
 // Multipart upload with progress (fetch cannot report upload progress).

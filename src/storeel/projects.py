@@ -28,6 +28,8 @@ ACTIVE_STAGE = {
     "process": "processing",
     "regenerate": "regenerating",
     "render": "rendering",
+    "agent": "editing",
+    "agent_apply": "regenerating",
 }
 
 

@@ -54,7 +54,8 @@ export function PicturesSection({ project, state }: { project: Project; state: U
       {analysis.moments.length ? (
         <ol className="flex flex-col gap-4">
           {analysis.moments.map((m) => (
-            <MomentCard key={m.id} project={project} moment={m} state={state} />
+            // Keyed on the prompt too, so the prompt box shows a prompt changed elsewhere.
+            <MomentCard key={`${m.id}:${m.prompt}`} project={project} moment={m} state={state} />
           ))}
         </ol>
       ) : (
