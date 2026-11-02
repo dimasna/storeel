@@ -13,6 +13,7 @@ from typing import Any, BinaryIO
 
 from .common import now_iso
 from .db import Job
+from .estimate import estimate_part
 from .jobs import PipelineError
 from .media import ffmpeg as ff
 from .models import DEFAULT_TITLE, Clip, Project, Style
@@ -178,9 +179,11 @@ def _novel_part(services: Services, project: Project) -> dict[str, Any] | None:
         "title": novel.title,
         "language": novel.language,
         "narration": novel.narration,
+        "visual_style": novel.visual_style,
         "chapter_title": chapter.title if chapter else "",
         "chapter_text": chapter.text if chapter else "",
         "opening": hook_opening(novel, number, any(c.number < number for c in novel.chapters)),
+        "estimate": estimate_part(len(chapter.text) if chapter else 0),
     }
 
 

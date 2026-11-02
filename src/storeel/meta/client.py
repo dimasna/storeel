@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import threading
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -45,6 +46,12 @@ RETRY_CODES = frozenset(
     }
 )
 MAX_RETRY_AFTER = 90.0
+# A stream that sends nothing for this long has stalled. While Muse Spark reasons it is quiet,
+# but the server sends a keep-alive event about every 30 s (measured: 30 s at most at effort
+# high), so silence this long means the answer is not coming.
+STREAM_SILENCE = 180.0
+# One streamed answer may take this long at most, however steadily it streams.
+STREAM_DEADLINE = 900.0
 
 
 class MetaAPIError(RuntimeError):
@@ -84,6 +91,11 @@ class MetaAPIError(RuntimeError):
     def output_limit(self) -> bool:
         """The answer hit max_output_tokens (for a structured answer: it ran away)."""
         return (self.code or "") == "max_output_tokens"
+
+    @property
+    def stalled(self) -> bool:
+        """The answer did not come: the stream went silent or ran past its time limit."""
+        return (self.code or "") in ("stalled", "timeout")
 
 
 @dataclass
@@ -224,8 +236,8 @@ class MetaClient:
         self._http = httpx.Client(
             base_url=base_url,
             headers={"Authorization": f"Bearer {api_key}", "User-Agent": "storeel-studio/0.1"},
-            # Reasoning can stay silent for minutes before the first streamed token.
-            timeout=httpx.Timeout(connect=20.0, read=900.0, write=600.0, pool=60.0),
+            # Reasoning is quiet for a while, but keep-alives arrive meanwhile (STREAM_SILENCE).
+            timeout=httpx.Timeout(connect=20.0, read=STREAM_SILENCE, write=600.0, pool=60.0),
             transport=transport,
         )
 
@@ -284,26 +296,90 @@ class MetaClient:
         *,
         cancel: CancelCheck | None = None,
         on_text: Callable[[str], None] | None = None,
+        attempts: int | None = None,
+        deadline: float = STREAM_DEADLINE,
+        retry_stalls: bool = True,
     ) -> ResponseResult:
-        """Stream one Responses API call and return its final response."""
+        """Stream one Responses API call and return its final response.
+
+        `attempts` overrides how often a transient failure is tried, and `deadline` limits
+        each try in seconds; a try past it fails with code "stalled". A stream that went silent
+        is tried again unless `retry_stalls` is off (the caller then asks differently, e.g.
+        with less reasoning)."""
         body = {**payload, "stream": True}
         model = body.get("model", "?")
-        for attempt in range(1, self.max_attempts + 1):
+        tries = attempts or self.max_attempts
+        for attempt in range(1, tries + 1):
             if cancel is not None and cancel():
                 raise Cancelled
             started = time.monotonic()
             try:
-                return self._stream_once(body, cancel, on_text, started)
+                return self._watched(body, cancel, on_text, started, deadline)
+            except httpx.TimeoutException as exc:
+                error = MetaAPIError(
+                    f"no answer from {model}: the stream went silent ({exc})",
+                    code="timeout",
+                    retryable=retry_stalls,
+                )
             except httpx.TransportError as exc:
                 error = MetaAPIError(f"network error streaming {model}: {exc}", retryable=True)
             except MetaAPIError as exc:
                 error = exc
-            if not error.retryable or attempt == self.max_attempts:
+            if not error.retryable or attempt == tries:
                 raise error
             delay = self._backoff(attempt, error)
             log.warning("responses (%s) failed (%s); retry %d in %.1fs", model, error, attempt, delay)
             sleep_unless_cancelled(delay, cancel)
         raise AssertionError("unreachable")
+
+    def _watched(
+        self,
+        body: dict[str, Any],
+        cancel: CancelCheck | None,
+        on_text: Callable[[str], None] | None,
+        started: float,
+        deadline: float,
+    ) -> ResponseResult:
+        """One try, read on a thread so that a cancel or the deadline ends it at once.
+
+        A blocked socket read can't be interrupted from outside, so the caller stops waiting
+        instead: the reading thread is told to stop, its response is closed, and whatever it
+        still returns is thrown away (it ends at its next event or its read timeout)."""
+        box: dict[str, Any] = {}
+        finished = threading.Event()
+        abandoned = threading.Event()
+
+        def read() -> None:
+            try:
+                box["result"] = self._stream_once(body, abandoned.is_set, on_text, started, box)
+            except BaseException as exc:  # handed to the caller
+                box["error"] = exc
+            finally:
+                finished.set()
+
+        threading.Thread(target=read, name="meta-stream", daemon=True).start()
+        while not finished.wait(0.25):
+            stop = cancel is not None and cancel()
+            late = time.monotonic() - started > deadline
+            if not (stop or late):
+                continue
+            abandoned.set()
+            response = box.get("response")
+            if response is not None:
+                try:
+                    response.close()
+                except Exception:  # the reading thread may be closing it too
+                    log.debug("closing an abandoned stream failed", exc_info=True)
+            if stop:
+                raise Cancelled
+            limit = f"{deadline / 60:.0f} minutes" if deadline >= 120 else f"{deadline:.0f} seconds"
+            raise MetaAPIError(
+                f"{body.get('model', '?')} did not finish its answer within {limit}",
+                code="stalled",
+            )
+        if "error" in box:
+            raise box["error"]
+        return box["result"]
 
     def _stream_once(
         self,
@@ -311,12 +387,15 @@ class MetaClient:
         cancel: CancelCheck | None,
         on_text: Callable[[str], None] | None,
         started: float,
+        box: dict[str, Any] | None = None,
     ) -> ResponseResult:
         text: list[str] = []
         images: list[str] = []
         with self._http.stream(
             "POST", "/responses", json=body, headers={"Accept": "text/event-stream"}
         ) as response:
+            if box is not None:
+                box["response"] = response  # so a cancel can close it from the waiting thread
             if response.status_code >= 400:
                 response.read()
                 raise _error_from_response(response)

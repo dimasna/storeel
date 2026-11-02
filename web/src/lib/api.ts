@@ -6,6 +6,7 @@ import type {
   Config,
   Novel,
   NovelSummary,
+  PartEstimate,
   Project,
   ProjectSummary,
 } from "./types";
@@ -121,8 +122,8 @@ export const api = {
     request<Project>("DELETE", `/api/projects/${id}/scenes/${sceneId}/take`),
 
   // Processing / review
-  process: (id: string, fresh: boolean) =>
-    request<Project>("POST", `/api/projects/${id}/process`, { fresh }),
+  process: (id: string, fresh: boolean, render = false) =>
+    request<Project>("POST", `/api/projects/${id}/process`, { fresh, ...(render ? { render } : {}) }),
   editTurn: (id: string, turnId: number, text: string) =>
     request<Project>("PUT", `/api/projects/${id}/turns/${turnId}`, { text }),
   editMoment: (id: string, momentId: string, body: { enabled?: boolean; display?: string }) =>
@@ -154,10 +155,15 @@ export const api = {
     request<Project>("POST", `/api/novels/${id}/chapters/${number}/reel`),
 
   // Novel parts (path C reels)
-  writePart: (id: string, fromVideo: boolean) =>
-    request<Project>("POST", `/api/projects/${id}/story`, { from_video: fromVideo }),
+  writePart: (id: string, fromVideo: boolean, brief?: string) =>
+    request<Project>("POST", `/api/projects/${id}/story`, {
+      from_video: fromVideo,
+      ...(brief !== undefined ? { brief } : {}),
+    }),
   editPart: (id: string, body: Record<string, unknown>) =>
     request<Project>("PUT", `/api/projects/${id}/story`, body),
+  estimatePart: (chars: number) =>
+    request<PartEstimate>("GET", `/api/estimate/part?chars=${Math.max(0, Math.round(chars))}`),
 
   // Editing agent
   agentSend: (id: string, message: string) =>

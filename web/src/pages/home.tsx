@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
-import { Film, Lightbulb, BookText, Plus, Sparkles } from "lucide-react";
+import { BookText, Film, Lightbulb, Play, Plus, Sparkles } from "lucide-react";
 import { motion } from "motion/react";
 import { api, mediaUrl } from "@/lib/api";
 import type { NovelSummary, ProjectSummary } from "@/lib/types";
-import { useConfig } from "@/lib/config";
 import { useToast } from "@/lib/toast";
 import { navigate, Link } from "@/lib/router";
 import { ago, seconds } from "@/lib/format";
 import { Card, Banner } from "@/components/ui/primitives";
 import { NewNovelDialog } from "@/components/app/new-novel-dialog";
+import { ChapterComposer } from "@/components/app/chapter-composer";
 import { EASE_OUT } from "@/lib/ease";
 
 const PATH_LABEL: Record<string, string> = {
@@ -18,7 +18,6 @@ const PATH_LABEL: Record<string, string> = {
 };
 
 export function HomePage() {
-  const config = useConfig();
   const { toast } = useToast();
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [novels, setNovels] = useState<NovelSummary[] | null>(null);
@@ -39,125 +38,90 @@ export function HomePage() {
     }
   };
 
-  const choices = [
-    {
-      icon: Film,
-      title: "I have a video",
-      desc: "Upload one or more clips. They are transcribed, pictures are planned and drawn, and the reel is compiled.",
-      onClick: () => create("video"),
-    },
-    {
-      icon: Lightbulb,
-      title: "Start from an idea",
-      desc: `Describe the idea. ${config.models.script_name} writes a scene script; you record it scene by scene with a teleprompter.`,
-      onClick: () => create("idea"),
-    },
-    {
-      icon: BookText,
-      title: "From a novel",
-      desc: "Paste a novel chapter by chapter. Each chapter becomes one part of a series, with the same characters in every part.",
-      onClick: () => setNovelOpen(true),
-    },
-  ];
+  const showcase = (projects ?? []).filter((p) => p.read_only);
+  const mine = (projects ?? []).filter((p) => !p.read_only);
+  const myNovels = (novels ?? []).filter((n) => !n.read_only);
 
   return (
     <div className="flex flex-col gap-8">
-      <section className="pt-4">
-        <motion.h1
-          initial={{ opacity: 0, y: 12, filter: "blur(6px)" }}
-          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-          transition={{ duration: 0.5, ease: EASE_OUT }}
-          className="text-3xl font-bold tracking-tight sm:text-4xl"
+      <section className="mx-auto flex w-full max-w-3xl flex-col gap-5 pt-2 sm:pt-6">
+        <div className="text-center">
+          <motion.h1
+            initial={{ opacity: 0, y: 12, filter: "blur(6px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            transition={{ duration: 0.5, ease: EASE_OUT }}
+            className="text-3xl font-bold tracking-tight sm:text-4xl"
+          >
+            Turn a chapter into a <span className="gradient-text">reel</span>
+          </motion.h1>
+          <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+            Paste a chapter of your novel. Muse Spark writes the part, you narrate it from a
+            teleprompter, Muse Image draws the characters, and the reel is rendered for you.
+          </p>
+        </div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.05, ease: EASE_OUT }}
         >
-          Create a <span className="gradient-text">reel</span>
-        </motion.h1>
-        <p className="mt-2 max-w-2xl text-muted-foreground">
-          Captions, pictures and a watermark on your talking-head video, made with Meta's Muse
-          models. Reels are kept for 24 hours — download yours before it expires.
+          <ChapterComposer />
+        </motion.div>
+
+        <p className="text-center text-xs leading-relaxed text-muted-foreground">
+          Your Muse / Model API key stays in this browser. Reels are kept for 24 hours: download
+          yours before then.
         </p>
       </section>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {choices.map((c, i) => (
-          <motion.button
-            key={c.title}
-            onClick={c.onClick}
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: i * 0.06, ease: EASE_OUT }}
-            whileHover={{ y: -3 }}
-            className="gradient-ring group flex flex-col items-start gap-3 rounded-3xl border border-border bg-card/60 p-6 text-left backdrop-blur-sm transition-colors hover:border-accent/50"
-          >
-            <span className="grid size-11 place-items-center rounded-2xl border border-border-strong bg-background text-accent transition-colors group-hover:border-accent/50">
-              <c.icon className="size-5" />
-            </span>
-            <strong className="text-lg">{c.title}</strong>
-            <span className="text-sm leading-relaxed text-muted-foreground">{c.desc}</span>
-          </motion.button>
-        ))}
-      </div>
-
-      <Card
-        title="Novels"
-        actions={
-          <button
-            onClick={() => setNovelOpen(true)}
-            className="inline-flex items-center gap-1 text-sm text-accent hover:underline"
-          >
-            <Plus className="size-4" /> New novel
-          </button>
-        }
-      >
-        {novels === null ? (
-          <p className="text-sm text-muted-foreground">Loading novels…</p>
-        ) : novels.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No novels yet.</p>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {novels.map((n) => (
+      {showcase.length ? (
+        <section className="flex flex-col gap-3">
+          <h2 className="flex items-center gap-2 text-base font-semibold">
+            <Sparkles className="size-4 text-accent" /> See one made with Storeel
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {showcase.map((p) => (
               <Link
-                key={n.id}
-                to={`/n/${n.id}`}
-                className="flex items-center gap-3 rounded-xl border border-transparent p-2.5 transition-colors hover:border-border hover:bg-background"
+                key={p.id}
+                to={`/p/${p.id}`}
+                className="group flex items-center gap-4 rounded-3xl border border-border bg-card/60 p-4 transition-colors hover:border-accent/50"
               >
-                <span className="grid size-10 place-items-center rounded-lg bg-background text-muted-foreground">
-                  ❡
+                <span
+                  className="grid size-14 shrink-0 place-items-center rounded-2xl text-white"
+                  style={{ background: "var(--gradient-accent)" }}
+                >
+                  <Play className="size-6 fill-white" />
                 </span>
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <strong className="truncate text-sm">{n.title}</strong>
+                <span className="flex min-w-0 flex-col">
+                  <strong className="truncate text-sm">{p.title}</strong>
                   <small className="text-xs text-muted-foreground">
-                    {n.chapters} chapter{n.chapters === 1 ? "" : "s"} · {n.characters} character
-                    {n.characters === 1 ? "" : "s"} · {ago(n.updated_at)}
+                    {PATH_LABEL[p.path]}
+                    {p.input_seconds ? ` · ${seconds(p.input_seconds)}` : ""} · watch and download
                   </small>
                 </span>
-                {n.read_only ? <ShowcasePill /> : null}
               </Link>
             ))}
           </div>
-        )}
-      </Card>
+        </section>
+      ) : null}
 
-      <Card title="Recent reels">
+      <Card title="Your reels">
         {error ? (
           <Banner tone="error">{error}</Banner>
         ) : projects === null ? (
-          <p className="text-sm text-muted-foreground">Loading projects…</p>
-        ) : projects.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No reels yet.</p>
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : mine.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No reels yet. Paste a chapter above to make your first.</p>
         ) : (
           <div className="flex flex-col gap-1">
-            {projects.map((p) => (
+            {mine.map((p) => (
               <Link
                 key={p.id}
                 to={`/p/${p.id}`}
                 className="flex items-center gap-3 rounded-xl border border-transparent p-2.5 transition-colors hover:border-border hover:bg-background"
               >
                 {p.cover ? (
-                  <img
-                    src={mediaUrl(p.id, p.cover)}
-                    alt=""
-                    className="h-14 w-10 shrink-0 rounded-md object-cover"
-                  />
+                  <img src={mediaUrl(p.id, p.cover)} alt="" className="h-14 w-10 shrink-0 rounded-md object-cover" />
                 ) : (
                   <span className="grid h-14 w-10 shrink-0 place-items-center rounded-md bg-background text-muted-foreground">
                     {p.path === "idea" ? "✎" : p.path === "novel" ? "❡" : "▶"}
@@ -170,7 +134,6 @@ export function HomePage() {
                     {p.input_seconds ? ` · ${seconds(p.input_seconds)}` : ""} · {ago(p.updated_at)}
                   </small>
                 </span>
-                {p.read_only ? <ShowcasePill /> : null}
                 {p.renders ? (
                   <span className="shrink-0 rounded-full border border-success/40 px-2.5 py-0.5 text-xs text-success">
                     {p.renders} render{p.renders > 1 ? "s" : ""}
@@ -182,16 +145,66 @@ export function HomePage() {
         )}
       </Card>
 
+      <Card
+        title="Your novels"
+        actions={
+          <button
+            onClick={() => setNovelOpen(true)}
+            className="inline-flex min-h-9 items-center gap-1 text-sm text-accent hover:underline"
+          >
+            <Plus className="size-4" /> New novel
+          </button>
+        }
+      >
+        {novels === null ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : myNovels.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            None yet. A novel keeps its characters the same from part to part.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {myNovels.map((n) => (
+              <Link
+                key={n.id}
+                to={`/n/${n.id}`}
+                className="flex items-center gap-3 rounded-xl border border-transparent p-2.5 transition-colors hover:border-border hover:bg-background"
+              >
+                <span className="grid size-10 place-items-center rounded-lg bg-background text-muted-foreground">
+                  <BookText className="size-4" />
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <strong className="truncate text-sm">{n.title}</strong>
+                  <small className="text-xs text-muted-foreground">
+                    {n.chapters} chapter{n.chapters === 1 ? "" : "s"} · {n.characters} character
+                    {n.characters === 1 ? "" : "s"} · {ago(n.updated_at)}
+                  </small>
+                </span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <section className="flex flex-col items-center gap-3 border-t border-border pt-6 text-center">
+        <p className="text-sm text-muted-foreground">Not a novel? Storeel also makes reels:</p>
+        <div className="flex flex-wrap justify-center gap-2">
+          <button
+            onClick={() => create("video")}
+            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border-strong px-4 text-sm font-semibold transition-colors hover:border-accent/60"
+          >
+            <Film className="size-4 text-accent" /> From your video
+          </button>
+          <button
+            onClick={() => create("idea")}
+            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border-strong px-4 text-sm font-semibold transition-colors hover:border-accent/60"
+          >
+            <Lightbulb className="size-4 text-accent" /> From an idea
+          </button>
+        </div>
+      </section>
+
       <NewNovelDialog open={novelOpen} onClose={() => setNovelOpen(false)} />
     </div>
-  );
-}
-
-/** Marks a reel or novel everyone can watch and nobody can change. */
-function ShowcasePill() {
-  return (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/40 bg-accent/5 px-2.5 py-0.5 text-xs text-accent">
-      <Sparkles className="size-3" /> Showcase
-    </span>
   );
 }

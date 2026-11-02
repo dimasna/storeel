@@ -63,6 +63,19 @@ REPAIR_ROUNDS = 2
 # video at "max" ran past 20,000 output tokens three times; "high" answered in 66 s.
 VIDEO_EFFORT = "high"
 REVIEW_ROUNDS = 1  # storyboard reviews of a script in the right shape, each followed by a rewrite
+# The job's step names while a part is written (the studio's checklist follows them).
+WRITE_STEP = "Writing the part"
+CHECK_STEP = "Checking the storyboard"
+FIX_STEP = "Fixing what the check found"
+# The longest one answer of the writer may take, by effort (at "high" it takes about 45 s).
+WRITE_DEADLINE = {
+    "minimal": 240.0,
+    "low": 240.0,
+    "medium": 300.0,
+    "high": 360.0,
+    "xhigh": 600.0,
+    "max": 900.0,
+}
 REVIEW_FIX = (
     "A storyboard review read the chapter next to this script and found moments whose pictures do"
     " not show what is being said. Fix the pictures of these beats (their see, show and then; add"
@@ -1186,7 +1199,7 @@ def write_story(ctx: JobContext, turns: list[Turn] | None = None) -> Story:
     continuing = previous is not None
     model = ctx.settings.script_model
     name = text_model_name(model)
-    effort = ctx.settings.script_effort
+    effort = ctx.settings.part_effort
     if from_video and effort in TEXT_EFFORTS:  # splitting their words needs less thinking than writing
         effort = TEXT_EFFORTS[min(TEXT_EFFORTS.index(effort), TEXT_EFFORTS.index(VIDEO_EFFORT))]
     what = f"making part {number} from your video" if from_video else f"writing part {number}"
@@ -1200,6 +1213,13 @@ def write_story(ctx: JobContext, turns: list[Turn] | None = None) -> Story:
         if from_video
         else user_prompt(novel, number, bible, previous)
     )
+    brief = " ".join(project.brief.split())
+    if brief:
+        ctx.log(f"the creator asks: {brief}")
+        request += (
+            "\n\nTHE CREATOR'S REQUEST for this part (follow it as far as the rules and the chapter"
+            f' allow; it never changes the format):\n"{brief}"'
+        )
     messages: list[dict] = [
         {
             "type": "message",
@@ -1211,6 +1231,7 @@ def write_story(ctx: JobContext, turns: list[Turn] | None = None) -> Story:
     best_rank = (1 << 30, 0)  # (format problems, storyboard mismatches): fewer is better
     reviewing = story_review.enabled(ctx)
     reviews = 0
+    found = 0  # the storyboard mismatches the review found (sent back to be fixed)
     rounds = REPAIR_ROUNDS + (REVIEW_ROUNDS if reviewing else 0)
     for round_no in range(rounds + 1):
         ctx.check()
@@ -1230,17 +1251,22 @@ def write_story(ctx: JobContext, turns: list[Turn] | None = None) -> Story:
                     "text": text_format("novel_part", StoryOut),
                 },
                 cancel=ctx.cancelled,
+                # A stalled answer is asked for again with less reasoning, below, not as it was.
+                retry_stalls=False,
+                deadline=WRITE_DEADLINE.get(effort, WRITE_DEADLINE["max"]),
             )
         except MetaAPIError as exc:
-            if not exc.output_limit:
+            if not (exc.output_limit or exc.stalled):
                 raise
             ctx.spend_text(model, exc.usage)
             # The same request would run as long again: the next try thinks one level less.
             lower = TEXT_EFFORTS[max(0, TEXT_EFFORTS.index(effort) - 1)] if effort in TEXT_EFFORTS else effort
-            ctx.log(
-                f"the answer ran past {ctx.settings.max_output_tokens} output tokens and was stopped"
-                + (f"; trying with effort {lower}" if lower != effort and best is None else "")
-            )
+            again = f"; trying with effort {lower}" if lower != effort and best is None else ""
+            if exc.stalled:
+                ctx.log(f"{name} gave no answer ({exc}){again}")
+            else:
+                cap = ctx.settings.max_output_tokens
+                ctx.log(f"the answer ran past {cap} output tokens and was stopped{again}")
             effort = lower
             if best is not None:
                 break
@@ -1263,8 +1289,12 @@ def write_story(ctx: JobContext, turns: list[Turn] | None = None) -> Story:
         review: list[str] = []  # a script in the right shape gets one look at its pictures
         if out is not None and not problems and reviewing and reviews < REVIEW_ROUNDS and round_no < rounds:
             reviews += 1
+            ctx.step(CHECK_STEP, 0.6, 0.75)
             ctx.log("storyboard review: does every picture show what the words say?")
             review = story_review.review_story(ctx, novel, number, out, bible)
+            found = len(review)
+            if review:
+                ctx.step(FIX_STEP, 0.75, 1.0)
         rank = (len(problems), len(review))
         if out is not None and (best is None or rank < best_rank):
             best, best_rank = (out, problems + review), rank
@@ -1297,6 +1327,7 @@ def write_story(ctx: JobContext, turns: list[Turn] | None = None) -> Story:
         raise PipelineError(f"{name} did not return a usable part script; try again")
     out, problems = best
     story = to_story(out, number, continuing, problems, from_video)
+    story.review_found = found
     for item in problems:
         ctx.log(f"  still to fix: {item}")
     ctx.log(

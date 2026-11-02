@@ -2,12 +2,15 @@ import { useCallback } from "react";
 import { requestKey } from "@/App";
 import { useProject } from "@/lib/use-project";
 import { Banner } from "@/components/ui/primitives";
-import { Link } from "@/lib/router";
+import { Link, useHashPath } from "@/lib/router";
 import { ProjectView } from "@/components/app/project-view";
+import { PartStudio } from "@/components/app/part-studio";
 
 export function ProjectPage({ id }: { id: string }) {
   const onNeedKey = useCallback((reason?: string) => requestKey(reason), []);
   const state = useProject(id, onNeedKey);
+  // A novel part opens on its chat; #/p/<id>/details shows every setting and section instead.
+  const details = useHashPath().endsWith("/details");
 
   if (state.loading && !state.project)
     return (
@@ -26,5 +29,8 @@ export function ProjectPage({ id }: { id: string }) {
       </div>
     );
 
+  const project = state.project;
+  if (project.path === "novel" && project.novel && !project.read_only && !details)
+    return <PartStudio state={state} />;
   return <ProjectView state={state} />;
 }

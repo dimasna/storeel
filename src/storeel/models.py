@@ -328,6 +328,7 @@ class Story(Strict):
     photos: list[StoryPhoto] = Field(default_factory=list)
     bible_notes: list[StoryBibleNote] = Field(default_factory=list)
     problems: list[str] = Field(default_factory=list)  # what the checks still found
+    review_found: int = 0  # the pictures the storyboard review found not matching (then fixed)
     # Made from the user's own video of the part: its words are what they said (the video is the
     # recording), and the poll and the call to action are there only if they said them.
     from_video: bool = False
@@ -614,6 +615,7 @@ class Project(Strict):
     script: Script | None = None  # paths B and C: the scenes (takes) to record
     novel_id: str | None = None  # path C: the novel and chapter this reel tells
     chapter: int | None = None
+    brief: str = Field("", max_length=600)  # path C: what the creator asked the part's writer for
     story: Story | None = None  # path C: the part's script
     part_pictures: dict[str, PartPicture] | None = None  # path C: what the part shows, by id
     part_faces: dict[str, list[Region]] = Field(default_factory=dict)  # path C: face boxes per take

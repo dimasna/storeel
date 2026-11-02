@@ -15,7 +15,7 @@ from .detect import find_faces, references
 from .ingest import ingest
 from .part import find_part_faces, make_part_pictures, outfit_entry, outfit_redraws
 from .script import write_script
-from .story import write_story
+from .story import WRITE_STEP, write_story
 from .story_compose import PartCompositor
 from .transcribe import transcribe
 
@@ -68,14 +68,15 @@ def _pictures(
     make_pictures(ctx, analysis, style, only)
 
 
-def _part_pictures(ctx: JobContext) -> None:
-    """A novel part: its pictures come from its script (no planner), plus the face per take."""
-    ctx.step("Drawing the part's pictures", 0.35, 0.95)
+def _part_pictures(ctx: JobContext, end: float = 1.0) -> None:
+    """A novel part: its pictures come from its script (no planner), plus the face per take.
+    The pictures fill the progress bar from 0.35 up to `end`."""
+    ctx.step("Drawing the part's pictures", 0.35, end - 0.05)
     make_part_pictures(ctx)
     ctx.flush_usage()
     ctx.check()
     if ctx.project().style.speaker_behind == "auto":
-        ctx.step("Finding the face", 0.95, 1.0)
+        ctx.step("Finding the face", end - 0.05, end)
         find_part_faces(ctx)
 
     def done(p: Project) -> None:  # the reel is processed: an empty plan marks it (no moments)
@@ -94,7 +95,7 @@ def handle_script(ctx: JobContext) -> None:
 
 def handle_story(ctx: JobContext) -> None:
     if not ctx.params.get("from_video"):
-        ctx.step("Writing the part", 0.0, 1.0)
+        ctx.step(WRITE_STEP, 0.0, 0.6)
         write_story(ctx)
         return
     # From the user's own video of the part: what they said becomes the part's words.
@@ -137,7 +138,14 @@ def handle_process(ctx: JobContext) -> None:
     ctx.flush_usage()
     ctx.check()
     if project.path == "novel":
-        _part_pictures(ctx)
+        # The studio's first pass (approved as a whole) goes on to render the reel.
+        then_render = bool(ctx.params.get("render"))
+        _part_pictures(ctx, end=0.8 if then_render else 1.0)
+        if then_render:
+            ctx.flush_usage()
+            ctx.check()
+            ctx.step("Rendering the reel", 0.8, 1.0)
+            _render(ctx, None)
         return
     ctx.step("Planning the pictures", 0.35, 0.55)
     analysis = analyze(ctx, source, transcript)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { AnimatePresence, motion, useDragControls, useReducedMotion } from "motion/react";
 import { AlertCircle, ArrowUp, Check, Clock, Loader2, RotateCcw, Sparkles, X } from "lucide-react";
 import { api } from "@/lib/api";
@@ -13,12 +13,19 @@ import type { UseProjectState } from "./project-view";
 
 // The editing agent's chat. Phones first: a bottom sheet over the page that you swipe down to
 // close. From the `lg` breakpoint it is a floating card, and the page stays usable beside it.
+// The pieces (messages, proposals, activity, composer) are shared with the part studio, which
+// shows the same conversation inline.
 
-function suggestions(project: Project): string[] {
+export function agentSuggestions(project: Project): string[] {
   const out: string[] = [];
   if (Object.values(project.caption_notes || {}).some((n) => n.script))
     out.push("Use the script's words where the captions differ");
   if (project.analysis?.moments.length) out.push("Hide the pictures in the first 5 seconds");
+  const character = Object.values(project.part_pictures || {}).find((p) => p.kind === "character" && p.key);
+  if (character) {
+    const name = character.id.replace(/_/g, " ");
+    out.push(`Dress ${name.charAt(0).toUpperCase()}${name.slice(1)} in dark red`);
+  }
   out.push("Make the captions yellow and uppercase");
   if (project.analysis?.moments.length) out.push("Draw the first picture again as a cut-out");
   out.push("Render it under 25 MB");
@@ -29,11 +36,16 @@ function cost(value: number): string {
   return value > 0 ? `≈ $${value.toFixed(2)}` : "no API cost";
 }
 
+/** The pending proposals of the agent's latest reply. */
+function usePending(project: Project): AgentAction[] {
+  const messages = project.agent?.messages ?? [];
+  const lastReply = [...messages].reverse().find((m) => m.role === "assistant");
+  return useMemo(() => (lastReply?.actions ?? []).filter((a) => a.status === "pending"), [lastReply]);
+}
+
 export function AgentDock({ project, state }: { project: Project; state: UseProjectState }) {
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState("");
   const desktop = useMediaQuery("(min-width: 1024px)");
-  const finePointer = useMediaQuery("(pointer: fine)");
   const reduce = useReducedMotion();
   const drag = useDragControls();
   const listRef = useRef<HTMLDivElement>(null);
@@ -44,26 +56,14 @@ export function AgentDock({ project, state }: { project: Project; state: UseProj
   const active = jobActive(project);
   const thinking = active && job?.kind === "agent";
   const applying = active && job?.kind === "agent_apply";
-  const otherJob = active && !thinking && !applying;
-
-  const lastReply = [...messages].reverse().find((m) => m.role === "assistant");
-  const pending = useMemo(
-    () => (lastReply?.actions ?? []).filter((a) => a.status === "pending"),
-    [lastReply],
-  );
-  const pendingKey = pending.map((a) => a.id).join(",");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  useEffect(() => setSelected(new Set(pending.map((a) => a.id))), [pendingKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const selectedCost = pending.filter((a) => selected.has(a.id)).reduce((n, a) => n + a.cost_usd, 0);
-  const canSend = draft.trim().length > 0 && !active && !state.busy;
+  const pending = usePending(project);
   const attention = pending.length > 0 || thinking || applying;
 
   // Keep the newest message in view.
   useEffect(() => {
     const list = listRef.current;
     if (list) list.scrollTo({ top: list.scrollHeight, behavior: reduce ? "auto" : "smooth" });
-  }, [open, messages.length, thinking, applying, pendingKey, job?.step, reduce]);
+  }, [open, messages.length, thinking, applying, pending.length, job?.step, reduce]);
 
   // The sheet covers the page on a phone: don't let the page scroll behind it.
   useEffect(() => {
@@ -82,43 +82,6 @@ export function AgentDock({ project, state }: { project: Project; state: UseProj
     if (desktop) inputRef.current?.focus(); // on a phone this would pop the keyboard up at once
     return () => document.removeEventListener("keydown", onKey);
   }, [open, desktop]);
-
-  const resize = (el: HTMLTextAreaElement) => {
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
-  };
-
-  const send = async (text: string) => {
-    const message = text.trim();
-    if (!message || active) return;
-    const result = await state.act(() => api.agentSend(project.id, message));
-    if (result) {
-      setDraft("");
-      if (inputRef.current) inputRef.current.style.height = "auto";
-    }
-  };
-
-  const onSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (canSend) send(draft);
-  };
-
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // With a keyboard and mouse, Enter sends and Shift+Enter is a new line. On touch screens
-    // Enter is a new line and the button sends.
-    if (finePointer && e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      if (canSend) send(draft);
-    }
-  };
-
-  const toggle = (id: string) =>
-    setSelected((s) => {
-      const next = new Set(s);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
 
   const sheet = desktop
     ? { initial: { opacity: 0, y: 16, scale: 0.98 }, animate: { opacity: 1, y: 0, scale: 1 }, exit: { opacity: 0, y: 16, scale: 0.98 } }
@@ -223,144 +186,266 @@ export function AgentDock({ project, state }: { project: Project; state: UseProj
 
             <div ref={listRef} className="flex-1 overflow-y-auto overscroll-contain border-t border-border px-4 py-4">
               {messages.length === 0 ? (
-                <div className="flex flex-col gap-3">
-                  <p className="text-sm text-muted-foreground">
-                    Tell me what to change, in your own words. For example:
-                  </p>
-                  <div className="flex flex-col gap-2">
-                    {suggestions(project).map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        disabled={active || state.busy}
-                        onClick={() => send(s)}
-                        className="min-h-11 rounded-2xl border border-border-strong bg-card px-4 py-2.5 text-left text-sm text-foreground transition-colors hover:border-accent/60 disabled:opacity-50"
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                <AgentSuggestions project={project} state={state} intro="Tell me what to change, in your own words. For example:" />
               ) : (
-                <ol className="flex flex-col gap-4">
-                  {messages.map((m, i) => (
-                    <li key={`${i}-${m.created_at}`}>
-                      <Message message={m} applying={applying} />
-                    </li>
-                  ))}
-                </ol>
+                <AgentThread messages={messages} applying={applying} />
               )}
-
-              {pending.length > 0 && !active ? (
-                <div className="mt-3 rounded-2xl border border-accent/40 bg-accent/5 p-3">
-                  <p className="mb-1 px-1 text-xs font-semibold text-foreground">Waiting for your OK</p>
-                  <ul className="flex flex-col">
-                    {pending.map((a) => (
-                      <li key={a.id}>
-                        <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl px-1 py-1.5">
-                          <input
-                            type="checkbox"
-                            checked={selected.has(a.id)}
-                            onChange={() => toggle(a.id)}
-                            className="size-5 shrink-0 accent-accent"
-                          />
-                          <span className="flex-1 text-sm leading-snug text-foreground">{a.summary}</span>
-                          <span className="shrink-0 text-xs text-muted-foreground">{cost(a.cost_usd)}</span>
-                        </label>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-2 flex gap-2">
-                    <Button
-                      variant="primary"
-                      className="h-11 flex-1"
-                      disabled={selected.size === 0 || state.busy}
-                      onClick={() => state.act(() => api.agentDecide(project.id, [...selected]))}
-                    >
-                      Run {selected.size}
-                      {selectedCost > 0 ? ` · ≈ $${selectedCost.toFixed(2)}` : ""}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      className="h-11"
-                      disabled={state.busy}
-                      onClick={() => state.act(() => api.agentDecide(project.id, []))}
-                    >
-                      Dismiss
-                    </Button>
-                  </div>
-                  <p className="mt-2 px-1 text-xs text-muted-foreground">Or type below to change the plan.</p>
-                </div>
-              ) : null}
-
-              {thinking && job ? (
-                <div className="mt-4 flex items-center gap-2">
-                  <div className="flex items-center gap-2 rounded-2xl rounded-bl-md border border-border bg-card px-3.5 py-2.5 text-sm text-muted-foreground">
-                    <Dots />
-                    {job.cancel_requested ? "Stopping" : job.step || "Thinking"}…
-                  </div>
-                  {!job.cancel_requested ? (
-                    <button
-                      type="button"
-                      onClick={() => state.act(() => api.cancelJob(job.id))}
-                      className="min-h-11 px-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
-                    >
-                      Stop
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {applying && job ? (
-                <div className="mt-4 rounded-2xl border border-border bg-card p-3">
-                  <div className="mb-2 flex items-center gap-2 text-sm text-foreground">
-                    <Loader2 className="size-4 animate-spin text-accent" />
-                    <span className="flex-1 truncate">{job.step || "Running the approved changes"}</span>
-                    <span className="text-xs text-muted-foreground">{Math.round((job.progress || 0) * 100)}%</span>
-                  </div>
-                  <ProgressBar value={job.progress || 0} />
-                </div>
-              ) : null}
+              <PendingActions project={project} state={state} />
+              <AgentActivity project={project} state={state} />
             </div>
 
-            <form
-              onSubmit={onSubmit}
-              className="shrink-0 border-t border-border px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3"
-            >
-              {otherJob ? (
-                <p className="mb-2 px-1 text-xs text-muted-foreground">Wait for the current job to finish.</p>
-              ) : null}
-              <div className="flex items-end gap-2">
-                <textarea
-                  ref={inputRef}
-                  rows={1}
-                  value={draft}
-                  maxLength={2000}
-                  enterKeyHint={finePointer ? "send" : "enter"}
-                  placeholder="Ask for a change…"
-                  aria-label="Message to the editor"
-                  onChange={(e) => {
-                    setDraft(e.target.value);
-                    resize(e.target);
-                  }}
-                  onKeyDown={onKeyDown}
-                  className="max-h-32 min-h-11 flex-1 resize-none rounded-2xl border border-input bg-card px-4 py-2.5 text-base leading-snug text-foreground placeholder:text-muted-foreground/70 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30 lg:text-sm"
-                />
-                <button
-                  type="submit"
-                  aria-label="Send"
-                  disabled={!canSend}
-                  className="grid size-11 shrink-0 place-items-center rounded-full text-white transition-opacity disabled:opacity-40"
-                  style={{ background: "var(--gradient-accent)" }}
-                >
-                  <ArrowUp className="size-5" />
-                </button>
-              </div>
-            </form>
+            <div className="shrink-0 border-t border-border px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+              <AgentComposer project={project} state={state} inputRef={inputRef} />
+            </div>
           </motion.section>
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+/** Example requests, sent with one tap. */
+export function AgentSuggestions({
+  project,
+  state,
+  intro,
+}: {
+  project: Project;
+  state: UseProjectState;
+  intro: string;
+}) {
+  const active = jobActive(project);
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm text-muted-foreground">{intro}</p>
+      <div className="flex flex-col gap-2">
+        {agentSuggestions(project).map((s) => (
+          <button
+            key={s}
+            type="button"
+            disabled={active || state.busy}
+            onClick={() => state.act(() => api.agentSend(project.id, s))}
+            className="min-h-11 rounded-2xl border border-border-strong bg-card px-4 py-2.5 text-left text-sm text-foreground transition-colors hover:border-accent/60 disabled:opacity-50"
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The conversation: the user's requests and the agent's replies with what each one did. */
+export function AgentThread({ messages, applying }: { messages: AgentMessage[]; applying: boolean }) {
+  return (
+    <ol className="flex flex-col gap-4">
+      {messages.map((m, i) => (
+        <li key={`${i}-${m.created_at}`}>
+          <ChatMessage message={m} applying={applying} />
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** The changes waiting for the user's OK, each with its cost; the rest are dismissed. */
+export function PendingActions({ project, state }: { project: Project; state: UseProjectState }) {
+  const pending = usePending(project);
+  const pendingKey = pending.map((a) => a.id).join(",");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  useEffect(() => setSelected(new Set(pending.map((a) => a.id))), [pendingKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!pending.length || jobActive(project)) return null;
+  const selectedCost = pending.filter((a) => selected.has(a.id)).reduce((n, a) => n + a.cost_usd, 0);
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  return (
+    <div className="mt-3 rounded-2xl border border-accent/40 bg-accent/5 p-3">
+      <p className="mb-1 px-1 text-xs font-semibold text-foreground">Waiting for your OK</p>
+      <ul className="flex flex-col">
+        {pending.map((a) => (
+          <li key={a.id}>
+            <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl px-1 py-1.5">
+              <input
+                type="checkbox"
+                checked={selected.has(a.id)}
+                onChange={() => toggle(a.id)}
+                className="size-5 shrink-0 accent-accent"
+              />
+              <span className="flex-1 text-sm leading-snug text-foreground">{a.summary}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">{cost(a.cost_usd)}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-2 flex gap-2">
+        <Button
+          variant="primary"
+          className="h-11 flex-1"
+          disabled={selected.size === 0 || state.busy}
+          onClick={() => state.act(() => api.agentDecide(project.id, [...selected]))}
+        >
+          Run {selected.size}
+          {selectedCost > 0 ? ` · ≈ $${selectedCost.toFixed(2)}` : ""}
+        </Button>
+        <Button
+          variant="ghost"
+          className="h-11"
+          disabled={state.busy}
+          onClick={() => state.act(() => api.agentDecide(project.id, []))}
+        >
+          Dismiss
+        </Button>
+      </div>
+      <p className="mt-2 px-1 text-xs text-muted-foreground">Or type below to change the plan.</p>
+    </div>
+  );
+}
+
+/** The agent thinking, or the approved changes running, with a way to stop it. */
+export function AgentActivity({ project, state }: { project: Project; state: UseProjectState }) {
+  const job = project.job;
+  const active = jobActive(project);
+  if (!job || !active) return null;
+  if (job.kind === "agent")
+    return (
+      <div className="mt-4 flex items-center gap-2">
+        <div className="flex items-center gap-2 rounded-2xl rounded-bl-md border border-border bg-card px-3.5 py-2.5 text-sm text-muted-foreground">
+          <Dots />
+          {job.cancel_requested ? "Stopping" : job.step || "Thinking"}…
+        </div>
+        {!job.cancel_requested ? (
+          <button
+            type="button"
+            onClick={() => state.act(() => api.cancelJob(job.id))}
+            className="min-h-11 px-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+          >
+            Stop
+          </button>
+        ) : null}
+      </div>
+    );
+  if (job.kind === "agent_apply")
+    return (
+      <div className="mt-4 rounded-2xl border border-border bg-card p-3">
+        <div className="mb-2 flex items-center gap-2 text-sm text-foreground">
+          <Loader2 className="size-4 animate-spin text-accent" />
+          <span className="flex-1 truncate">{job.step || "Running the approved changes"}</span>
+          <span className="text-xs text-muted-foreground">{Math.round((job.progress || 0) * 100)}%</span>
+        </div>
+        <ProgressBar value={job.progress || 0} />
+      </div>
+    );
+  return null;
+}
+
+/**
+ * The message box. By default it sends to the editing agent; `onSend` takes the message
+ * instead (the part studio uses it before the reel exists).
+ */
+export function AgentComposer({
+  project,
+  state,
+  inputRef,
+  placeholder = "Ask for a change…",
+  disabledNote,
+  onSend,
+  sendLabel,
+}: {
+  project: Project;
+  state: UseProjectState;
+  inputRef?: React.RefObject<HTMLTextAreaElement | null>;
+  placeholder?: string;
+  disabledNote?: ReactNode;
+  onSend?: (message: string) => Promise<boolean>;
+  sendLabel?: ReactNode;
+}) {
+  const [draft, setDraft] = useState("");
+  const finePointer = useMediaQuery("(pointer: fine)");
+  const ownRef = useRef<HTMLTextAreaElement>(null);
+  const ref = inputRef ?? ownRef;
+  const active = jobActive(project);
+  const kind = project.job?.kind;
+  const otherJob = active && kind !== "agent" && kind !== "agent_apply";
+  const blocked = Boolean(disabledNote) || active;
+  const canSend = draft.trim().length > 0 && !blocked && !state.busy;
+
+  const resize = (el: HTMLTextAreaElement) => {
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
+  };
+
+  const send = async () => {
+    const message = draft.trim();
+    if (!message || blocked) return;
+    const sent = onSend
+      ? await onSend(message)
+      : Boolean(await state.act(() => api.agentSend(project.id, message)));
+    if (sent) {
+      setDraft("");
+      if (ref.current) ref.current.style.height = "auto";
+    }
+  };
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (canSend) send();
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // With a keyboard and mouse, Enter sends and Shift+Enter is a new line. On touch screens
+    // Enter is a new line and the button sends.
+    if (finePointer && e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      if (canSend) send();
+    }
+  };
+
+  return (
+    <form onSubmit={onSubmit}>
+      {disabledNote ? (
+        <p className="mb-2 px-1 text-xs text-muted-foreground">{disabledNote}</p>
+      ) : otherJob ? (
+        <p className="mb-2 px-1 text-xs text-muted-foreground">Wait for the current job to finish.</p>
+      ) : null}
+      <div className="flex items-end gap-2">
+        <textarea
+          ref={ref}
+          rows={1}
+          value={draft}
+          maxLength={2000}
+          enterKeyHint={finePointer ? "send" : "enter"}
+          placeholder={placeholder}
+          aria-label="Message"
+          disabled={Boolean(disabledNote)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            resize(e.target);
+          }}
+          onKeyDown={onKeyDown}
+          className="max-h-32 min-h-11 flex-1 resize-none rounded-2xl border border-input bg-card px-4 py-2.5 text-base leading-snug text-foreground placeholder:text-muted-foreground/70 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30 disabled:opacity-60 lg:text-sm"
+        />
+        <button
+          type="submit"
+          aria-label="Send"
+          disabled={!canSend}
+          className={cn(
+            "flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-full text-sm font-semibold text-white transition-opacity disabled:opacity-40",
+            sendLabel ? "px-4" : "w-11",
+          )}
+          style={{ background: "var(--gradient-accent)" }}
+        >
+          {sendLabel ?? null}
+          <ArrowUp className="size-5" />
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -390,21 +475,12 @@ function HeaderButton({
   );
 }
 
-function Message({ message, applying }: { message: AgentMessage; applying: boolean }) {
-  if (message.role === "user")
-    return (
-      <div className="flex justify-end">
-        <p className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-[15px] leading-snug text-primary-foreground lg:text-sm">
-          {message.text}
-        </p>
-      </div>
-    );
+export function ChatMessage({ message, applying }: { message: AgentMessage; applying: boolean }) {
+  if (message.role === "user") return <UserBubble>{message.text}</UserBubble>;
   const shown = message.actions.filter((a) => a.status !== "pending");
   return (
     <div className="flex flex-col items-start gap-2">
-      <p className="max-w-[92%] whitespace-pre-wrap break-words rounded-2xl rounded-bl-md border border-border bg-card px-3.5 py-2 text-[15px] leading-snug text-foreground lg:text-sm">
-        {message.text}
-      </p>
+      <AssistantBubble>{message.text}</AssistantBubble>
       {shown.length ? (
         <ul className="flex w-full flex-col gap-1 pl-1">
           {shown.map((a) => (
@@ -412,6 +488,29 @@ function Message({ message, applying }: { message: AgentMessage; applying: boole
           ))}
         </ul>
       ) : null}
+    </div>
+  );
+}
+
+export function UserBubble({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-3.5 py-2 text-[15px] leading-snug text-primary-foreground lg:text-sm">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+export function AssistantBubble({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      className={cn(
+        "max-w-[92%] whitespace-pre-wrap break-words rounded-2xl rounded-bl-md border border-border bg-card px-3.5 py-2 text-[15px] leading-snug text-foreground lg:text-sm",
+        className,
+      )}
+    >
+      {children}
     </div>
   );
 }
@@ -438,7 +537,7 @@ function ActionLine({ action, applying }: { action: AgentAction; applying: boole
   );
 }
 
-function Dots() {
+export function Dots() {
   return (
     <span className="flex items-center gap-1" aria-hidden>
       {[0, 150, 300].map((delay) => (

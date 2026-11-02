@@ -1,8 +1,10 @@
 import { useSyncExternalStore } from "react";
+import { MessageSquare } from "lucide-react";
 import { apiKey } from "@/lib/api";
 import type { Project } from "@/lib/types";
 import { jobActive, type UseProject } from "@/lib/use-project";
 import { requestKey } from "@/App";
+import { Link } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import { Banner } from "@/components/ui/primitives";
 import { Button } from "@/components/ui/button";
@@ -49,6 +51,14 @@ export function ProjectView({ state }: { state: UseProject }) {
 
   return (
     <div className="flex flex-col gap-5">
+      {project.path === "novel" && project.novel ? (
+        <Link
+          to={`/p/${project.id}`}
+          className="inline-flex w-fit items-center gap-1.5 rounded-xl border border-accent/40 bg-accent/5 px-3 py-2 text-sm font-semibold text-accent transition-colors hover:border-accent/70"
+        >
+          <MessageSquare className="size-4" /> Back to the chat
+        </Link>
+      ) : null}
       <ProjectHead project={project} state={state} />
 
       {!hasKey ? (

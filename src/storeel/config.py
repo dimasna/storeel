@@ -89,6 +89,9 @@ class Settings:
     # The text models: one writes the scripts, one watches the video and plans the pictures.
     script_model: str
     script_effort: str
+    # A novel part is written while its creator waits in the chat: at effort "high" Muse Spark
+    # answers in about 45 s, while "max" took many minutes and at times never finished.
+    part_effort: str
     plan_model: str
     plan_effort: str
     max_output_tokens: int  # per text-model call, reasoning included: bounds a runaway answer
@@ -139,6 +142,7 @@ def get_settings() -> Settings:
         # more reliable scripts, Muse Wonder the better picture plans (see README).
         script_model=_get("STOREEL_SCRIPT_MODEL", "muse-spark-1.3"),
         script_effort=_get_choice("STOREEL_SCRIPT_EFFORT", "max", TEXT_EFFORTS),
+        part_effort=_get_choice("STOREEL_PART_EFFORT", "high", TEXT_EFFORTS),
         plan_model=_get("STOREEL_PLAN_MODEL", "muse-wonder-1.0"),
         plan_effort=_get_choice("STOREEL_PLAN_EFFORT", "max", TEXT_EFFORTS),
         max_output_tokens=_get_int("STOREEL_MAX_OUTPUT_TOKENS", 32000, minimum=1000),

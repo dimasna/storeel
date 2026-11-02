@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, File, Request, UploadFile
+from fastapi import FastAPI, File, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,6 +35,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from ..common import now_iso
 from ..config import ConfigError, Settings, get_settings
 from ..db import Conflict, NotFound
+from ..estimate import estimate_part
 from ..jobs import PipelineError, Workers
 from ..maintenance import Cleaner
 from ..media import ffmpeg as ff
@@ -116,10 +117,12 @@ class ClipOrder(Body):
 
 class ProcessRequest(Body):
     fresh: bool = False  # new pictures for every moment
+    render: bool = False  # a novel part: render the reel once its pictures are drawn
 
 
 class PartRequest(Body):
     from_video: bool = False  # make the part from the user's own video of it, not from the chapter
+    brief: str | None = Field(None, max_length=600)  # what the creator asks the writer for ("" clears it)
 
 
 class TurnEdit(Body):
@@ -413,6 +416,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         needed = list(dict.fromkeys(needed))
         return JSONResponse({"ok": True, "models": models, "missing": [m for m in needed if m not in models]})
 
+    @app.get("/api/estimate/part")
+    def part_estimate(chars: Annotated[int, Query(ge=0, le=200_000)]) -> dict[str, float | int]:
+        """What making a part of a chapter this long costs at list prices (nothing runs)."""
+        return estimate_part(chars)
+
     @app.get("/api/projects")
     def list_projects(request: Request) -> list[dict[str, Any]]:
         owner = request.state.owner
@@ -597,7 +605,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         project = load(project_id)
         if not project.inputs():
             raise PipelineError("add a video first" if project.path == "video" else "record the scenes first")
-        return start(project_id, "process", {"fresh": body.fresh}, key=user_key(request))
+        params: dict[str, Any] = {"fresh": body.fresh}
+        if body.render and project.path == "novel":
+            params["render"] = True
+        return start(project_id, "process", params, key=user_key(request))
 
     @app.put("/api/projects/{project_id}/turns/{turn_id}")
     def edit_turn(project_id: str, turn_id: int, body: TurnEdit) -> dict[str, Any]:
@@ -764,8 +775,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from_video = bool(body and body.from_video)
         if from_video and not project.clips:
             raise PipelineError("upload your video of the part first")
+        key = user_key(request)  # before anything changes, so a missing key loses nothing
+        if body is not None and body.brief is not None:
+            brief = " ".join(body.brief.split())
+            edit(project_id, lambda p: setattr(p, "brief", brief))
         params = {"from_video": True} if from_video else {}
-        return start(project_id, "story", params, key=user_key(request))
+        return start(project_id, "story", params, key=key)
 
     @app.put("/api/projects/{project_id}/story")
     def edit_part(project_id: str, body: StoryEdit) -> dict[str, Any]:

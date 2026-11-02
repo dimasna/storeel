@@ -187,6 +187,8 @@ export interface Story {
   cta: string;
   from_video: boolean;
   problems: string[];
+  /** The pictures the storyboard review found not matching the chapter, then fixed. */
+  review_found?: number;
   characters?: { id: string; name: string; label: string; role: string; description: string; outfit: string }[];
   looks?: { id: string; outfit: string }[];
   variants?: { id: string; base: string; change: string; persistent: boolean }[];
@@ -208,14 +210,26 @@ export interface PartPicture {
   problems: string[];
 }
 
+/** What a part's first pass costs at list prices, before it runs (rendering is free). */
+export interface PartEstimate {
+  write_usd: number;
+  draw_usd: number;
+  transcribe_usd: number;
+  total_usd: number;
+  pictures: number;
+  seconds: number;
+}
+
 export interface NovelPart {
   id: string;
   title: string;
   language: string;
   narration: string;
+  visual_style: string;
   chapter_title: string;
   chapter_text: string;
   opening: string;
+  estimate: PartEstimate;
 }
 
 export interface HeardNote {
@@ -264,6 +278,7 @@ export interface Project {
   script: Script | null;
   novel_id: string | null;
   chapter: number | null;
+  brief: string;
   story: Story | null;
   part_pictures: Record<string, PartPicture> | null;
   source: unknown | null;
