@@ -43,7 +43,7 @@ CLIP = "work/title-window.mp4"
 # masks (see maskdecode.decode_packed). Without it, a few local processes decode.
 RemoteDecode = Callable[[list[tuple[list[str], int, int]]], list[tuple[list[int], bytes]]]
 REMOTE_DECODE: RemoteDecode | None = None
-REMOTE_BATCH = 20  # lines a machine decodes (about 20 seconds)
+REMOTE_BATCH = 5  # lines a machine decodes (about 3 s each on one there; 240 in 25 s on 49 machines)
 
 
 def needed(project: Project) -> bool:
@@ -97,6 +97,7 @@ def decode_masks(
             for frames, data in REMOTE_DECODE(batches):
                 out.update(unpack(frames, data, width, height))
             ctx.check()
+            ctx.log(f"decoded the masks in {len(batches)} batches on machines of their own")
             return out
         except Cancelled:
             raise

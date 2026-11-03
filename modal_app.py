@@ -122,7 +122,7 @@ volume = modal.Volume.from_name(f"{APP_NAME}-data", create_if_missing=True)
 
 # SAM 3.1's video masks are decoded by Meta's parser, which is pure Python (about a second a
 # mask): a whole reel's masks for a cut-out background are shared out over many small machines
-# at once (see storeel.pipeline.depth.decode_masks), each taking about 20 of them. They only
+# at once (see storeel.pipeline.depth.decode_masks), each taking a few of them. They only
 # get SAM's answer text and give back packed masks: no key, no files, no Volume.
 decoder_image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -132,7 +132,7 @@ decoder_image = (
 )
 
 
-@app.function(image=decoder_image, cpu=1.0, memory=1024, max_containers=80, timeout=300)
+@app.function(image=decoder_image, cpu=1.0, memory=1024, max_containers=100, timeout=300)
 def decode_masks(lines: list[str], width: int, height: int) -> tuple[list[int], bytes]:
     from storeel.pipeline.maskdecode import decode_packed
 
