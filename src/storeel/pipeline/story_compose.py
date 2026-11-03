@@ -26,6 +26,7 @@ from .align import Text, align, tokens
 from .analyze import find_quote
 from .compose import Compositor, H, W, _Card
 from .layout import covered, to_region
+from .motion import Renderer
 from .render import (
     INK,
     RED,
@@ -362,6 +363,7 @@ class Sprites:
             self.slots[c.id], self.labels[c.id] = c.slot, c.label
         self.bases = {v.id: v.base for v in self.story.variants} if self.story else {}
         self.cache: dict[tuple, Image.Image] = {}
+        self.kinds: dict[int, str] = {}  # id of a sprite -> "photo" for the photo and scene cards
 
     def image(self, picture_id: str) -> Image.Image | None:
         picture = self.pictures.get(picture_id)
@@ -445,10 +447,9 @@ class Sprites:
             title = self.photos[show.photo].title if show.photo in self.photos else ""
             picture = _wide(picture)
             width = _card_width(picture)
-            centred(
-                self._cached(("photo", show.photo, width), lambda: photo_card(picture, width, title)),
-                CARD_Y + shift,
-            )
+            sprite = self._cached(("photo", show.photo, width), lambda: photo_card(picture, width, title))
+            self.kinds[id(sprite)] = "photo"
+            centred(sprite, CARD_Y + shift)
         elif show.prop and (picture := self.image(show.prop)) is not None:
             meta = self.props.get(show.prop)
             info = self.pictures.get(show.prop)
@@ -466,10 +467,9 @@ class Sprites:
             else:
                 picture = _wide(picture)
                 width = _card_width(picture)
-                centred(
-                    self._cached(("scene", show.prop, width), lambda: photo_card(picture, width)),
-                    0.30 + shift,
-                )
+                sprite = self._cached(("scene", show.prop, width), lambda: photo_card(picture, width))
+                self.kinds[id(sprite)] = "photo"
+                centred(sprite, 0.30 + shift)
         named: tuple[Image.Image, tuple[int, int]] | None = None
         for cid, slot in zip(chars, slots, strict=True):
             picture = self.image(cid)
@@ -546,10 +546,12 @@ class PartCompositor(Compositor):
         files: ProjectFiles,
         novel_files: ProjectFiles | None,
         cast: dict[str, BibleCharacter] | None = None,
+        motion: Renderer | None = None,
     ) -> None:
         self._novel_files = novel_files
         self._cast = cast or {}
-        super().__init__(project, files)
+        self._end_kinds: dict[int, str] = {}  # id of an end screen piece -> what it is
+        super().__init__(project, files, motion)
 
     def _build_pictures(self, project: Project, files: ProjectFiles) -> list[tuple[float, float]]:
         story = project.story
@@ -572,11 +574,15 @@ class PartCompositor(Compositor):
             end: float,
             animate: bool = True,
             enter: bool = True,
+            group: str = "",
         ) -> _Card:
             nonlocal ident
             ident += 1
             center = (xy[0] + image.width // 2, xy[1] + image.height // 2)
-            card = _Card(start, end, image, center, ident=ident, animate=animate, enter=enter)
+            kind = (self._end_kinds if group else sprites.kinds).get(id(image), "")
+            card = _Card(
+                start, end, image, center, ident=ident, animate=animate, enter=enter, kind=kind, group=group
+            )
             self.cards.append(card)
             return card
 
@@ -620,7 +626,7 @@ class PartCompositor(Compositor):
                 if card is not None and abs(card.end - line.start) < 1e-6:
                     card.end = line.end
                 else:
-                    card = add(image, xy, line.start, line.end)
+                    card = add(image, xy, line.start, line.end, group="cta" if line.kind == "cta" else "")
                 now[key] = card
             live = now
             behind = style.speaker_behind
@@ -684,4 +690,7 @@ class PartCompositor(Compositor):
                 top = min(max(top, title_bottom + gap), pill_top - gap - sprite.height)
                 out.append((sprite, (W // 2 - sprite.width // 2, top)))
         out.append((end, (W // 2 - end.width // 2, pill_top)))
+        # What each piece is, for the end screen's entrance (see Compositor._add_motion).
+        self._end_kinds.update({id(titles): "titles", id(end): "pill"})
+        self._end_kinds.update({id(image): "picture" for image, _ in out[1:-1]})
         return out

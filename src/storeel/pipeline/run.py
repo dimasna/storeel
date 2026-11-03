@@ -11,8 +11,12 @@ from .agent import handle_agent
 from .analyze import analyze
 from .assets import make_anchors, make_pictures
 from .compose import compose
+from .depth import needed as title_needs_masks
+from .depth import track_speaker
 from .detect import find_faces, references
+from .emphasis import pick_emphasis
 from .ingest import ingest
+from .motion import Renderer
 from .part import find_part_faces, make_part_pictures, outfit_entry, outfit_redraws
 from .script import write_script
 from .story import WRITE_STEP, write_story
@@ -63,6 +67,9 @@ def _pictures(
     references(ctx, source, analysis)
     find_faces(ctx, source, analysis, style, only)
     ctx.flush_usage()
+    if only is None and title_needs_masks(ctx.project()):
+        track_speaker(ctx)
+        ctx.flush_usage()
     ctx.step("Generating pictures", middle, end)
     make_anchors(ctx, analysis, style, only)
     make_pictures(ctx, analysis, style, only)
@@ -71,13 +78,17 @@ def _pictures(
 def _part_pictures(ctx: JobContext, end: float = 1.0) -> None:
     """A novel part: its pictures come from its script (no planner), plus the face per take.
     The pictures fill the progress bar from 0.35 up to `end`."""
-    ctx.step("Drawing the part's pictures", 0.35, end - 0.05)
+    ctx.step("Drawing the part's pictures", 0.35, end - 0.08)
     make_part_pictures(ctx)
     ctx.flush_usage()
     ctx.check()
     if ctx.project().style.speaker_behind == "auto":
-        ctx.step("Finding the face", end - 0.05, end)
+        ctx.step("Finding the face", end - 0.08, end - 0.04)
         find_part_faces(ctx)
+    if title_needs_masks(ctx.project()):
+        ctx.step("Tracking you for the title", end - 0.04, end)
+        track_speaker(ctx)
+        ctx.flush_usage()
 
     def done(p: Project) -> None:  # the reel is processed: an empty plan marks it (no moments)
         title = p.title
@@ -113,6 +124,8 @@ def handle_story(ctx: JobContext) -> None:
         names += [c.name for c in novel.bible.before(project.chapter or 1).characters.values()]
     transcript = transcribe(ctx, source, _language(project), names)
     ctx.flush_usage()
+    pick_emphasis(ctx, transcript)
+    ctx.flush_usage()
     ctx.check()
     ctx.step("Making the part from your video", 0.35, 1.0)
     write_story(ctx, transcript.turns)
@@ -135,6 +148,8 @@ def handle_process(ctx: JobContext) -> None:
     project = ctx.project()
     ctx.step("Transcribing", 0.25, 0.35)
     transcript = transcribe(ctx, source, _language(project), _keywords(project))
+    ctx.flush_usage()
+    pick_emphasis(ctx, transcript)
     ctx.flush_usage()
     ctx.check()
     if project.path == "novel":
@@ -181,9 +196,14 @@ def _render(ctx: JobContext, fit_mb: int | None) -> None:
     project = ctx.project()
     if project.transcript is None or project.analysis is None:
         raise PipelineError("process the clips before rendering")
+    keyed = ctx.services.keys.get(ctx.job.id) is not None  # renders are free; a key is optional
+    if keyed and title_needs_masks(project):
+        track_speaker(ctx)  # "behind" chosen after processing (reuses the masks when they fit)
+        ctx.flush_usage()
+        project = ctx.project()
     compositor = None
     if project.path == "novel":
-        if project.style.speaker_behind == "auto" and not project.part_faces:
+        if keyed and project.style.speaker_behind == "auto" and not project.part_faces:
             find_part_faces(ctx)  # chosen after processing: check the face now
             project = ctx.project()
         cast: dict[str, BibleCharacter] = {}
@@ -192,7 +212,9 @@ def _render(ctx: JobContext, fit_mb: int | None) -> None:
             novel_files = ctx.services.novel_files(project.novel_id)
             with contextlib.suppress(LookupError):  # the novel is gone: the part's own cast only
                 cast = ctx.services.db.get_novel(project.novel_id).bible.characters
-        compositor = PartCompositor(project, ctx.files, novel_files, cast)
+        compositor = PartCompositor(
+            project, ctx.files, novel_files, cast, motion=Renderer(ctx.files, ctx.log, ctx.cancelled)
+        )
     compose(ctx, project, fit_mb=fit_mb, compositor=compositor)
 
 

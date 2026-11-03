@@ -805,11 +805,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return edit(project_id, save)
 
     @app.post("/api/projects/{project_id}/render")
-    def render(project_id: str, body: RenderRequest) -> dict[str, Any]:
+    def render(project_id: str, body: RenderRequest, request: Request) -> dict[str, Any]:
         project = load(project_id)
         if project.analysis is None or project.transcript is None:
             raise PipelineError("process the video first")
-        return start(project_id, "render", {"fit_mb": body.fit_mb})  # no Model API calls, so no key
+        # Free: the key, when the user gave one, is used only for a look chosen after processing
+        # (SAM tracking them for a title behind them, or finding their face).
+        key = valid_key(request.headers.get(KEY_HEADER))
+        return start(project_id, "render", {"fit_mb": body.fit_mb}, key=key)
 
     @app.post("/api/jobs/{job_id}/cancel")
     def cancel(job_id: str) -> dict[str, Any]:
@@ -841,8 +844,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         approve = set(body.approve)
         pending = project.agent.latest_actions("pending")
         chosen = [a for a in pending if a.id in approve]
-        # A new picture or outfit calls Muse Image; a render alone needs no key.
-        key = user_key(request) if any(a.kind in ("picture", "outfit") for a in chosen) else None
+        # A new picture or outfit calls Muse Image; a render alone uses the key only if it was
+        # given (to track the speaker for a title behind them, see render).
+        if any(a.kind in ("picture", "outfit") for a in chosen):
+            key: str | None = user_key(request)
+        else:
+            key = valid_key(request.headers.get(KEY_HEADER))
 
         def decide(p: Project) -> None:
             for action in p.agent.latest_actions("pending"):

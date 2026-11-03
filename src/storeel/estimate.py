@@ -9,12 +9,14 @@ These are estimates: the writer's thinking varies.
 
 from __future__ import annotations
 
-from .models import PRICE_ASR_SECOND, PRICE_IMAGE, PRICE_SAM_IMAGE
+from .models import PRICE_ASR_SECOND, PRICE_IMAGE, PRICE_SAM_FRAME, PRICE_SAM_IMAGE
 from .pipeline.story import MAX_SECONDS
 
 TEXT_BASE_USD = 0.13  # the prompts, the storyboard check, a fix round and the portrait checks
 TEXT_PER_CHAR_USD = 0.00001  # the chapter is read by each of those calls
 CUT_OUT_SHARE = 0.7  # most pictures are cut out of their background by SAM
+TITLE_FRAMES = 90  # SAM tracking the storyteller under the title: three seconds at 30 fps
+STRESS_USD = 0.005  # Muse Spark choosing the words the captions stress, after the transcription
 
 
 def part_pictures(chapter_chars: int) -> int:
@@ -28,13 +30,14 @@ def part_seconds(chapter_chars: int) -> int:
 
 
 def estimate_part(chapter_chars: int) -> dict[str, float | int]:
-    """The cost of a part's first pass: writing, transcribing, drawing (rendering is free)."""
+    """The cost of a part's first pass: writing, transcribing (with the stressed words),
+    drawing (with the title's tracking); rendering is free."""
     chars = max(0, chapter_chars)
     pictures = part_pictures(chars)
     seconds = part_seconds(chars)
     write = TEXT_BASE_USD + chars * TEXT_PER_CHAR_USD
-    draw = pictures * (PRICE_IMAGE + CUT_OUT_SHARE * PRICE_SAM_IMAGE)
-    transcribe = seconds * PRICE_ASR_SECOND
+    draw = pictures * (PRICE_IMAGE + CUT_OUT_SHARE * PRICE_SAM_IMAGE) + TITLE_FRAMES * PRICE_SAM_FRAME
+    transcribe = seconds * PRICE_ASR_SECOND + STRESS_USD
     return {
         "write_usd": round(write, 3),
         "draw_usd": round(draw, 3),

@@ -40,15 +40,22 @@ class Style(Strict):
     # What the speaker looks like behind a card or cut-out: "auto" blurs only when it covers the face,
     # "top" only behind a picture in the upper part (characters standing at the bottom keep it sharp).
     speaker_behind: Literal["blur", "sharp", "auto", "top"] = "blur"
-    captions: Literal["pill", "karaoke", "clean", "off"] = "pill"
+    # "bold" and "serif" bring each word in as it is said and set the stressed words (picked by
+    # Muse Spark) in an italic serif, in caption_color; the others highlight the spoken word.
+    captions: Literal["pill", "karaoke", "clean", "bold", "serif", "off"] = "pill"
     caption_color: str = Field("#E50914", pattern=HEX_COLOR)
     caption_position: Literal["lower", "middle"] = "lower"
     caption_case: Literal["original", "upper"] = "original"
     watermark: str = Field("", max_length=60)
     watermark_position: Literal["center", "top", "bottom"] = "center"
     language: Literal["auto", "id", "en"] = "auto"
+    # A big title over the first seconds: "behind" the speaker (SAM 3.1 tracks them, so their head
+    # and shoulders cover the words), "front" of them, or "off". title_text "" is the reel's title.
+    title_style: Literal["behind", "front", "off"] = "behind"
+    title_text: str = Field("", max_length=40)
 
     _clean_watermark = field_validator("watermark")(_one_line)
+    _clean_title = field_validator("title_text")(_one_line)
 
     @field_validator("speaker_behind", mode="before")
     @classmethod
@@ -381,6 +388,7 @@ class Word(Strict):
     text: str
     start: float
     end: float
+    emphasis: bool = False  # a word the captions stress (picked by Muse Spark)
 
 
 class Turn(Strict):
@@ -401,6 +409,21 @@ class Transcript(Strict):
     language_bias: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
     digest: str = ""
+    emphasis_picked: bool = False  # Muse Spark chose the words to stress (none may be stressed)
+
+
+class SpeakerMasks(Strict):
+    """Where the speaker is, frame by frame, while the title is up: SAM 3.1 video masks of the
+    person, stored as one compressed array (frames x height x width, at half the reel's width
+    and height)."""
+
+    key: str
+    start: float  # seconds on the reel's timeline of the first mask
+    fps: float
+    frames: int
+    width: int
+    height: int
+    digest: str  # the source video and the window they were made for
 
 
 class Entity(Strict):
@@ -508,6 +531,8 @@ TEXT_PRICES = {
 CONTRIBUTOR_PRICES = (0.10 / 1e6, 0.002 / 1e6, 0.20 / 1e6)  # the "-contributor" Muse Spark models
 PRICE_IMAGE = 0.01
 PRICE_SAM_IMAGE = 2.5 / 1000
+PRICE_SAM_FRAME = 0.20 / 1000  # video segmentation, billed for at least SAM_MIN_FRAMES a request
+SAM_MIN_FRAMES = 50
 PRICE_ASR_SECOND = 0.18 / 3600
 
 
@@ -535,6 +560,7 @@ class Usage(Strict):
     text_usd: float = 0.0  # those tokens priced by the model that used them
     images: int = 0
     sam_images: int = 0
+    sam_frames: int = 0  # video frames SAM segmented (as billed)
     asr_seconds: float = 0.0
 
     def add(self, other: Usage) -> None:
@@ -554,6 +580,7 @@ class Usage(Strict):
             text
             + self.images * PRICE_IMAGE
             + self.sam_images * PRICE_SAM_IMAGE
+            + self.sam_frames * PRICE_SAM_FRAME
             + self.asr_seconds * PRICE_ASR_SECOND,
             4,
         )
@@ -622,6 +649,7 @@ class Project(Strict):
     story: Story | None = None  # path C: the part's script
     part_pictures: dict[str, PartPicture] | None = None  # path C: what the part shows, by id
     part_faces: dict[str, list[Region]] = Field(default_factory=dict)  # path C: face boxes per take
+    speaker_masks: SpeakerMasks | None = None  # the speaker while the title is up (SAM 3.1 video)
     source: Source | None = None
     transcript: Transcript | None = None
     analysis: Analysis | None = None

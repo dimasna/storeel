@@ -4,7 +4,10 @@ In the layout, the speaker's video fills the frame, and pictures
 float over it as photo cards in the upper part, cut-out characters standing at the bottom,
 or cut-out objects in the upper middle. A picture can also fill the screen (a cutaway with a
 slow Ken Burns zoom). While a card or cut-out is up, the speaker can be blurred and dimmed
-behind it (style "speaker_behind"), fading in and out over half a second.
+behind it (style "speaker_behind"), fading in and out over half a second. Over the first
+seconds a big title can stand behind the speaker: their SAM 3.1 masks (see depth.py) choose
+where it stays readable and take its letters out where they are. The word-by-word caption
+styles bring each word in as it is said, with the stressed words set apart.
 
 Python draws only the overlay layer (RGBA) and the blur level; ffmpeg decodes the user's
 video, blurs a copy, blends the two by that level, puts the layer on top and encodes. The
@@ -25,14 +28,15 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PIL import Image, ImageOps
+import numpy as np
+from PIL import Image, ImageFilter, ImageOps
 
 from ..common import Cancelled, now_iso
 from ..files import ProjectFiles
 from ..jobs import JobContext, PipelineError
 from ..media import ffmpeg as ff
 from ..models import Moment, Project, Region, Render, Style
-from .captions import build_pages
+from .captions import build_pages, stressed
 from .layout import (
     CAPTION_CENTER,
     CHARACTER_BOTTOM,
@@ -44,7 +48,18 @@ from .layout import (
     object_box,
     to_region,
 )
-from .render import caption_page, card, cutout_sprite, watermark
+from .motion import Motion, Renderer, stage_page, swing_page, title_page
+from .render import (
+    TitleSprite,
+    WordSprite,
+    caption_page,
+    card,
+    cutout_sprite,
+    kinetic_page,
+    title_sprite,
+    watermark,
+)
+from .title import title_window, title_words
 
 W, H = ff.WIDTH, ff.HEIGHT
 MASK_ROWS = 2  # under each overlay frame: the blur level, as the alpha of these rows
@@ -61,6 +76,26 @@ BLUR_JOIN = 1.0  # blurred stretches closer than this are joined, so the speaker
 BLUR_SIGMA = 18  # at quarter size
 BLUR_DIM = 0.56
 KEEP_RENDERS = 5
+# The word-by-word caption styles: text size (of the height), page width (of the width), the words
+# and characters a page holds, how long a word takes to come in and how far it rises (of its size).
+KINETIC = {
+    "bold": {"size": 0.056, "width": 0.84, "words": 4, "chars": 18, "reveal": 0.14, "rise": 0.32},
+    "serif": {"size": 0.046, "width": 0.80, "words": 6, "chars": 30, "reveal": 0.2, "rise": 0.12},
+}
+WORD_LEAD = 0.04  # a word comes in this much before it is said
+TITLE_Y = 0.3  # behind the speaker, the title is fitted to them; among equals, nearest this height
+TITLE_FRONT_Y = 0.2  # its centre in front of them (or not tracked): above the eyes in most framings
+# Where a title behind the speaker may go (top and bottom, of the height): under the platforms'
+# top bar and clear of the captions. It is tried on two lines and on one, at every height there.
+TITLE_BAND = {"lower": (0.06, 0.5), "middle": (0.06, 0.41)}
+TITLE_STEP = 0.005  # of the height
+READABLE = 0.7  # the share of the title's letters that must show past the speaker
+TITLE_TARGET = 0.85  # the share it aims for: the speaker covers a little of it, not more
+TITLE_SMALLEST = 0.035  # of the height: a title this small on one line is not tried
+TITLE_SHRINK = (0.75, 0.56)  # then smaller sizes of the one-line title, before it goes in front
+TITLE_IN, TITLE_OUT = 0.35, 0.3
+TITLE_FEATHER = 1.6  # pixels: the soft edge where the speaker covers the title
+SWING_MIN = 1.4  # seconds a photo card must be up to swing in through 3D (see motion.py)
 
 
 def _composite(canvas: Image.Image, image: Image.Image, x: int, y: int) -> None:
@@ -164,6 +199,149 @@ class _Page:
 
 
 @dataclass
+class _Kinetic:
+    """A caption page of the word-by-word styles: each word comes in (a fade and a small rise)
+    as it is said, and stays until the page ends."""
+
+    start: float
+    end: float
+    xy: tuple[int, int]
+    words: list[WordSprite]
+    starts: list[float]
+    reveal: float
+    rise: int
+
+    def shown(self, t: float) -> int:
+        return sum(1 for s in self.starts if s - WORD_LEAD <= t)
+
+    def animating(self, t: float) -> bool:
+        return any(0.0 <= t - (s - WORD_LEAD) < self.reveal for s in self.starts)
+
+    def draw(self, canvas: Image.Image, t: float) -> None:
+        x, y = self.xy
+        for word, start in zip(self.words, self.starts, strict=True):
+            since = t - (start - WORD_LEAD)
+            if since < 0:
+                break
+            alpha = _ease_out(since / self.reveal)
+            dy = round((1 - alpha) * self.rise)
+            _composite(canvas, _faded(word.image, alpha), x + word.xy[0], y + word.xy[1] + dy)
+
+
+@dataclass
+class _Title:
+    """The reel's title over its first seconds. With the speaker's masks (SAM 3.1, frame by
+    frame) its pixels where the speaker is are taken out, so they stand in front of it. With an
+    `intro` (HyperFrames: its letters rising in one by one) the title is drawn from those frames,
+    the last one held."""
+
+    start: float
+    end: float
+    sprite: Image.Image  # the title, cropped to its box
+    box: tuple[int, int, int, int]  # where that box is on the frame
+    masks: np.ndarray | None = None  # frames x h x w booleans, at `fps` from `mask_start`
+    mask_start: float = 0.0
+    fps: float = 24.0
+    still: TitleSprite | None = None  # how it was set (for HyperFrames to set it the same way)
+    intro: Motion | None = None
+
+    def alpha(self, t: float) -> float:
+        if self.intro is not None:  # its letters come in by themselves
+            return max(0.0, min((self.end - t) / TITLE_OUT, 1.0))
+        return max(0.0, min(_ease_out((t - self.start) / TITLE_IN), (self.end - t) / TITLE_OUT, 1.0))
+
+    def draw(self, canvas: Image.Image, t: float, behind: bool) -> None:
+        alpha = self.alpha(t)
+        if alpha <= 0.0:
+            return
+        x0, y0, x1, y1 = self.box
+        sprite = self.sprite
+        grow = _ease_out((t - self.start) / TITLE_IN)
+        if self.intro is not None:
+            sprite = self.intro.at(t - self.start)
+        elif grow < 0.999:  # comes in a little smaller, about its centre
+            scale = 0.94 + 0.06 * grow
+            size = (round(sprite.width * scale), round(sprite.height * scale))
+            small = sprite.resize(size, Image.BILINEAR)
+            sprite = Image.new("RGBA", self.sprite.size, (0, 0, 0, 0))
+            sprite.alpha_composite(small, ((sprite.width - size[0]) // 2, (sprite.height - size[1]) // 2))
+        if behind and self.masks is not None and len(self.masks):
+            k = min(max(round((t - self.mask_start) * self.fps), 0), len(self.masks) - 1)
+            mask = self.masks[k]
+            sx, sy = mask.shape[1] / W, mask.shape[0] / H
+            top, left = int(y0 * sy), int(x0 * sx)
+            region = mask[top : max(top + 1, round(y1 * sy)), left : max(left + 1, round(x1 * sx))]
+            person = Image.fromarray(region.astype(np.uint8) * 255).resize(sprite.size, Image.BILINEAR)
+            person = person.filter(ImageFilter.GaussianBlur(TITLE_FEATHER))
+            keep = 255 - np.asarray(person, dtype=np.uint16)
+            ink = np.asarray(sprite.getchannel("A"), dtype=np.uint16)
+            sprite = sprite.copy()
+            sprite.putalpha(Image.fromarray((ink * keep // 255).astype(np.uint8)))
+        _composite(canvas, _faded(sprite, alpha), x0, y0)
+
+
+Box = tuple[float, float, float, float]  # x0, y0, x1, y1 on the frame
+
+
+def _overlap(a: Box, b: Box) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def fit_title(
+    text: str, cover: np.ndarray, band: tuple[float, float], avoid: tuple[Box, ...] = ()
+) -> tuple[TitleSprite, int, float]:
+    """Where the title goes behind the speaker. `cover` is how often each pixel is the speaker
+    over the title's time (the masks' mean, at their size). The title is tried on two lines, on
+    one, and smaller on one, at every height in `band` where it meets none of the `avoid` boxes;
+    the biggest that stays readable (READABLE of its letters showing) wins, at the height where
+    the share showing is nearest TITLE_TARGET (then nearest TITLE_Y). Returns the title, its top
+    and the share showing; when no height is readable, its place in front (see below)."""
+    sy, sx = cover.shape[0] / H, cover.shape[1] / W
+    two = title_sprite(text, W, H, 2)
+    layouts = [two]
+    one = title_sprite(text, W, H, 1) if two.lines == 2 else two
+    if one is not two and one.size >= TITLE_SMALLEST * H:
+        layouts.append(one)
+    for shrink in TITLE_SHRINK:
+        size = round(one.size * shrink)
+        if size >= TITLE_SMALLEST * H:
+            layouts.append(title_sprite(text, W, H, 1, max_size=size))
+    tried: list[tuple[int, float, int, TitleSprite]] = []
+    for rank, sprite in enumerate(layouts):
+        w, h = max(1, round(sprite.image.width * sx)), max(1, round(sprite.image.height * sy))
+        ink = np.asarray(sprite.letters.resize((w, h), Image.BILINEAR), dtype=np.float32) / 255
+        x0 = round(sprite.x * sx)
+        top, bottom = round(band[0] * H), round(band[1] * H) - sprite.image.height
+        for y in range(top, max(top, bottom) + 1, max(1, round(TITLE_STEP * H))):
+            box = (sprite.x, y, sprite.x + sprite.image.width, y + sprite.image.height)
+            if any(_overlap(box, other) for other in avoid):
+                continue
+            region = cover[round(y * sy) : round(y * sy) + h, x0 : x0 + w]
+            part = ink[: region.shape[0], : region.shape[1]]
+            showing = float((part * (1 - region)).sum()) / max(1e-6, float(part.sum()))
+            tried.append((rank, showing, y, sprite))
+    if not tried:  # the badge, a card or the watermark is everywhere it could go: go under them
+        return fit_title(text, cover, band)
+    readable = [t for t in tried if t[1] >= READABLE]
+    if not readable:
+        # Nowhere readable: the title goes in front of the speaker, as high as it can (over
+        # their hair rather than their eyes), on one line when it has one. The share returned
+        # is the most that would have shown behind them.
+        sprite = layouts[1] if len(layouts) > 1 else layouts[0]
+        top = min(t[2] for t in tried if t[3] is sprite)
+        return sprite, top, max(t[1] for t in tried)
+    rank = min(t[0] for t in readable)
+    best = min(
+        (t for t in readable if t[0] == rank),
+        key=lambda t: (
+            round(abs(t[1] - TITLE_TARGET), 2),
+            abs(t[2] + t[3].image.height / 2 - TITLE_Y * H),
+        ),
+    )
+    return best[3], best[2], best[1]
+
+
+@dataclass
 class _Cutaway:
     start: float
     end: float
@@ -186,7 +364,8 @@ class _Card:
     """A card or cut-out: pops in (fade and a small rise), fades out. With `animate` off it is
     simply there for its time; with `enter` off it is there from its first frame (the part badge,
     which the platforms' cover frame must show) and still fades out when it leaves. One that
-    replaces another in the same place comes in without the rise (`rise` off): a dissolve."""
+    replaces another in the same place comes in without the rise (`rise` off): a dissolve.
+    With an `intro` (HyperFrames frames, see motion.py) those frames are its entrance instead."""
 
     start: float
     end: float
@@ -197,14 +376,29 @@ class _Card:
     enter: bool = True
     rise: bool = True
     fade: float = FADE_OUT  # seconds it takes to go, at the end of its time
+    kind: str = ""  # "photo" for a picture card (it may swing in through 3D); a part's end screen
+    group: str = ""  # its pieces: "titles", "picture", "pill", in the group "cta"
+    intro: Motion | None = None
+
+    @property
+    def entrance(self) -> float:
+        return self.intro.duration if self.intro is not None else POP_IN
+
+    def _introducing(self, t: float) -> bool:
+        return self.intro is not None and t - self.start < self.intro.duration
 
     def animating(self, t: float) -> bool:
-        entering = self.enter and t - self.start < POP_IN
+        if self._introducing(t):
+            return True
+        entering = self.enter and self.intro is None and t - self.start < POP_IN
         return self.animate and (entering or self.end - t < self.fade)
 
     def draw(self, canvas: Image.Image, t: float) -> None:
+        if self.intro is not None and self._introducing(t):
+            _composite(canvas, self.intro.at(t - self.start), *self.intro.xy)
+            return
         alpha, rise = 1.0, 0.0
-        if self.animate and self.enter and t - self.start < POP_IN:
+        if self.animate and self.enter and self.intro is None and t - self.start < POP_IN:
             alpha = _ease_out((t - self.start) / POP_IN)
             if self.rise:
                 rise = (1 - alpha) * 0.02 * H
@@ -224,6 +418,11 @@ SOLID = 0.9  # a sprite this opaque (its share of its box) is a card; less, a cu
 def _box(card: _Card) -> tuple[float, float, float, float]:
     w, h = card.image.width, card.image.height
     return card.center[0] - w / 2, card.center[1] - h / 2, card.center[0] + w / 2, card.center[1] + h / 2
+
+
+def _top_left(card: _Card) -> tuple[int, int]:
+    """Where a card's sprite goes on the frame, as _Card.draw puts it."""
+    return round(card.center[0] - card.image.width / 2), round(card.center[1] - card.image.height / 2)
 
 
 def _covers(a: _Card, b: _Card) -> bool:
@@ -268,13 +467,14 @@ def join_cuts(cards: list[_Card], cutaways: list[_Cutaway]) -> None:
     for a, nxt in plan:  # (only the ends change, so the plan made first stays right)
         for b in nxt:
             b.rise = False
+        entrance = max((b.entrance for b in nxt), default=POP_IN)  # under the new card until it is in
         if not nxt:
             a.end += a.fade
         elif all(_solid(b.image) for b in nxt):
-            a.end += POP_IN + a.fade
+            a.end += entrance + a.fade
         else:
-            a.end += POP_IN
-            a.fade = POP_IN
+            a.end += entrance
+            a.fade = entrance
     for c in cutaways:
         cut = c.end
         if any(d is not c and abs(d.start - cut) < CUT_EPS for d in cutaways):
@@ -289,7 +489,7 @@ def join_cuts(cards: list[_Card], cutaways: list[_Cutaway]) -> None:
 class Compositor:
     """Builds every overlay element up front, then yields the layer frame by frame."""
 
-    def __init__(self, project: Project, files: ProjectFiles) -> None:
+    def __init__(self, project: Project, files: ProjectFiles, motion: Renderer | None = None) -> None:
         if project.source is None:
             raise PipelineError("process the clips before rendering")
         self.duration = project.source.duration
@@ -297,7 +497,39 @@ class Compositor:
         self.overlay_fps = fps if fps <= OVERLAY_FPS_MAX else fps // 2
         style = project.style
         self.pages: list[_Page] = []
-        if style.captions != "off" and project.transcript is not None:
+        self.kinetic: list[_Kinetic] = []
+        if style.captions in KINETIC and project.transcript is not None:
+            spec = KINETIC[style.captions]
+            size = round(H * spec["size"])
+            center_y = CAPTION_CENTER[style.caption_position] * H
+            pages = build_pages(
+                project.transcript.turns, style.caption_case, spec["words"], spec["chars"], clauses=True
+            )
+            flags = stressed(pages, project.transcript.emphasis_picked)
+            for page, stress in zip(pages, flags, strict=True):
+                kinetic = kinetic_page(
+                    [w.text for w in page.words],
+                    stress,
+                    style.captions,
+                    size,
+                    round(W * spec["width"]),
+                    style.caption_color,
+                )
+                # The first line sits where a one-line page does; a second goes under it, so a long
+                # page never climbs into what is above the captions (a part's end screen).
+                xy = (round(W / 2 - kinetic.width / 2), round(center_y - kinetic.anchor))
+                self.kinetic.append(
+                    _Kinetic(
+                        page.start,
+                        page.end,
+                        xy,
+                        kinetic.words,
+                        [w.start for w in page.words],
+                        spec["reveal"],
+                        round(spec["rise"] * size),
+                    )
+                )
+        elif style.captions != "off" and project.transcript is not None:
             size = round(H * CAPTION_SIZE)
             center_y = CAPTION_CENTER[style.caption_position] * H
             for page in build_pages(project.transcript.turns, style.caption_case):
@@ -315,12 +547,125 @@ class Compositor:
         self.cards: list[_Card] = []
         self.unchecked_faces = 0  # "auto" blur without face boxes: blurred to be safe
         self.blurs = blur_windows(self._build_pictures(project, files), self.duration)
-        join_cuts(self.cards, self.cutaways)
         self.mark: tuple[Image.Image, tuple[int, int]] | None = None
         if style.watermark:
             image = watermark(style.watermark, round(H * WATERMARK_SIZE), round(W * 0.8))
             y = WATERMARK_Y[style.watermark_position] * H
             self.mark = (image, (round(W / 2 - image.width / 2), round(y - image.height / 2)))
+        self.title_note = ""
+        self.title_showing: float | None = None  # the share of the title showing past the speaker
+        self.title = self._build_title(project, files)
+        self.motion_note = (
+            "plain (HyperFrames is not installed)" if motion is None or not motion.available else ""
+        )
+        if motion is not None and motion.available:
+            self._add_motion(motion)
+        join_cuts(self.cards, self.cutaways)
+
+    def _add_motion(self, motion: Renderer) -> None:
+        """HyperFrames entrances (see motion.py) for the title, the photo cards and a part's end
+        screen, rendered side by side; whatever does not render comes in the plain way."""
+        fps = self.overlay_fps
+        pages = []
+        if self.title is not None and self.title.still is not None:
+            pages.append(title_page(self.title.still))
+        swinging = [
+            c
+            for c in self.cards
+            if c.kind == "photo" and c.animate and c.enter and c.end - c.start >= SWING_MIN
+        ]
+        sheet: list[Image.Image] = []
+        for item in swinging:
+            if all(item.image is not other for other in sheet):
+                sheet.append(item.image)
+        slot = 0
+        if sheet:
+            cards_page, slot = swing_page(sheet, fps)
+            pages.append(cards_page)
+        end = [c for c in self.cards if c.group == "cta"]
+        at = (0, 0)
+        if end:
+            layers = [(c.image, _top_left(c)) for c in end]
+            end_page, at = stage_page(layers, [c.kind for c in end])
+            pages.append(end_page)
+        if not pages:
+            return
+        frames = motion.render(pages, fps)
+        rate = max(1, round(fps))
+        done = []
+        if self.title is not None and frames.get("title"):
+            self.title.intro = Motion(frames["title"], rate, self.title.box[:2])
+            done.append("title")
+        sheet_frames = frames.get("cards")
+        if sheet_frames and sheet:
+            with Image.open(sheet_frames[0]) as first:
+                sheet_w, sheet_h = first.size
+            swung = 0
+            for item in swinging:
+                k = next(i for i, image in enumerate(sheet) if image is item.image)
+                own = sheet_frames[k * slot : (k + 1) * slot]
+                if not own:
+                    continue
+                x, y = _top_left(item)
+                xy = (x - (sheet_w - item.image.width) // 2, y - (sheet_h - item.image.height) // 2)
+                item.intro = Motion(own, rate, xy)
+                swung += 1
+            done.append(f"{swung} card(s)")
+        if frames.get("end") and end:
+            stage = Motion(frames["end"], rate, at)
+            start = min(c.start for c in end)
+            blank = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+            self.cards.append(
+                _Card(start, start + stage.duration, blank, (0, 0), ident=0, animate=False, intro=stage)
+            )
+            for c in end:  # the still pieces take over from its last frame, exactly where it left them
+                c.start, c.enter = start + stage.duration, False
+            done.append("end screen")
+        self.motion_note = f"HyperFrames ({', '.join(done)})" if done else "plain (HyperFrames failed)"
+
+    def _build_title(self, project: Project, files: ProjectFiles) -> _Title | None:
+        """The title over the first seconds. Behind the speaker, it goes where their masks
+        leave it readable; with no masks, or no such place, it is drawn in front of them."""
+        window = title_window(project)
+        if window is None:
+            return None
+        start, end = window
+        text = title_words(project)
+        style = project.style
+        stored = project.speaker_masks
+        masks = None
+        if style.title_style == "behind":
+            if stored is not None and not stored.key and abs(stored.start - start) <= 0.01:
+                self.title_note = "SAM found no speaker while the title is up, so it is drawn in front"
+            elif stored is None or not files.exists(stored.key) or abs(stored.start - start) > 0.01:
+                self.title_note = (
+                    "the speaker is not tracked for this title yet, so it is drawn in front of them"
+                )
+            else:
+                with np.load(files.path(stored.key)) as data:
+                    masks = data["masks"]
+        if stored is None or masks is None or not len(masks):
+            sprite = title_sprite(text, W, H, 2)
+            top = round(TITLE_FRONT_Y * H - sprite.image.height / 2)
+            box = (sprite.x, top, sprite.x + sprite.image.width, top + sprite.image.height)
+            return _Title(start, end, sprite.image, box, still=sprite)
+        band = TITLE_BAND.get(style.caption_position, TITLE_BAND["lower"])
+        avoid = [_box(c) for c in self.cards if c.start < end and start < c.end]  # e.g. a part's badge
+        if self.mark is not None:
+            image, (x, y) = self.mark
+            avoid.append((x, y, x + image.width, y + image.height))
+        sprite, top, showing = fit_title(text, masks.mean(axis=0, dtype=np.float32), band, tuple(avoid))
+        box = (sprite.x, top, sprite.x + sprite.image.width, top + sprite.image.height)
+        title = _Title(start, end, sprite.image, box, still=sprite)
+        self.title_showing = showing
+        if showing < READABLE:
+            self.title_note = (
+                f"the speaker fills the frame (only {showing:.0%} of the title would show behind them),"
+                " so it is drawn in front of them, as high as it goes"
+            )
+            return title
+        title.masks, title.mask_start, title.fps = masks, stored.start, stored.fps
+        return title
 
     def _build_pictures(self, project: Project, files: ProjectFiles) -> list[tuple[float, float]]:
         """The moments' pictures as cutaways and cards; returns the spans to blur the speaker in."""
@@ -341,7 +686,10 @@ class Compositor:
                 self.cutaways.append(_Cutaway(start, end, source, zoom_in=len(self.cutaways) % 2 == 0))
                 continue
             placed = place(moment, picture, style)
-            self.cards.append(_Card(start, end, placed.image, placed.center, ident=len(self.cards) + 1))
+            kind = "" if is_cutout(moment) else "photo"
+            self.cards.append(
+                _Card(start, end, placed.image, placed.center, ident=len(self.cards) + 1, kind=kind)
+            )
             blur = style.speaker_behind == "blur" or (
                 style.speaker_behind == "top" and not is_standing(moment, picture)
             )
@@ -361,6 +709,12 @@ class Compositor:
     def _page_at(self, t: float) -> int | None:
         for index, page in enumerate(self.pages):
             if page.start <= t < page.end:
+                return index
+        return None
+
+    def _kinetic_at(self, t: float) -> int | None:
+        for index, page in enumerate(self.kinetic):
+            if page.start - WORD_LEAD <= t < page.end:
                 return index
         return None
 
@@ -384,6 +738,8 @@ class Compositor:
                 canvas.paste(cut.frame(t), (0, 0))
             else:
                 _composite(canvas, cut.frame(t), 0, 0)
+        if self.title is not None and self.title.start <= t < self.title.end:
+            self.title.draw(canvas, t, behind=not cuts)  # over a full-screen picture: in front
         for item in self.cards:
             if item.start <= t < item.end:
                 item.draw(canvas, t)
@@ -394,6 +750,9 @@ class Compositor:
             if page.marks:
                 mark, (dx, dy) = page.marks[page.word_at(t)]
                 _composite(canvas, mark, page.xy[0] + dx, page.xy[1] + dy)
+        kinetic = self._kinetic_at(t)
+        if kinetic is not None:
+            self.kinetic[kinetic].draw(canvas, t)
         if self.mark is not None:
             _composite(canvas, self.mark[0], *self.mark[1])
         level = round(255 * self.blur_level(t))
@@ -404,6 +763,8 @@ class Compositor:
         """Identifies what is on screen; None while something is moving."""
         if any(c.start <= t < c.end for c in self.cutaways):
             return None
+        if self.title is not None and self.title.start <= t < self.title.end:
+            return None  # the speaker moves under it
         level = self.blur_level(t)
         if 0.0 < level < 1.0:
             return None
@@ -415,7 +776,13 @@ class Compositor:
                 cards.append(item.ident)
         index = self._page_at(t)
         word = self.pages[index].word_at(t) if index is not None else None
-        return index, word, tuple(cards), level
+        kinetic = self._kinetic_at(t)
+        shown = None
+        if kinetic is not None:
+            if self.kinetic[kinetic].animating(t):
+                return None
+            shown = self.kinetic[kinetic].shown(t)
+        return index, word, kinetic, shown, tuple(cards), level
 
     def frames(self) -> Iterator[bytes]:
         last_key: tuple | None = None
@@ -530,13 +897,23 @@ def compose(
     if project.source is None:
         raise PipelineError("process the clips before rendering")
     master = files.path(project.source.key)
-    compositor = compositor or Compositor(project, files)
+    compositor = compositor or Compositor(project, files, Renderer(files, ctx.log, ctx.cancelled))
+    pages = len(compositor.pages) or len(compositor.kinetic)
+    title = "no title"
+    if compositor.title is not None:
+        where = "in front"
+        if compositor.title.masks is not None:
+            where = f"behind the speaker ({compositor.title_showing:.0%} of it showing)"
+        title = f"title {title_words(project)!r} {where}"
     ctx.log(
         f"compose: {compositor.duration:.1f}s at {project.source.fps} fps,"
-        f" {len(compositor.pages)} caption pages, {len(compositor.cutaways)} full-screen pictures,"
+        f" {pages} caption pages ({project.style.captions}), {title},"
+        f" {len(compositor.cutaways)} full-screen pictures,"
         f" {len(compositor.cards)} cards and cut-outs, speaker blurred in {len(compositor.blurs)}"
-        f" stretch(es) ({project.style.speaker_behind})"
+        f" stretch(es) ({project.style.speaker_behind}), motion: {compositor.motion_note}"
     )
+    if compositor.title_note:
+        ctx.log(compositor.title_note)
     if compositor.unchecked_faces:
         ctx.log(
             f"{compositor.unchecked_faces} picture(s) have no face check yet, so the speaker is blurred"

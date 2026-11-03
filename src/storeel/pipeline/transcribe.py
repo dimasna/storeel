@@ -201,10 +201,19 @@ def build_turns(raw_turns: list[dict], envelope: Envelope, duration: float) -> l
 
 
 def retime(turn: Turn, text: str) -> Turn:
-    """The turn with corrected caption text, re-timed over the same speech."""
+    """The turn with corrected caption text, re-timed over the same speech. A stressed word that
+    is still there stays stressed."""
     text = " ".join(text.split())
     speech = turn.speech or [(turn.start, turn.end)]
-    return turn.model_copy(update={"text": text, "words": place_words(text, speech)})
+    words = place_words(text, speech)
+    stressed = {_bare(w.text) for w in turn.words if w.emphasis}
+    if stressed:
+        words = [w.model_copy(update={"emphasis": True}) if _bare(w.text) in stressed else w for w in words]
+    return turn.model_copy(update={"text": text, "words": words})
+
+
+def _bare(text: str) -> str:
+    return re.sub(r"[^\w]", "", text.lower())
 
 
 def asr_keywords(names: list[str]) -> list[str]:

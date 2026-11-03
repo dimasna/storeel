@@ -1,0 +1,22 @@
+<!doctype html>
+<!-- Rendered once when the server image is built, so HyperFrames' Chrome is in the image and a
+     broken install fails the build instead of a user's render. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=64, height=64">
+<style>
+* { margin: 0; padding: 0; }
+html, body { width: 64px; height: 64px; overflow: hidden; background: transparent; }
+#root { position: relative; width: 64px; height: 64px; }
+.dot { position: absolute; left: 16px; top: 16px; width: 32px; height: 32px; border-radius: 50%;
+  background: #e50914; animation: grow .5s ease-out both; }
+@keyframes grow { from { transform: scale(.2); opacity: 0; } to { transform: none; opacity: 1; } }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="main" data-start="0" data-duration="0.5" data-width="64" data-height="64">
+<div class="clip" data-start="0" data-duration="0.5" data-track-index="0"><div class="dot"></div></div>
+</div>
+</body>
+</html>

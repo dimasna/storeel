@@ -9,6 +9,10 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 FONT_FILE = Path(__file__).resolve().parents[1] / "assets" / "fonts" / "PlusJakartaSans-VariableFont_wght.ttf"
+SERIF_FILES = {
+    "regular": FONT_FILE.with_name("InstrumentSerif-Regular.ttf"),
+    "italic": FONT_FILE.with_name("InstrumentSerif-Italic.ttf"),
+}
 _local = threading.local()  # FreeType faces are not safe to share between threads
 
 
@@ -21,6 +25,16 @@ def font(size: int, weight: int = 800) -> ImageFont.FreeTypeFont:
         face = ImageFont.truetype(str(FONT_FILE), size)
         face.set_variation_by_axes([weight])
         cache[key] = face
+    return cache[key]
+
+
+def serif(size: int, italic: bool = False) -> ImageFont.FreeTypeFont:
+    cache: dict[tuple[int, bool], ImageFont.FreeTypeFont] | None = getattr(_local, "serifs", None)
+    if cache is None:
+        cache = _local.serifs = {}
+    key = (size, italic)
+    if key not in cache:
+        cache[key] = ImageFont.truetype(str(SERIF_FILES["italic" if italic else "regular"]), size)
     return cache[key]
 
 
@@ -131,6 +145,107 @@ def caption_page(words: list[str], size: int, max_width: int, mode: str, color: 
             )
             marks.append((glyph, (round(x - stroke - 1), round(baseline - ascent - stroke - 1))))
     return CaptionLayout(shadow, marks)
+
+
+@dataclass(frozen=True)
+class WordSprite:
+    image: Image.Image  # the word with its soft shadow
+    xy: tuple[int, int]  # where it goes on the page
+    stressed: bool
+
+
+@dataclass(frozen=True)
+class KineticLayout:
+    """A caption page whose words come in one by one: each word is its own sprite."""
+
+    width: int
+    height: int
+    words: list[WordSprite]
+    anchor: int = 0  # the middle of its first line, from the top: a second line goes under it
+
+
+def _word_sprite(
+    word: str, fnt: ImageFont.FreeTypeFont, fill: tuple[int, int, int, int], size: int
+) -> Image.Image:
+    """One word with a wide soft shadow and a tight one under it, legible over any picture."""
+    ascent, descent = fnt.getmetrics()
+    pad = round(size * 0.35)
+    width = int(fnt.getlength(word)) + 2 * pad
+    height = ascent + descent + 2 * pad
+    glyph = Image.new("L", (width, height), 0)
+    ImageDraw.Draw(glyph).text((pad, pad + ascent), word, font=fnt, anchor="ls", fill=255)
+    out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    for radius, strength, dy in ((size * 0.12, 0.62, size * 0.05), (size * 0.035, 0.5, size * 0.015)):
+        blurred = glyph.filter(ImageFilter.GaussianBlur(max(1, radius)))
+        shade = blurred.point(lambda v, s=strength: round(v * s))
+        layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        layer.putalpha(shade)
+        out.alpha_composite(layer, (0, round(dy)))
+    ink = Image.new("RGBA", (width, height), fill)
+    ink.putalpha(glyph.point(lambda v: round(v * fill[3] / 255)))
+    out.alpha_composite(ink)
+    return out
+
+
+def kinetic_page(
+    words: list[str], stress: list[bool], mode: str, size: int, max_width: int, color: str
+) -> KineticLayout:
+    """Lay out a page for the word-by-word styles. "bold": heavy sans words with the stressed
+    ones in a larger italic serif; "serif": serif words, the stressed ones in italic. Stressed
+    words are drawn in `color`, the rest in white; lines are centred and share a baseline."""
+    accent = (*hex_rgb(color), 255)
+    white = (255, 255, 255, 255)
+    if mode == "bold":
+        plain, strong = font(size, 800), serif(round(size * 1.38), italic=True)
+        space, leading = font(size, 800).getlength(" ") * 0.95, 0.02
+    else:
+        plain, strong = serif(size), serif(round(size * 1.12), italic=True)
+        space, leading = serif(size).getlength(" "), 0.16
+    faces = [strong if s else plain for s in stress]
+    widths = [faces[k].getlength(w) for k, w in enumerate(words)]
+
+    def line_width(line: list[int]) -> float:
+        return sum(widths[k] for k in line) + space * (len(line) - 1)
+
+    lines: list[list[int]] = [[]]
+    for k in range(len(words)):
+        if lines[-1] and line_width([*lines[-1], k]) > max_width:
+            lines.append([k])
+        else:
+            lines[-1].append(k)
+    if len(lines) == 2 and len(words) > 2:  # two lines that balance, not one word left on the second
+        split = min(
+            range(1, len(words)),
+            key=lambda k: max(line_width(list(range(k))), line_width(list(range(k, len(words))))),
+        )
+        lines = [list(range(split)), list(range(split, len(words)))]
+    metrics = [faces[k].getmetrics() for k in range(len(words))]
+    line_sizes = []
+    for line in lines:
+        ascent = max(metrics[k][0] for k in line)
+        descent = max(metrics[k][1] for k in line)
+        line_sizes.append((ascent, descent))
+    gap = round(size * leading)
+    line_widths = [line_width(line) for line in lines]
+    pad = round(size * 0.35)
+    page_w = int(max(line_widths)) + 2 * pad
+    page_h = sum(a + d for a, d in line_sizes) + gap * (len(lines) - 1) + 2 * pad
+    sprites: list[WordSprite | None] = [None] * len(words)
+    y = pad
+    for line, (ascent, descent), line_w in zip(lines, line_sizes, line_widths, strict=True):
+        baseline = y + ascent
+        x = (page_w - line_w) / 2
+        for k in line:
+            fnt = faces[k]
+            image = _word_sprite(words[k], fnt, accent if stress[k] else white, size)
+            glyph_pad = round(size * 0.35)
+            sprites[k] = WordSprite(
+                image, (round(x - glyph_pad), round(baseline - fnt.getmetrics()[0] - glyph_pad)), stress[k]
+            )
+            x += widths[k] + space
+        y += ascent + descent + gap
+    anchor = pad + sum(line_sizes[0]) // 2
+    return KineticLayout(page_w, page_h, [s for s in sprites if s is not None], anchor)
 
 
 def _rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
@@ -440,3 +555,69 @@ def badge(part: str, title: str, size: int, max_width: int) -> Image.Image:
             stroke_fill=(0, 0, 0, 190),
         )
     return out
+
+
+@dataclass(frozen=True)
+class TitleSprite:
+    image: Image.Image  # RGBA, cropped to the letters and their shadow
+    letters: Image.Image  # L: the letters alone, same size (what has to stay readable)
+    x: int  # where the image's left edge goes on a frame `width` wide (it is centred)
+    size: int  # the font size, in pixels
+    lines: int
+    rows: tuple[str, ...] = ()  # the words on each line, in capitals
+    line_height: int = 0
+    baseline: int = 0  # the first line's baseline, from the image's top
+    metrics: tuple[int, int] = (0, 0)  # the font's ascent and descent at `size`
+
+
+def title_sprite(
+    text: str, width: int, height: int, lines: int = 2, max_size: int | None = None
+) -> TitleSprite:
+    """The reel's title: heavy white capitals as big as `width` allows (up to `max_size`, 13% of
+    `height` by default), with a soft shadow. On one line, or with `lines` 2 on two that balance,
+    when it does not fit on one at the biggest size."""
+    words = text.upper().split() or [""]
+    max_w = round(width * 0.92)
+    size = max_size or round(height * 0.13)
+    while True:
+        fnt = font(size, 800)
+        rows = [words]
+        if lines > 1 and len(words) > 1 and fnt.getlength(" ".join(words)) > max_w:  # split where it balances
+            best = min(
+                range(1, len(words)),
+                key=lambda k: abs(fnt.getlength(" ".join(words[:k])) - fnt.getlength(" ".join(words[k:]))),
+            )
+            rows = [words[:best], words[best:]]
+        if max(fnt.getlength(" ".join(row)) for row in rows) <= max_w or size <= 12:
+            break
+        size = round(size * 0.94)
+    ascent, descent = fnt.getmetrics()
+    line_h = round((ascent + descent) * 0.86)
+    pad = round(size * 0.3)
+    box = (width, line_h * len(rows) + 2 * pad)
+    glyphs = Image.new("L", box, 0)
+    draw = ImageDraw.Draw(glyphs)
+    for row, words_in_row in enumerate(rows):
+        draw.text(
+            (width / 2, pad + row * line_h + ascent), " ".join(words_in_row), font=fnt, anchor="ms", fill=255
+        )
+    canvas = Image.new("RGBA", box, (0, 0, 0, 0))
+    shade = glyphs.filter(ImageFilter.GaussianBlur(max(2, size * 0.08))).point(lambda v: round(v * 0.55))
+    shadow = Image.new("RGBA", box, (0, 0, 0, 0))
+    shadow.putalpha(shade)
+    canvas.alpha_composite(shadow, (0, round(size * 0.04)))
+    ink = Image.new("RGBA", box, (255, 255, 255, 255))
+    ink.putalpha(glyphs)
+    canvas.alpha_composite(ink)
+    crop = canvas.getbbox() or (0, 0, 1, 1)
+    return TitleSprite(
+        canvas.crop(crop),
+        glyphs.crop(crop),
+        crop[0],
+        size,
+        len(rows),
+        tuple(" ".join(row) for row in rows),
+        line_h,
+        pad + ascent - crop[1],
+        (ascent, descent),
+    )

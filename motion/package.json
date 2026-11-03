@@ -1,0 +1,8 @@
+{
+  "name": "storeel-motion",
+  "private": true,
+  "description": "HyperFrames, the HTML-to-video renderer the studio runs locally for its motion graphics (see src/storeel/pipeline/motion.py)",
+  "dependencies": {
+    "hyperframes": "0.9.6"
+  }
+}

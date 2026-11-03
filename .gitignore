@@ -16,6 +16,10 @@ dist/
 # Local data: uploads, intermediate media, renders and the job database
 /data/
 
+# The motion renderer's npm install (see motion/package.json), and the state it leaves in a page
+/motion/node_modules/
+.hyperframes/
+
 # OS and editors
 .DS_Store
 .idea/
