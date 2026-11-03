@@ -1237,8 +1237,12 @@ class Compositor:
             else:
                 _composite(canvas, cut.frame(t), 0, 0)
         cutout = self.track is not None and (self.backdrop or bool(cuts))
-        if self.title is not None and self.title.start <= t < self.title.end:
-            self.title.draw(canvas, t, behind=cutout or not cuts)  # over a full-screen picture: in front
+        title = self.title if self.title is not None and self.title.start <= t < self.title.end else None
+        # Cut out, the speaker stands in front of all that is drawn before them: a title that
+        # could not be read behind them (no masks) is drawn over them, after.
+        title_last = cutout and title is not None and title.masks is None
+        if title is not None and not title_last:
+            title.draw(canvas, t, behind=cutout or not cuts)  # over a full-screen picture: in front
         front = self.cards
         if cutout:
             behind = [c for c in self.cards if id(c) in self.behind]
@@ -1248,6 +1252,8 @@ class Compositor:
             self._cut_out(canvas, t)
             drawn = {id(c) for c in behind}
             front = [c for c in self.cards if id(c) not in drawn]
+        if title is not None and title_last:
+            title.draw(canvas, t, behind=False)
         if self.letterbox:  # over the speaker, under the pictures, the badge and the captions
             bar = round(LETTERBOX * H)
             canvas.paste((0, 0, 0, 255), (0, 0, W, bar))
