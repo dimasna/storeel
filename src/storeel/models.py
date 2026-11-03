@@ -53,6 +53,9 @@ class Style(Strict):
     # and shoulders cover the words), "front" of them, or "off". title_text "" is the reel's title.
     title_style: Literal["behind", "front", "off"] = "behind"
     title_text: str = Field("", max_length=40)
+    # "animated": HyperFrames brings in the title's letters, the photo cards (a 3D swing) and a
+    # part's end screen; "plain": they fade in.
+    motion: Literal["animated", "plain"] = "animated"
 
     _clean_watermark = field_validator("watermark")(_one_line)
     _clean_title = field_validator("title_text")(_one_line)

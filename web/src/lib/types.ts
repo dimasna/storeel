@@ -33,6 +33,7 @@ export interface Style {
   language: string;
   title_style: string;
   title_text: string;
+  motion: string;
 }
 
 export interface Idea {

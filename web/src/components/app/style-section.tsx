@@ -110,6 +110,13 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
           </Field>
         ) : null}
 
+        <SubHeading>Motion</SubHeading>
+        <SelectField
+          name="motion"
+          label="Entrances"
+          hint="The title's letters, photo cards swinging in through 3D, and a part's end screen."
+        />
+
         <SubHeading>Watermark</SubHeading>
         <Field label="Text">
           <Input

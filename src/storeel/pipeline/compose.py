@@ -557,10 +557,12 @@ class Compositor:
         self.title_note = ""
         self.title_showing: float | None = None  # the share of the title showing past the speaker
         self.title = self._build_title(project, files)
-        self.motion_note = (
-            "plain (HyperFrames is not installed)" if motion is None or not motion.available else ""
-        )
-        if motion is not None and motion.available:
+        if style.motion == "plain":
+            self.motion_note = "plain (chosen in the style)"
+        elif motion is None or not motion.available:
+            self.motion_note = "plain (HyperFrames is not installed)"
+        else:
+            self.motion_note = ""
             self._add_motion(motion)
         join_cuts(self.cards, self.cutaways)
 

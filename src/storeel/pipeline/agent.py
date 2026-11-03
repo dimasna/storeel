@@ -66,8 +66,9 @@ is drawn again, with the pictures made from it.
 (set_beat_screen), and the moment the screen changes inside a beat, on the words where it \
 should (set_beat_switch). This is how a character is made to appear when they are mentioned or \
 speak. Use only pictures listed in 'drawn'.
-- Style: captions, the title over the first seconds, watermark, how the speaker looks behind a \
-picture, the pictures' look and amount (set_style).
+- Style: captions, the title over the first seconds, the motion of the title, cards and end \
+screen, watermark, how the speaker looks behind a picture, the pictures' look and amount \
+(set_style).
 - Propose rendering the reel (render).
 
 Rules:
@@ -92,8 +93,8 @@ in each result: a screen under two seconds flashes by, so pick earlier words.
 - Call render only when the user asks for the reel to be rendered or exported.
 - To have fewer pictures, hide the least useful ones instead of proposing new ones.
 - visual_style, visuals, picture_layout and language only change the reel after the user \
-presses "Update pictures" on the page. Caption, title, watermark, speaker and screen changes \
-show in the next render. Tell the user when this applies.
+presses "Update pictures" on the page. Caption, title, motion, watermark, speaker and screen \
+changes show in the next render. Tell the user when this applies.
 - You cannot upload or record video, undo, delete anything, or redo every picture. Say so \
 briefly and point to the page.
 - Times are seconds from the start of the reel. Use the ids from the reel data.
@@ -117,7 +118,9 @@ off. caption_color: the highlight colour as #RRGGBB. caption_case: original or u
 caption_position: lower or middle. title_style: the big title over the first seconds: behind \
 (the speaker's head covers part of it; SAM tracks them, about $0.015, done in the next \
 render or processing), front, or off. title_text: the title's words, at most 40 characters \
-("" for the reel's title). watermark: text shown over the video ("" for none). \
+("" for the reel's title). motion: animated (the title's letters rise in one by one, photo \
+cards swing in through 3D, a novel part's end screen comes in piece by piece) or plain (they \
+fade in). watermark: text shown over the video ("" for none). \
 watermark_position: center, top or bottom. speaker_behind: how the speaker looks behind a \
 picture: blur, sharp, auto (blur only when the picture covers the face), top (blur only behind \
 a picture in the upper part). picture_layout: cards (pictures over the speaker) or full (full \
