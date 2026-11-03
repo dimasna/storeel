@@ -37,6 +37,7 @@ from ..models import (
     text_model_name,
 )
 from . import picture_check
+from .compose import on_screen, placement
 from .heard import caption_review
 from .part import outfit_entry, outfit_redraws
 from .story_compose import MIN_HOLD, calm, timeline
@@ -49,6 +50,8 @@ HISTORY = 12  # earlier chat messages sent with a request
 KEEP_MESSAGES = 60  # chat messages stored per project
 # The settings that only change the reel after the user presses "Update pictures".
 NEEDS_UPDATE = frozenset({"visual_style", "visuals", "picture_layout", "language"})
+# The settings that change where the cut-out speaker is: set_style says where they are then.
+SPEAKER_PLACE = frozenset({"background", "speaker_scale", "speaker_x", "speaker_y"})
 
 INSTRUCTIONS = """\
 You are the editor inside Storeel Studio. The user is making one vertical video reel (a person \
@@ -68,8 +71,9 @@ should (set_beat_switch). This is how a character is made to appear when they ar
 speak. Use only pictures listed in 'drawn'.
 - Style: captions, the title over the first seconds, the motion of the title, cards and end \
 screen, the reel's look (dalang: their own video with the characters at the bottom and the \
-pictures up top; or cut out in front of a scene or a studio backdrop), watermark, how the \
-speaker looks behind a picture, the pictures' look and amount (set_style).
+pictures up top; or cut out in front of a scene or a studio backdrop), the cut-out speaker's \
+size and place, watermark, how the speaker looks behind a picture, the pictures' look and \
+amount (set_style).
 - Propose rendering the reel (render).
 
 Rules:
@@ -127,7 +131,22 @@ also set speaker_behind to auto, so they are blurred only when a picture covers 
 scene (SAM 3.1 cuts them out and each photo card's picture fills the screen behind them, \
 slowly zooming or panning), or studio (cut out in front of a dark backdrop with a soft glow in \
 the highlight colour and a light outline; photo cards stay in front). Cutting out costs about \
-$0.0024 a second of video, done in the next render or processing. watermark: text shown over \
+$0.0024 a second of video, done in the next render or processing. speaker_scale, speaker_x, \
+speaker_y: where the cut-out speaker stands, in the scene and studio looks only (in dalang \
+they are their own video as recorded; to move or resize them there, switch the look to studio or \
+scene, and say that cutting them out costs about $0.0024 a second, once). speaker_scale sizes \
+their video about its bottom middle (1 as \
+recorded, 0.5 half, 0.3 to 1.6); speaker_x is where that middle is across the frame (0.5 the \
+middle; their video is speaker_scale wide, so for a corner keep speaker_x about \
+speaker_scale / 2 from the edge, e.g. 0.3 for bottom left at 0.55); speaker_y is where their \
+video's bottom edge is (1 the frame's bottom, 0.6 to 1.8; above 1 sinks them, which keeps the \
+head in view when bigger, e.g. 1.25 at 1.3; below 1 lifts them and leaves a gap under them). \
+'speaker' in the reel data says where they are now ('on_screen', fractions of the frame); \
+change by small steps (about 0.1) for "a bit", and check 'speaker' in the result. Resized or \
+moved, they always have a backdrop: the pictures, and the studio glow between them. To put them \
+back where they were recorded, keep the look and set speaker_scale 1, speaker_x 0.5 and \
+speaker_y 1. \
+watermark: text shown over \
 the video ("" for none). \
 watermark_position: center, top or bottom. speaker_behind: how the speaker looks behind a \
 picture: blur, sharp, auto (blur only when the picture covers the face), top (blur only behind \
@@ -398,6 +417,8 @@ def reel_data(project: Project, novel: Novel | None = None) -> dict[str, Any]:
         "pictures": pictures,
         "renders": len(project.renders),
     }
+    if project.source is not None:
+        data["speaker"] = speaker_view(project)
     if project.path == "novel":
         data["cast"] = _cast(project, novel)
         data["beats"] = _beats(project)
@@ -410,6 +431,27 @@ def reel_data(project: Project, novel: Novel | None = None) -> dict[str, Any]:
             " set_beat_switch. What a cast member wears is changed with change_outfit."
         )
     return data
+
+
+def speaker_view(project: Project) -> dict[str, Any]:
+    """Whether the speaker is cut out, and then where they are on screen (fractions of the frame),
+    so the editing agent can move and resize them (speaker_scale, speaker_x, speaker_y)."""
+    style, track = project.style, project.speaker_track
+    if style.background == "dalang":
+        return {
+            "cut_out": False,
+            "note": "the dalang look shows their own video as recorded; speaker_scale, speaker_x and"
+            " speaker_y move them in the scene and studio looks only",
+        }
+    if track is None:
+        return {"cut_out": False, "note": "cut out in the next processing, or a render with the key"}
+    if not track.key:
+        return {"cut_out": False, "note": "SAM found too little of the speaker to cut them out"}
+    view: dict[str, Any] = {"cut_out": True}
+    if track.box is not None:
+        view["on_screen"] = on_screen(placement(style), track.box)
+        view["as_recorded"] = dict(zip(("left", "top", "right", "bottom"), track.box, strict=True))
+    return view
 
 
 def _show_data(show: StoryShow) -> dict[str, Any]:
@@ -659,9 +701,24 @@ def _set_style(ctx: JobContext, raw: dict[str, Any], actions: list[AgentAction])
     )
     actions.append(_action("style", f"Style: {words}"))
     out: dict[str, Any] = {"ok": True, "changed": changed}
+    notes = []
     later = sorted(NEEDS_UPDATE & changed.keys())
     if later:
-        out["note"] = f"{', '.join(later)} change the reel only after the user presses Update pictures"
+        notes.append(f"{', '.join(later)} change the reel only after the user presses Update pictures")
+    if changed.keys() & SPEAKER_PLACE:
+        project = ctx.project()
+        view = speaker_view(project)
+        out["speaker"] = view
+        shown = view.get("on_screen", {}).get("inside_share", 1.0)
+        if shown < 0.85:
+            notes.append(f"only {shown:.0%} of the speaker is inside the frame now")
+        top = view.get("on_screen", {}).get("top", 0.0)
+        if top > 0.4 and project.style.caption_position == "lower":
+            notes.append("the lower captions now cross the speaker's face: offer caption_position middle")
+        if not view["cut_out"] and changed.keys() & {"speaker_scale", "speaker_x", "speaker_y"}:
+            notes.append("the speaker moves only when they are cut out: " + view["note"])
+    if notes:
+        out["note"] = "; ".join(notes)
     return out
 
 

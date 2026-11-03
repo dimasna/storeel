@@ -142,12 +142,14 @@ def _track(ctx: JobContext) -> None:
     decoded = decode_masks(ctx, [line for _, line in sorted(numbered)])
     row = (MASK_W * MASK_H + 7) // 8
     packed = np.zeros((frames, row), dtype=np.uint8)
+    counts = np.zeros((MASK_H, MASK_W), dtype=np.uint32)
     found = 0
     for frame in range(frames):
         mask = decoded.get(frame)
         if mask is not None:
-            bits = np.unpackbits(mask)[: MASK_W * MASK_H].reshape(MASK_H, MASK_W)
-            packed[frame] = np.packbits(filled(bits))
+            bits = filled(np.unpackbits(mask)[: MASK_W * MASK_H].reshape(MASK_H, MASK_W))
+            packed[frame] = np.packbits(bits)
+            counts += bits
             found += int(mask.any())
         elif frame:  # a frame SAM skipped keeps the one before it
             packed[frame] = packed[frame - 1]
@@ -163,6 +165,25 @@ def _track(ctx: JobContext) -> None:
     with path.open("wb") as handle:
         np.savez_compressed(handle, masks=packed)
     stored = SpeakerTrack(
-        key=KEY, fps=TRACK_FPS, frames=frames, width=MASK_W, height=MASK_H, digest=key_digest
-    )
+        key=KEY, fps=TRACK_FPS, frames=frames, width=MASK_W, height=MASK_H, digest=key_digest,
+        box=usual_box(counts, found),
+    )  # fmt: skip
     ctx.update(lambda p: setattr(p, "speaker_track", stored))
+
+
+def usual_box(counts: np.ndarray, found: int) -> tuple[float, float, float, float] | None:
+    """The box (fractions of the frame) of the pixels the speaker covers on most of the `found`
+    frames, from how many of them each pixel was theirs on."""
+    if found <= 0:
+        return None
+    rows, cols = np.nonzero(counts * 2 > found)
+    if not len(rows):
+        return None
+    h, w = counts.shape
+    box = (cols.min() / w, rows.min() / h, (cols.max() + 1) / w, (rows.max() + 1) / h)
+    return (
+        round(float(box[0]), 4),
+        round(float(box[1]), 4),
+        round(float(box[2]), 4),
+        round(float(box[3]), 4),
+    )

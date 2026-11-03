@@ -7,6 +7,39 @@ import { useToast } from "@/lib/toast";
 import { Card, Field, Select, Input, SubHeading } from "@/components/ui/primitives";
 import type { UseProjectState } from "./project-view";
 
+function RangeField({
+  label,
+  value,
+  min,
+  max,
+  shown,
+  hint,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  shown: string;
+  hint?: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <Field label={`${label} · ${shown}`} hint={hint}>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={0.01}
+        value={value}
+        aria-label={label}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="h-10 w-full cursor-pointer accent-primary"
+      />
+    </Field>
+  );
+}
+
 export function StyleSection({ project, state }: { project: Project; state: UseProjectState }) {
   const config = useConfig();
   const { toast } = useToast();
@@ -134,6 +167,44 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
                 }`
           }
         />
+        {style.background !== "dalang" ? (
+          <>
+            <RangeField
+              label="Your size"
+              value={style.speaker_scale}
+              min={0.3}
+              max={1.6}
+              shown={`${Math.round(style.speaker_scale * 100)}%`}
+              onChange={(v) => update({ speaker_scale: v }, true)}
+            />
+            <RangeField
+              label="Left to right"
+              value={style.speaker_x}
+              min={0}
+              max={1}
+              shown={style.speaker_x < 0.4 ? "Left" : style.speaker_x > 0.6 ? "Right" : "Middle"}
+              onChange={(v) => update({ speaker_x: v }, true)}
+            />
+            <RangeField
+              label="Up and down"
+              value={style.speaker_y}
+              min={0.6}
+              max={1.8}
+              shown={style.speaker_y < 0.97 ? "Raised" : style.speaker_y > 1.03 ? "Lowered" : "On the bottom"}
+              hint="Moved or resized, you always have a backdrop: the pictures, and a soft glow between them."
+              onChange={(v) => update({ speaker_y: v }, true)}
+            />
+            {style.speaker_scale !== 1 || style.speaker_x !== 0.5 || style.speaker_y !== 1 ? (
+              <button
+                type="button"
+                className="self-start text-sm font-medium text-primary underline-offset-4 hover:underline"
+                onClick={() => update({ speaker_scale: 1, speaker_x: 0.5, speaker_y: 1 })}
+              >
+                Reset your size and place
+              </button>
+            ) : null}
+          </>
+        ) : null}
 
         <SubHeading>Watermark</SubHeading>
         <Field label="Text">

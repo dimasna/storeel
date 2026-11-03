@@ -35,6 +35,9 @@ export interface Style {
   title_text: string;
   motion: string;
   background: string;
+  speaker_scale: number;
+  speaker_x: number;
+  speaker_y: number;
 }
 
 export interface Idea {

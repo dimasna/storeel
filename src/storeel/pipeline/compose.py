@@ -408,6 +408,96 @@ def scene_of(picture: Image.Image, start: float, end: float, index: int) -> _Cut
     return _Pan(start, end, picture.resize((width, height), Image.LANCZOS), rightward=index % 2 == 0)
 
 
+@dataclass(frozen=True)
+class Placement:
+    """Where the speaker's video goes in a cut-out look (see Style.speaker_scale): scaled to
+    `width` x `height` (even, for the encoder), its top-left corner at (`x`, `y`) on the frame.
+    The encoder moves the video and the cut-out moves its masks by this same placement."""
+
+    width: int = W
+    height: int = H
+    x: int = 0
+    y: int = 0
+
+    @property
+    def identity(self) -> bool:
+        return (self.width, self.height, self.x, self.y) == (W, H, 0, 0)
+
+    @property
+    def scale(self) -> float:
+        return self.width / W
+
+    def move(self, mask: np.ndarray) -> np.ndarray:
+        """A mask of the whole frame as recorded (float 0..1, any size), as the video is placed."""
+        if self.identity:
+            return mask
+        mh, mw = mask.shape
+        sx, sy = mw / W, mh / H
+        size = (max(1, round(self.width * sx)), max(1, round(self.height * sy)))
+        image = Image.fromarray((mask * 255).astype(np.uint8)).resize(size, Image.BILINEAR)
+        out = Image.new("L", (mw, mh), 0)
+        out.paste(image, (round(self.x * sx), round(self.y * sy)))
+        return np.asarray(out, dtype=np.float32) / 255
+
+    def box(self, box: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+        """A box of the frame as recorded (fractions), where the placement puts it."""
+        s, dx, dy = self.scale, self.x / W, self.y / H
+        return (dx + box[0] * s, dy + box[1] * s, dx + box[2] * s, dy + box[3] * s)
+
+
+def placement(style: Style) -> Placement:
+    """The speaker's placement from the style: scaled about the bottom middle of the video."""
+    s = style.speaker_scale
+    width, height = 2 * round(W * s / 2), 2 * round(H * s / 2)
+    return Placement(
+        width, height, round(style.speaker_x * W - width / 2), round(style.speaker_y * H - height)
+    )
+
+
+def speaker_place(project: Project) -> Placement:
+    """Where the speaker's video goes: the style's placement in a cut-out look (with the speaker
+    tracked), else as recorded."""
+    track = project.speaker_track
+    if project.style.background == "dalang" or track is None or not track.key:
+        return Placement()
+    return placement(project.style)
+
+
+def moved_faces(place: Placement, faces: list[Region] | None) -> list[Region] | None:
+    """Face boxes found in the recording, where the placement puts them."""
+    if faces is None or place.identity:
+        return faces
+    return [
+        Region(**dict(zip(("x0", "y0", "x1", "y1"), place.box((f.x0, f.y0, f.x1, f.y1)), strict=True)))
+        for f in faces
+    ]
+
+
+def speaker_side(project: Project) -> str | None:
+    """The side of the frame a moved cut-out speaker stands on ("left" or "right"), or None
+    when they are in the middle or not cut out (their own video, as recorded)."""
+    if speaker_place(project).identity:
+        return None
+    x = project.style.speaker_x
+    return "left" if x < 0.4 else "right" if x > 0.6 else None
+
+
+def on_screen(place: Placement, box: tuple[float, float, float, float]) -> dict[str, float]:
+    """Where the speaker is after the placement (fractions of the frame), and the share of them
+    inside it, for the editing agent."""
+    x0, y0, x1, y1 = place.box(box)
+    inside = max(0.0, min(x1, 1.0) - max(x0, 0.0)) * max(0.0, min(y1, 1.0) - max(y0, 0.0))
+    area = max(1e-6, (x1 - x0) * (y1 - y0))
+    return {
+        "left": round(x0, 3),
+        "top": round(y0, 3),
+        "right": round(x1, 3),
+        "bottom": round(y1, 3),
+        "height_share": round(min(y1, 1.0) - max(y0, 0.0), 3),
+        "inside_share": round(inside / area, 3),
+    }
+
+
 @dataclass
 class _Track:
     """The speaker in every frame of the reel (SAM 3.1 masks at `fps`, packed bits at half the
@@ -417,6 +507,7 @@ class _Track:
     fps: float
     width: int
     height: int
+    place: Placement = field(default_factory=Placement)  # where the speaker's video is put
     _half: dict[int, np.ndarray] = field(default_factory=dict, repr=False)
 
     def _mask(self, k: int) -> np.ndarray:
@@ -424,7 +515,7 @@ class _Track:
         mask = self._half.get(k)
         if mask is None:
             bits = np.unpackbits(self.packed[k])[: self.width * self.height]
-            mask = bits.reshape(self.height, self.width).astype(np.float32)
+            mask = self.place.move(bits.reshape(self.height, self.width).astype(np.float32))
             if len(self._half) > 6:  # frames are read in order: keep only the latest few
                 self._half.pop(min(self._half))
             self._half[k] = mask
@@ -552,7 +643,11 @@ def _load_track(project: Project, files: ProjectFiles) -> _Track | None:
         return None
     with np.load(files.path(stored.key)) as data:
         packed = data["masks"]
-    return _Track(packed, stored.fps, stored.width, stored.height) if len(packed) else None
+    return (
+        _Track(packed, stored.fps, stored.width, stored.height, speaker_place(project))
+        if len(packed)
+        else None
+    )
 
 
 def _covers(a: _Card, b: _Card) -> bool:
@@ -687,6 +782,11 @@ class Compositor:
                 "the speaker is not cut out for this reel yet (process it, or render with your key),"
                 " so they keep their own background"
             )
+        # Moved or resized (cut out only), the speaker always has a backdrop behind them: the
+        # pictures, and between them the studio's glow (their own video is not where they are).
+        self.place = self.track.place if self.track is not None else Placement()
+        self.moved = not self.place.identity
+        self.backdrop = self.background == "studio" or (self.background == "scene" and self.moved)
         if self.background == "scene":  # each photo card becomes the scene behind them
             keep = []
             for item in self.cards:
@@ -882,7 +982,7 @@ class Compositor:
                 style.speaker_behind == "top" and not is_standing(moment, picture)
             )
             if style.speaker_behind == "auto":
-                hit = covered(placed.box, moment.faces)
+                hit = covered(placed.box, moved_faces(speaker_place(project), moment.faces))
                 if hit is None:
                     self.unchecked_faces += 1
                 blur = hit is not False
@@ -920,15 +1020,15 @@ class Compositor:
     def frame(self, t: float) -> Image.Image:
         """The overlay layer at `t`, with MASK_ROWS extra rows at the bottom holding the blur level."""
         canvas = Image.new("RGBA", (W, H + MASK_ROWS), (0, 0, 0, 0))
-        if self.background == "studio":
+        if self.backdrop:
             canvas.paste(studio_backdrop(t, self.accent), (0, 0))
         cuts = sorted((c for c in self.cutaways if c.start <= t < c.end), key=lambda c: c.start)
         for k, cut in enumerate(cuts):  # two at a cut: the next one fades in over the last
-            if k == 0 and self.background != "studio":
+            if k == 0 and not self.backdrop:
                 canvas.paste(cut.frame(t), (0, 0))
             else:
                 _composite(canvas, cut.frame(t), 0, 0)
-        cutout = self.track is not None and (self.background == "studio" or bool(cuts))
+        cutout = self.track is not None and (self.backdrop or bool(cuts))
         if self.title is not None and self.title.start <= t < self.title.end:
             self.title.draw(canvas, t, behind=cutout or not cuts)  # over a full-screen picture: in front
         front = self.cards
@@ -980,7 +1080,7 @@ class Compositor:
 
     def _key(self, t: float) -> tuple | None:
         """Identifies what is on screen; None while something is moving."""
-        if self.background == "studio" and self.track is not None:
+        if self.backdrop and self.track is not None:
             return None  # the speaker moves in front of the backdrop
         if any(c.start <= t < c.end for c in self.cutaways):
             return None
@@ -1054,21 +1154,33 @@ def encode(
     layer_in = f"[1:v]split=2[lraw][mraw];[lraw]crop={W}:{H}:0:0,"
     layer = layer_in + "scale=out_color_matrix=bt709:out_range=tv,format=yuva420p[layer]"
     finish = f"overlay=x=0:y=0:format=yuv420:eof_action=repeat,format=yuv420p,{ff.TAG_BT709}[v]"
+    video, moved = "[0:v]", ""
+    place = compositor.place
+    if not place.identity:
+        # The speaker resized and moved (a cut-out look): their video on black, where the
+        # layer's cut-out of them is; the layer covers the rest.
+        video = "[moved]"
+        moved = (
+            "[0:v]split=2[ground][speaker];"
+            "[ground]drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill[black];"
+            f"[speaker]scale={place.width}:{place.height}[small];"
+            f"[black][small]overlay=x={place.x}:y={place.y}:format=yuv420[moved];"
+        )
     if compositor.blurs:
         # The blurred, dimmed copy is made at quarter size (cheap) and blended in by the level
         # carried in the layer's extra rows.
         dim = BLUR_DIM
         blur = (
-            f"[0:v]split=2[sharp][soft];[soft]scale={W // 4}:{H // 4},gblur=sigma={BLUR_SIGMA},"
+            f"{video}split=2[sharp][soft];[soft]scale={W // 4}:{H // 4},gblur=sigma={BLUR_SIGMA},"
             f"lutyuv=y='16+(val-16)*{dim}':u='128+(val-128)*{dim}':v='128+(val-128)*{dim}',"
             f"scale={W}:{H}[blurred];"
             f"[mraw]crop={W}:{MASK_ROWS}:0:{H},alphaextract,scale={W}:{H}[mask];"
             "[blurred][mask]alphamerge[veil];"
             "[sharp][veil]overlay=x=0:y=0:format=yuv420:eof_action=repeat[base]"
         )
-        graph = f"{layer};{blur};[base][layer]{finish}"
+        graph = f"{moved}{layer};{blur};[base][layer]{finish}"
     else:
-        graph = f"{layer};[mraw]nullsink;[0:v][layer]{finish}"
+        graph = f"{moved}{layer};[mraw]nullsink;{video}[layer]{finish}"
     cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-i", str(master)]
     cmd += ["-f", "rawvideo", "-pix_fmt", "rgba", "-video_size", f"{W}x{H + MASK_ROWS}"]
     cmd += ["-framerate", str(compositor.overlay_fps), "-i", "pipe:0"]
@@ -1140,6 +1252,12 @@ def compose(
             f", {len(compositor.behind)} picture(s) behind them" if compositor.background == "studio" else ""
         )
         ctx.log(f"background: {compositor.background}, the speaker cut out by SAM 3.1 in front of it{behind}")
+        if compositor.moved:
+            style = project.style
+            ctx.log(
+                f"the speaker at {style.speaker_scale:.0%} of their size, their middle {style.speaker_x:.0%}"
+                f" across and their bottom {style.speaker_y:.0%} down the frame"
+            )
     if compositor.background_note:
         ctx.log(compositor.background_note)
     if compositor.unchecked_faces:

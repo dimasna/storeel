@@ -24,7 +24,7 @@ from ..files import ProjectFiles
 from ..models import Beat, BibleCharacter, Project, Story, StoryShow, Word
 from .align import Text, align, tokens
 from .analyze import find_quote
-from .compose import Compositor, H, W, _Card
+from .compose import Compositor, H, W, _Card, moved_faces, speaker_place, speaker_side
 from .layout import covered, to_region
 from .motion import Renderer
 from .render import (
@@ -368,6 +368,7 @@ class Sprites:
         # ids of the pictures up top (photo and scene cards, cut-out objects): what may cover the
         # storyteller's face (the characters standing at the bottom, notes and chats never count)
         self.up_top: set[int] = set()
+        self.speaker_side = speaker_side(project)
 
     def image(self, picture_id: str) -> Image.Image | None:
         picture = self.pictures.get(picture_id)
@@ -524,6 +525,8 @@ class Sprites:
         return tag, (tx, ty)
 
     def slot(self, character: str) -> str:
+        if self.speaker_side:  # the cut-out speaker stands on one side: the other is free
+            return "left" if self.speaker_side == "right" else "right"
         return self.slots.get(character) or self.slots.get(self.person(character)) or "left"
 
 
@@ -579,6 +582,7 @@ class PartCompositor(Compositor):
         lines = calm(timeline(project))
         spans: list[tuple[float, float]] = []
         faces = project.part_faces
+        place = speaker_place(project)  # a moved cut-out speaker's face is where they are put
         ident = 0
         named: set[str] = set()  # the characters whose name has been on screen
 
@@ -650,7 +654,7 @@ class PartCompositor(Compositor):
             if behind == "top":
                 blur = line.kind == "beat" and line.show is not None and sprites.has_top_picture(line.show)
             if behind == "auto":
-                boxes = faces.get(line.take)
+                boxes = moved_faces(place, faces.get(line.take))
                 if boxes is None:
                     self.unchecked_faces += 1
                     blur = True

@@ -61,6 +61,13 @@ class Style(Strict):
     # frame by SAM 3.1: "scene" (each picture fills the screen behind them; their own video in
     # between) or "studio" (a moving glow in caption_color, the pictures as cards, an outline).
     background: Literal["dalang", "scene", "studio"] = "dalang"
+    # Where the cut-out speaker stands in the scene and studio looks: their video scaled about its
+    # bottom middle (1 = as recorded), that middle across the frame (0 the left edge, 1 the right
+    # edge), and the video's bottom edge down the frame (1 the frame's bottom; less lifts them,
+    # more sinks them, which keeps the head in view when they are bigger).
+    speaker_scale: float = Field(1.0, ge=0.3, le=1.6)
+    speaker_x: float = Field(0.5, ge=0.0, le=1.0)
+    speaker_y: float = Field(1.0, ge=0.6, le=1.8)
 
     _clean_watermark = field_validator("watermark")(_one_line)
     _clean_title = field_validator("title_text")(_one_line)
@@ -450,6 +457,9 @@ class SpeakerTrack(Strict):
     width: int
     height: int
     digest: str
+    # where they usually are, as recorded (x0, y0, x1, y1 in fractions of the frame): the box of
+    # the pixels they cover on most frames; None for a track made before it was kept
+    box: tuple[float, float, float, float] | None = None
 
 
 class Entity(Strict):

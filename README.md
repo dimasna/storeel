@@ -139,6 +139,14 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   highlight colour and a light outline; a photo card that would cover little of you goes
   behind you, one over your face stays in front. You are blurred only while a picture is in
   front of you. The title behind you reuses these masks.
+- **Your size and place** in the cut-out looks: make yourself smaller or bigger and move
+  anywhere on the frame, with three sliders or by asking the editor ("make me small in the
+  bottom left corner", "a bit bigger", "move me up a little"). The encoder scales and moves
+  your video, and the same placement moves your cut-out, so they always line up. Moved or
+  resized, you always have a backdrop: the pictures, and the studio glow between them. Your
+  face check moves with you, and a single character stands on the side you leave free. The
+  editor sees where you are on screen after each change, and offers to move the captions
+  when they would cross your face.
 - **Motion graphics**: three entrances are rendered by HyperFrames, an open-source
   HTML-to-video renderer, run locally: the title's letters rising in one by one, photo cards
   swinging in through 3D with a light crossing them, and a novel part's end screen coming in
