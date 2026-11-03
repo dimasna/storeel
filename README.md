@@ -244,8 +244,8 @@ A novel is told as a series: one reel per chapter, called a
   baca part satu novel X..." or "Aku baru baca..."), a picture look, a watermark and a genre
   (romance, horror, mystery, drama, legend or other: its parts' theme, see "Genre themes").
   On *Auto*, Muse Spark picks the genre from the synopsis and the chapter when the first
-  part is written (one small call at low effort, kept on the novel); a failed call leaves it
-  on Auto, so the parts have no theme yet. Paste each chapter's text.
+  part is written (one small call at low effort, under half a cent, kept on the novel); a
+  failed call leaves it on Auto, so the parts have no theme yet. Paste each chapter's text.
 - **The part script** (Muse Spark): a hook on camera with a fixed opening, the story in beats
   (part one's setup or a bridge from the previous part, rises, the turn, a cliffhanger), a
   poll and a call to action ("... lengkapnya ada di link bio"). Each beat says what the screen
