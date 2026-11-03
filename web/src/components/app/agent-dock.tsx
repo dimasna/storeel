@@ -28,7 +28,11 @@ export function agentSuggestions(project: Project): string[] {
     const name = character.id.replace(/_/g, " ");
     out.push(`Dress ${name.charAt(0).toUpperCase()}${name.slice(1)} in dark red`);
   }
-  out.push("Make the captions yellow and uppercase");
+  out.push(
+    project.style.captions === "bold" || project.style.captions === "serif"
+      ? "Make the captions yellow and uppercase"
+      : "Bold captions that come in word by word",
+  );
   if (project.analysis?.moments.length) out.push("Draw the first picture again as a cut-out");
   out.push("Render it under 25 MB");
   return out.slice(0, 4);

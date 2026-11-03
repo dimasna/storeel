@@ -114,7 +114,11 @@ export function UsageSection({ project, state }: { project: Project; state: UseP
   const rows: [string, string][] = [
     ["Text model", `${u.spark_input_tokens.toLocaleString()} in · ${u.spark_output_tokens.toLocaleString()} out`],
     ["Muse Image", `${u.images} image${u.images === 1 ? "" : "s"}`],
-    ["SAM", `${u.sam_images} image${u.sam_images === 1 ? "" : "s"}`],
+    [
+      "SAM",
+      `${u.sam_images} image${u.sam_images === 1 ? "" : "s"}` +
+        (u.sam_frames ? ` · ${u.sam_frames} video frames` : ""),
+    ],
     ["Voice Transcribe", seconds(u.asr_seconds)],
   ];
   return (

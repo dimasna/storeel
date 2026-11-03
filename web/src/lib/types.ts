@@ -31,6 +31,8 @@ export interface Style {
   watermark: string;
   watermark_position: string;
   language: string;
+  title_style: string;
+  title_text: string;
 }
 
 export interface Idea {
@@ -153,6 +155,7 @@ export interface Usage {
   spark_output_tokens: number;
   images: number;
   sam_images: number;
+  sam_frames: number;
   asr_seconds: number;
   estimated_usd: number;
 }

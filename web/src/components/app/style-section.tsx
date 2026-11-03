@@ -89,6 +89,27 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
         </div>
         <SelectField name="caption_position" label="Position" />
 
+        <SubHeading>Title</SubHeading>
+        <SelectField
+          name="title_style"
+          label="Over the first seconds"
+          hint={
+            style.title_style === "behind"
+              ? "SAM tracks you so your head covers part of it (about $0.015, when processing or rendering with your key)."
+              : undefined
+          }
+        />
+        {style.title_style !== "off" ? (
+          <Field label="Words" hint="Leave empty to use the reel's title.">
+            <Input
+              value={style.title_text}
+              maxLength={40}
+              placeholder={project.title.split(" - Part")[0]}
+              onChange={(e) => update({ title_text: e.target.value }, true)}
+            />
+          </Field>
+        ) : null}
+
         <SubHeading>Watermark</SubHeading>
         <Field label="Text">
           <Input
