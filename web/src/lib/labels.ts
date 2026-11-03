@@ -25,9 +25,9 @@ export const LABELS: Record<string, Record<string, string>> = {
   title_style: { behind: "Behind the speaker", front: "In front of the speaker", off: "No title" },
   motion: { animated: "Animated (HyperFrames)", plain: "Plain fades" },
   background: {
-    original: "Your own video",
-    scene: "Cut out, the pictures behind you",
-    studio: "Cut out, studio backdrop",
+    dalang: "Dalang: your own video",
+    scene: "Scene: cut out, the pictures behind you",
+    studio: "Studio: cut out, a studio backdrop",
   },
   watermark_position: { center: "Centre", top: "Top", bottom: "Bottom" },
   language: { auto: "Detect", id: "Indonesian (+ English)", en: "English" },

@@ -120,13 +120,13 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
           hint="The title's letters, photo cards swinging in through 3D, and a part's end screen."
         />
 
-        <SubHeading>Background</SubHeading>
+        <SubHeading>Look</SubHeading>
         <SelectField
           name="background"
           label="Behind you"
           hint={
-            style.background === "original"
-              ? `SAM 3.1 can cut you out of the video${cutoutCost}: the pictures behind you, or a studio backdrop.`
+            style.background === "dalang"
+              ? `Your own video, the characters standing at the bottom and the pictures up top. SAM 3.1 can also cut you out${cutoutCost}: Scene puts the pictures behind you, Studio a backdrop.`
               : `SAM 3.1 cuts you out${cutoutCost}, when processing or rendering with your key. ${
                   style.background === "scene"
                     ? "Each photo fills the screen behind you."

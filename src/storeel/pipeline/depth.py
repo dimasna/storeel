@@ -51,7 +51,7 @@ def needed(project: Project) -> bool:
     tracked all through for a cut-out background (those masks serve the title too)."""
     return (
         project.style.title_style == "behind"
-        and project.style.background == "original"
+        and project.style.background == "dalang"
         and title_window(project) is not None
     )
 

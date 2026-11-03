@@ -43,14 +43,16 @@ def add_chapter(
 
 
 def chapter_style(novel: Novel) -> Style:
-    """A chapter reel's starting style: the novel's look and watermark; the speaker sharp, and
-    blurred only while a picture is up top (a place, a photo, a scene or an object)."""
+    """A chapter reel's starting style, the dalang look: the novel's pictures and watermark, the
+    characters standing at the bottom and the pictures up top, and the storyteller sharp,
+    blurred only while a picture covers their face (SAM looks for it in each take)."""
     return Style(
         visual_style=novel.visual_style,
         watermark=novel.watermark,
         language=novel.language,
         picture_layout="cards",
-        speaker_behind="top",
+        speaker_behind="auto",
+        background="dalang",
     )
 
 

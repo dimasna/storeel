@@ -65,7 +65,7 @@ def filled(mask: np.ndarray, rounds: int = 40) -> np.ndarray:
 
 
 def needed(project: Project) -> bool:
-    return project.style.background != "original" and project.source is not None
+    return project.style.background != "dalang" and project.source is not None
 
 
 def track_reel(ctx: JobContext) -> None:

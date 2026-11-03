@@ -56,10 +56,11 @@ class Style(Strict):
     # "animated": HyperFrames brings in the title's letters, the photo cards (a 3D swing) and a
     # part's end screen; "plain": they fade in.
     motion: Literal["animated", "plain"] = "animated"
-    # Behind the speaker, who SAM 3.1 cuts out of every frame: "original" (their own video),
-    # "scene" (each picture fills the screen behind them; their own video in between) or
-    # "studio" (a moving glow in caption_color, the pictures as cards behind them, an outline).
-    background: Literal["original", "scene", "studio"] = "original"
+    # The reel's look, by what is behind the speaker: "dalang" (their own video, as a storyteller
+    # with the characters standing at the bottom and the pictures up top), or cut out of every
+    # frame by SAM 3.1: "scene" (each picture fills the screen behind them; their own video in
+    # between) or "studio" (a moving glow in caption_color, the pictures as cards, an outline).
+    background: Literal["dalang", "scene", "studio"] = "dalang"
 
     _clean_watermark = field_validator("watermark")(_one_line)
     _clean_title = field_validator("title_text")(_one_line)
@@ -68,6 +69,11 @@ class Style(Strict):
     @classmethod
     def _top_was_card(cls, value: object) -> object:
         return "top" if value == "card" else value  # its name for a day, when it was cards only
+
+    @field_validator("background", mode="before")
+    @classmethod
+    def _dalang_was_original(cls, value: object) -> object:
+        return "dalang" if value == "original" else value  # its name before the look had one
 
 
 class Idea(Strict):

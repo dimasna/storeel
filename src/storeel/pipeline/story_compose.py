@@ -365,6 +365,9 @@ class Sprites:
         self.cache: dict[tuple, Image.Image] = {}
         self.kinds: dict[int, str] = {}  # id of a sprite -> "photo" for the photo and scene cards
         self.originals: dict[int, Image.Image] = {}  # id of a photo or scene card -> its picture
+        # ids of the pictures up top (photo and scene cards, cut-out objects): what may cover the
+        # storyteller's face (the characters standing at the bottom, notes and chats never count)
+        self.up_top: set[int] = set()
 
     def image(self, picture_id: str) -> Image.Image | None:
         picture = self.pictures.get(picture_id)
@@ -452,6 +455,7 @@ class Sprites:
             sprite = self._cached(("photo", show.photo, width), lambda: photo_card(picture, width, title))
             self.kinds[id(sprite)] = "photo"
             self.originals[id(sprite)] = original
+            self.up_top.add(id(sprite))
             centred(sprite, CARD_Y + shift)
         elif show.prop and (picture := self.image(show.prop)) is not None:
             meta = self.props.get(show.prop)
@@ -466,7 +470,12 @@ class Sprites:
                 else:
                     box = (round(OBJECT_W[size] * W), round(H * 0.4))
                     y = 0.4 if size == "large" else 0.35 + shift
-                centred(self._cached(("object", show.prop, size), lambda: cutout_sprite(picture, *box)), y)
+                object_sprite = self._cached(
+                    ("object", show.prop, size), lambda: cutout_sprite(picture, *box)
+                )
+                if object_sprite is not None:
+                    self.up_top.add(id(object_sprite))
+                    centred(object_sprite, y)
             else:
                 original = picture
                 picture = _wide(picture)
@@ -474,6 +483,7 @@ class Sprites:
                 sprite = self._cached(("scene", show.prop, width), lambda: photo_card(picture, width))
                 self.kinds[id(sprite)] = "photo"
                 self.originals[id(sprite)] = original
+                self.up_top.add(id(sprite))
                 centred(sprite, 0.30 + shift)
         named: tuple[Image.Image, tuple[int, int]] | None = None
         for cid, slot in zip(chars, slots, strict=True):
@@ -644,8 +654,12 @@ class PartCompositor(Compositor):
                 if boxes is None:
                     self.unchecked_faces += 1
                     blur = True
-                else:
-                    blur = any(covered(to_region(x, y, im.width, im.height), boxes) for im, (x, y) in layers)
+                else:  # only the pictures up top, by what of them is seen (not their shadow)
+                    blur = any(
+                        covered(to_region(x + s[0], y + s[1], s[2] - s[0], s[3] - s[1]), boxes)
+                        for im, (x, y) in layers
+                        if id(im) in sprites.up_top and (s := _solid(im))
+                    )
             if blur and line.kind != "hook":
                 spans.append((line.start, line.end))
         if lines:

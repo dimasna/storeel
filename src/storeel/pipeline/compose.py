@@ -548,7 +548,7 @@ def _top_left(card: _Card) -> tuple[int, int]:
 def _load_track(project: Project, files: ProjectFiles) -> _Track | None:
     """The speaker's masks for the whole reel, when a cut-out background has them."""
     stored = project.speaker_track
-    if project.style.background == "original" or stored is None or not files.exists(stored.key):
+    if project.style.background == "dalang" or stored is None or not files.exists(stored.key):
         return None
     with np.load(files.path(stored.key)) as data:
         packed = data["masks"]
@@ -679,10 +679,10 @@ class Compositor:
         self.blurs = blur_windows(self._build_pictures(project, files), self.duration)
         # A cut-out background, when SAM found the speaker all through (else their own video).
         self.track = _load_track(project, files)
-        self.background = style.background if self.track is not None else "original"
+        self.background = style.background if self.track is not None else "dalang"
         self.accent = style.caption_color
         self.background_note = ""
-        if style.background != "original" and self.track is None:
+        if style.background != "dalang" and self.track is None:
             self.background_note = (
                 "the speaker is not cut out for this reel yet (process it, or render with your key),"
                 " so they keep their own background"
@@ -704,7 +704,7 @@ class Compositor:
                     and self.track.visible(item.start, item.end, _box(item)) >= BEHIND_SEEN
                 ):
                     self.behind.add(id(item))
-        if self.background != "original":  # no blur while a picture is behind them, only over them
+        if self.background != "dalang":  # no blur while a picture is behind them, only over them
             clear = [(c.start, c.end) for c in self.cutaways] if self.background == "scene" else []
             clear += [(c.start, c.end) for c in self.cards if id(c) in self.behind]
             over = [(c.start, c.end) for c in self.cards if c.kind == "photo" and id(c) not in self.behind]
@@ -1135,7 +1135,7 @@ def compose(
     )
     if compositor.title_note:
         ctx.log(compositor.title_note)
-    if compositor.background != "original":
+    if compositor.background != "dalang":
         behind = (
             f", {len(compositor.behind)} picture(s) behind them" if compositor.background == "studio" else ""
         )

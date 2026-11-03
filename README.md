@@ -78,8 +78,9 @@ Every option is documented in `.env.example`. Projects, uploads and renders are 
 - **Style**: picture look, how many pictures, the layout (cards and cut-outs over the speaker,
   or full screen), what the speaker looks like behind a picture (blurred, sharp, or blurred
   only when the picture covers the face), caption style, colour, case and position, the title
-  over the first seconds (behind you, in front, or none, and its words), watermark text and
-  position.
+  over the first seconds (behind you, in front, or none, and its words), the look (*dalang*:
+  your own video; *scene* or *studio*: you cut out in front of the pictures or a backdrop),
+  the motion of the entrances, watermark text and position.
 - **Review**: fix misheard caption words, hide a picture, show it as a card, a cut-out or full
   screen, or edit its prompt and regenerate it. "Update pictures" applies style changes and
   redoes only what changed.
@@ -125,13 +126,14 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   half, and puts it where your head and shoulders cover a little of it but at least 70% of
   its letters show; their pixels where you are are taken out frame by frame. When you fill
   the frame so that no place is readable, it goes in front of you, as high as it can.
-- **A background behind you** (optional, off by default): SAM 3.1 tracks you through the
-  whole video at 12 frames a second, in 20-second stretches sent side by side (about $0.0024
-  a second: $0.24 for a 100-second reel). Meta's mask decoder is pure Python, about a second
-  a mask, so on the server the masks are shared out over many small machines at once; on
-  your own computer a few processes decode them. They are kept as packed bits at half size,
-  with the holes SAM leaves (a clip-on microphone) filled, and the compositor eases from one
-  mask to the next, so the cut-out moves at the reel's frame rate and renders stay free.
+- **A background behind you** (optional; the default *dalang* look keeps your own video):
+  SAM 3.1 tracks you through the whole video at 12 frames a second, in 20-second stretches
+  sent side by side (about $0.0024 a second: $0.24 for a 100-second reel). Meta's mask
+  decoder is pure Python, about a second a mask, so on the server the masks are shared out
+  over many small machines at once; on your own computer a few processes decode them. They
+  are kept as packed bits at half size, with the holes SAM leaves (a clip-on microphone)
+  filled, and the compositor eases from one mask to the next, so the cut-out moves at the
+  reel's frame rate and renders stay free.
   *Scene* puts each photo card's picture full screen behind you, slowly zooming, or panning
   across a wide one. *Studio* puts you in front of a dark backdrop with two slow glows in the
   highlight colour and a light outline; a photo card that would cover little of you goes
@@ -240,12 +242,15 @@ A novel is told as a series: one reel per chapter, called a
   fix if it is wrong (`STOREEL_PICTURE_CHECK_EFFORT`; about $0.0035 a check). Recurring
   objects are kept too, and notes (a death, a secret) carry into later scripts. Part N sees
   only what earlier parts added.
-- **On screen**: a "Part N" badge from the first frame, the hook on the sharp speaker, then
-  the speaker blurred behind each beat's red tag, its photo card, scene, cut-out object, note
-  or chat bubbles, and up to two characters standing at the bottom (a character's name over
-  their head the first time you voice them). Then the poll screen and the end card. Pictures
-  follow your recording: with one video of the whole part, each line starts where its words
-  are heard.
+- **On screen**, in the *dalang* look (the default, named after the shadow-puppet
+  storyteller): a "Part N" badge from the first frame, the hook on the sharp speaker, then
+  each beat's red tag, its photo card, scene, cut-out object, note or chat bubbles up top,
+  and up to two characters standing at the bottom (a character's name over their head the
+  first time you voice them). The speaker stays sharp and is blurred only while a picture
+  covers their face (SAM finds it once in each take, about $0.0025 a take). Then the poll
+  screen and the end card. The *scene* and *studio* looks cut you out instead (see "A
+  background behind you"). Pictures follow your recording: with one video of the whole part,
+  each line starts where its words are heard.
 - **Captions** are what Muse Voice Transcribe heard. Review them before you render: where a
   line follows the script but a word differs (a misheard name, a word said twice), the page
   shows the script's wording and can use it.

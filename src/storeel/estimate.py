@@ -17,6 +17,7 @@ TEXT_BASE_USD = 0.13  # the prompts, the storyboard check, a fix round and the p
 TEXT_PER_CHAR_USD = 0.00001  # the chapter is read by each of those calls
 CUT_OUT_SHARE = 0.7  # most pictures are cut out of their background by SAM
 TITLE_FRAMES = 90  # SAM tracking the storyteller under the title: three seconds at 30 fps
+FACE_TAKES = 14  # SAM finding the storyteller's face once a take (hook, beats, poll, end): 13 and 14 seen
 STRESS_USD = 0.005  # Muse Spark choosing the words the captions stress, after the transcription
 
 
@@ -30,17 +31,17 @@ def part_seconds(chapter_chars: int) -> int:
     return min(MAX_SECONDS, round(90 + chapter_chars / 200))
 
 
-def estimate_part(chapter_chars: int, background: str = "original") -> dict[str, float | int]:
+def estimate_part(chapter_chars: int, background: str = "dalang") -> dict[str, float | int]:
     """The cost of a part's first pass: writing, transcribing (with the stressed words),
-    drawing (with the title's tracking, or the speaker cut out all through for a `background`
-    other than their own video); rendering is free."""
+    drawing (with the title's tracking and the face check in each take, or the speaker cut out
+    all through for a `background` other than the dalang look); rendering is free."""
     chars = max(0, chapter_chars)
     pictures = part_pictures(chars)
     seconds = part_seconds(chars)
     write = TEXT_BASE_USD + chars * TEXT_PER_CHAR_USD
-    draw = pictures * (PRICE_IMAGE + CUT_OUT_SHARE * PRICE_SAM_IMAGE)
+    draw = pictures * (PRICE_IMAGE + CUT_OUT_SHARE * PRICE_SAM_IMAGE) + FACE_TAKES * PRICE_SAM_IMAGE
     cutout = seconds * TRACK_FPS * PRICE_SAM_FRAME
-    draw += cutout if background != "original" else TITLE_FRAMES * PRICE_SAM_FRAME  # (the title reuses it)
+    draw += cutout if background != "dalang" else TITLE_FRAMES * PRICE_SAM_FRAME  # (the title reuses it)
     transcribe = seconds * PRICE_ASR_SECOND + STRESS_USD
     return {
         "write_usd": round(write, 3),

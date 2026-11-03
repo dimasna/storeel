@@ -67,9 +67,9 @@ is drawn again, with the pictures made from it.
 should (set_beat_switch). This is how a character is made to appear when they are mentioned or \
 speak. Use only pictures listed in 'drawn'.
 - Style: captions, the title over the first seconds, the motion of the title, cards and end \
-screen, what is behind the speaker (their own video, or cut out in front of a scene or a \
-studio backdrop), watermark, how the speaker looks behind a picture, the pictures' look and \
-amount (set_style).
+screen, the reel's look (dalang: their own video with the characters at the bottom and the \
+pictures up top; or cut out in front of a scene or a studio backdrop), watermark, how the \
+speaker looks behind a picture, the pictures' look and amount (set_style).
 - Propose rendering the reel (render).
 
 Rules:
@@ -121,11 +121,14 @@ caption_position: lower or middle. title_style: the big title over the first sec
 render or processing), front, or off. title_text: the title's words, at most 40 characters \
 ("" for the reel's title). motion: animated (the title's letters rise in one by one, photo \
 cards swing in through 3D, a novel part's end screen comes in piece by piece) or plain (they \
-fade in). background: what is behind the speaker: original (their own video), scene (SAM \
-3.1 cuts them out and each photo card's picture fills the screen behind them, slowly zooming or \
-panning), or studio (cut out in front of a dark backdrop with a soft glow in the highlight \
-colour and a light outline; photo cards stay in front). Cutting out costs about $0.0024 a \
-second of video, done in the next render or processing. watermark: text shown over the video ("" for none). \
+fade in). background: the reel's look: dalang (the default: their own video, like a storyteller, \
+with the characters standing at the bottom and the pictures up top; for the whole dalang look \
+also set speaker_behind to auto, so they are blurred only when a picture covers their face), \
+scene (SAM 3.1 cuts them out and each photo card's picture fills the screen behind them, \
+slowly zooming or panning), or studio (cut out in front of a dark backdrop with a soft glow in \
+the highlight colour and a light outline; photo cards stay in front). Cutting out costs about \
+$0.0024 a second of video, done in the next render or processing. watermark: text shown over \
+the video ("" for none). \
 watermark_position: center, top or bottom. speaker_behind: how the speaker looks behind a \
 picture: blur, sharp, auto (blur only when the picture covers the face), top (blur only behind \
 a picture in the upper part). picture_layout: cards (pictures over the speaker) or full (full \
