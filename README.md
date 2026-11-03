@@ -80,7 +80,8 @@ Every option is documented in `.env.example`. Projects, uploads and renders are 
   only when the picture covers the face), caption style, colour, case and position, the title
   over the first seconds (behind you, in front, or none, and its words), the look (*dalang*:
   your own video; *scene* or *studio*: you cut out in front of the pictures or a backdrop),
-  the motion of the entrances, watermark text and position.
+  a genre theme over that look (see "Genre themes"), the motion of the entrances, watermark
+  text and position.
 - **Review**: fix misheard caption words, hide a picture, show it as a card, a cut-out or full
   screen, or edit its prompt and regenerate it. "Update pictures" applies style changes and
   redoes only what changed.
@@ -147,6 +148,23 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   face check moves with you, and a single character stands on the side you leave free. The
   editor sees where you are on screen after each change, and offers to move the captions
   when they would cross your face.
+- **Genre themes** dress any look for the kind of story it tells, at no cost (no model call,
+  no SAM): a colour grade on your video, the caption style and highlight, the photo cards'
+  frame, the title's colour and typeface, the studio backdrop, an effect on the stressed
+  words and one touch of its own.
+
+  | Theme | Grade and cards | Captions and title | Backdrop | Stressed words | Its own touch |
+  | --- | --- | --- | --- | --- | --- |
+  | Romance (*senja*) | warm; cream cards, rose border | serif in rose; cream serif title | a dusk sky, soft lights drifting up | a heartbeat | |
+  | Horror | cold, desaturated, vignette; black cards, red edge | bold in acid green; pale title glowing red | a flickering green dark | shaking | cards glitch in |
+  | Mystery (*noir*) | high-contrast black and white; tilted paper prints | bold in red; white title | a spotlight on a grainy wall | stamped down | every picture in black and white |
+  | Drama (*sinetron*) | punchy contrast; dark cards, gold border | bold in gold; gold title | red and gold glows on a curtain | a zoom and a flash | letterbox bars |
+  | Legend (*wayang*) | warm amber; dark-wood cards, gold border | serif in amber; gold serif title | a lamp-lit shadow-puppet screen | a glow | characters come in as shadow puppets |
+
+  A theme sets the caption style and highlight only while you keep the defaults (Highlight
+  pill, red); any other choice wins. *Auto* (the default) follows a novel part's genre (see
+  "Novels"); other reels have no theme on Auto. *None* is the plain look. The editor sets a
+  theme for the mood you ask for ("make it scarier", "pakai tema romance").
 - **Motion graphics**: three entrances are rendered by HyperFrames, an open-source
   HTML-to-video renderer, run locally: the title's letters rising in one by one, photo cards
   swinging in through 3D with a light crossing them, and a novel part's end screen coming in
@@ -205,7 +223,7 @@ src/storeel/
   media/       ffmpeg/ffprobe helpers and speech detection
   pipeline/    ingest, script, transcribe, analyze, detect, assets, layout, captions, compose,
                emphasis (stressed words), title + depth (the title behind you), cutout (you cut
-               out for a background), motion (HyperFrames)
+               out for a background), themes + genre (genre themes), motion (HyperFrames)
   prompts/     model instructions (Markdown)
   web/         FastAPI app and the static single-page UI
   db.py        SQLite: project documents and the job queue
@@ -223,8 +241,11 @@ A novel is told as a series: one reel per chapter, called a
 
 - **A novel** has a title, a synopsis, a language (Indonesian or English), a narration style
   (casual, warm, dramatic or funny: it sets the voice and how part one opens, e.g. "Gue baru
-  baca part satu novel X..." or "Aku baru baca..."), a picture look and a watermark. Paste
-  each chapter's text.
+  baca part satu novel X..." or "Aku baru baca..."), a picture look, a watermark and a genre
+  (romance, horror, mystery, drama, legend or other: its parts' theme, see "Genre themes").
+  On *Auto*, Muse Spark picks the genre from the synopsis and the chapter when the first
+  part is written (one small call at low effort, kept on the novel); a failed call leaves it
+  on Auto, so the parts have no theme yet. Paste each chapter's text.
 - **The part script** (Muse Spark): a hook on camera with a fixed opening, the story in beats
   (part one's setup or a bridge from the previous part, rises, the turn, a cliffhanger), a
   poll and a call to action ("... lengkapnya ada di link bio"). Each beat says what the screen

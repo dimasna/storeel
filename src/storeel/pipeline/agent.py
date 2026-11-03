@@ -71,7 +71,8 @@ should (set_beat_switch). This is how a character is made to appear when they ar
 speak. Use only pictures listed in 'drawn'.
 - Style: captions, the title over the first seconds, the motion of the title, cards and end \
 screen, the reel's look (dalang: their own video with the characters at the bottom and the \
-pictures up top; or cut out in front of a scene or a studio backdrop), the cut-out speaker's \
+pictures up top; or cut out in front of a scene or a studio backdrop), the genre theme that sets \
+its mood (romance, horror, mystery, drama, legend), the cut-out speaker's \
 size and place, watermark, how the speaker looks behind a picture, the pictures' look and \
 amount (set_style).
 - Propose rendering the reel (render).
@@ -98,8 +99,8 @@ in each result: a screen under two seconds flashes by, so pick earlier words.
 - Call render only when the user asks for the reel to be rendered or exported.
 - To have fewer pictures, hide the least useful ones instead of proposing new ones.
 - visual_style, visuals, picture_layout and language only change the reel after the user \
-presses "Update pictures" on the page. Caption, title, motion, background, watermark, speaker and screen \
-changes show in the next render. Tell the user when this applies.
+presses "Update pictures" on the page. Caption, title, motion, background, theme, watermark, \
+speaker and screen changes show in the next render. Tell the user when this applies.
 - You cannot upload or record video, undo, delete anything, or redo every picture. Say so \
 briefly and point to the page.
 - Times are seconds from the start of the reel. Use the ids from the reel data.
@@ -146,6 +147,21 @@ change by small steps (about 0.1) for "a bit", and check 'speaker' in the result
 moved, they always have a backdrop: the pictures, and the studio glow between them. To put them \
 back where they were recorded, keep the look and set speaker_scale 1, speaker_x 0.5 and \
 speaker_y 1. \
+theme: a genre theme over any look, free (it never changes the look or the cost): romance \
+(senja: a warm grade, serif captions in rose, cream cards with a rose border, a serif cream \
+title, a dusk backdrop, stressed words beating like a heart), horror (a cold, desaturated grade \
+with a vignette, bold captions in acid green, black red-edged cards that glitch in, a pale title \
+glowing red, a flickering green backdrop, stressed words shaking), mystery (noir: high-contrast \
+black and white, every picture in black and white on a tilted paper print, a grainy spotlight \
+backdrop, stressed words stamped down), drama (sinetron: punchy contrast, dark gold-edged cards, \
+a gold title, red and gold glows, letterbox bars, stressed words zooming in with a flash), legend \
+(wayang: a warm amber grade, serif captions, dark-wood gold-edged cards, a serif gold title, a \
+lamp-lit shadow-puppet screen, characters coming in as shadow puppets, glowing stressed words), \
+none (the plain look), or auto (a novel part follows its novel's genre, novel_genre in the reel \
+data; other reels have no theme). A theme uses its own caption style and highlight only while \
+captions is pill and caption_color is #E50914. Set it for the mood the user asks for: scarier or \
+creepier is horror, more romantic romance, more suspense or a whodunit mystery, more emotional \
+or soap-opera drama, more traditional, magical or folk-tale legend. \
 watermark: text shown over \
 the video ("" for none). \
 watermark_position: center, top or bottom. speaker_behind: how the speaker looks behind a \
@@ -420,6 +436,7 @@ def reel_data(project: Project, novel: Novel | None = None) -> dict[str, Any]:
     if project.source is not None:
         data["speaker"] = speaker_view(project)
     if project.path == "novel":
+        data["novel_genre"] = novel.genre if novel is not None else None  # what theme "auto" follows
         data["cast"] = _cast(project, novel)
         data["beats"] = _beats(project)
         data["drawn"] = _drawn(project)

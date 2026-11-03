@@ -36,7 +36,7 @@ from PIL import Image
 
 from ..common import Cancelled, digest
 from ..files import ProjectFiles
-from .render import FONT_FILE, TitleSprite
+from .render import FONT_FILE, SERIF_FILES, TitleSprite
 
 VERSION = 1  # bump when a template changes: cached renders are made again
 TIMEOUT = 240.0  # seconds a page may take
@@ -147,7 +147,8 @@ def _png(image: Image.Image) -> bytes:
 
 def title_page(title: TitleSprite) -> Page:
     """The title's letters rising in one after another, each from a little lower, smaller and
-    blurred, on a page the size of the still title, its lines where the still title has them."""
+    blurred, on a page the size of the still title, its lines where the still title has them,
+    in its face, ink and glow."""
     size, line_h = title.size, title.line_height
     ascent, descent = title.metrics
     letters = sum(len(r) for r in title.rows)
@@ -165,11 +166,20 @@ def title_page(title: TitleSprite) -> Page:
     # A line box of line_h puts its baseline at line_h / 2 + (ascent - descent) / 2.
     top = round(title.baseline - line_h / 2 - (ascent - descent) / 2)
     shadow = f"0 {round(size * 0.04)}px {round(size * 0.16)}px rgba(0, 0, 0, 0.55)"
+    if title.glow is not None:
+        shadow += f", 0 0 {round(size * 0.22)}px rgba({', '.join(map(str, title.glow))}, 0.9)"
     start = f"translateY({round(size * 0.42)}px) scale(.86)"
-    style = f"""
+    family, weight, fonts = "Storeel Sans", 800, ""
+    files = {"sans.ttf": FONT_FILE.read_bytes()}
+    if title.face == "serif":
+        family, weight = "Storeel Serif", 400
+        fonts = '\n@font-face { font-family: "Storeel Serif"; src: url("serif.ttf") format("truetype"); }'
+        files["serif.ttf"] = SERIF_FILES["regular"].read_bytes()
+    color = "#fff" if title.ink == (255, 255, 255) else "#{:02x}{:02x}{:02x}".format(*title.ink)
+    style = f"""{fonts}
 .title {{ position: absolute; left: 0; right: 0; top: {top}px; text-align: center;
-  font-family: "Storeel Sans"; font-weight: 800; font-size: {size}px; line-height: {line_h}px;
-  color: #fff; white-space: pre; text-shadow: {shadow}; }}
+  font-family: "{family}"; font-weight: {weight}; font-size: {size}px; line-height: {line_h}px;
+  color: {color}; white-space: pre; text-shadow: {shadow}; }}
 .row {{ display: block; height: {line_h}px; }}
 .l {{ display: inline-block; opacity: 0; animation: rise {rise}s cubic-bezier(.2, .85, .25, 1) both; }}
 @keyframes rise {{
@@ -182,7 +192,7 @@ def title_page(title: TitleSprite) -> Page:
         f'<div class="title">{"".join(spans)}</div></div>'
     )
     width, height = title.image.size
-    return Page("title", body, style, width, height, seconds, {"sans.ttf": FONT_FILE.read_bytes()})
+    return Page("title", body, style, width, height, seconds, files)
 
 
 SWING = """

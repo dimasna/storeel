@@ -29,8 +29,10 @@ from .layout import covered, to_region
 from .motion import Renderer
 from .render import (
     INK,
+    PLAIN_FRAME,
     RED,
     WHITE,
+    Frame,
     badge,
     card,
     chat_bubble,
@@ -42,6 +44,7 @@ from .render import (
     title_block,
 )
 from .story import CTA, HOOK, OUTRO, POLL
+from .themes import desaturate
 
 MIN_LINE = 0.25  # seconds: no beat is squeezed to less than this
 MIN_HOLD = 3.0  # seconds a picture stays up at least: the viewer needs time to look at it
@@ -341,7 +344,9 @@ WORDS = {
 
 
 class Sprites:
-    """Builds and caches each screen element of a part, positioned on the frame."""
+    """Builds and caches each screen element of a part, positioned on the frame. Photo and scene
+    cards are in `frame` (a theme's, or the plain one); with `grey` every picture is in black
+    and white."""
 
     def __init__(
         self,
@@ -349,10 +354,14 @@ class Sprites:
         files: ProjectFiles,
         novel_files: ProjectFiles | None,
         cast: dict[str, BibleCharacter] | None = None,
+        frame: Frame = PLAIN_FRAME,
+        grey: bool = False,
     ) -> None:
         self.project = project
         self.story = project.story
         self.files = {"project": files, "novel": novel_files}
+        self.frame = frame
+        self.grey = grey
         self.pictures = project.part_pictures or {}
         self.props = {p.id: p for p in self.story.props} if self.story else {}
         self.photos = {p.id: p for p in self.story.photos} if self.story else {}
@@ -363,7 +372,8 @@ class Sprites:
             self.slots[c.id], self.labels[c.id] = c.slot, c.label
         self.bases = {v.id: v.base for v in self.story.variants} if self.story else {}
         self.cache: dict[tuple, Image.Image] = {}
-        self.kinds: dict[int, str] = {}  # id of a sprite -> "photo" for the photo and scene cards
+        # id of a sprite -> "photo" for the photo and scene cards, "character" for one standing
+        self.kinds: dict[int, str] = {}
         self.originals: dict[int, Image.Image] = {}  # id of a photo or scene card -> its picture
         # ids of the pictures up top (photo and scene cards, cut-out objects): what may cover the
         # storyteller's face (the characters standing at the bottom, notes and chats never count)
@@ -376,7 +386,8 @@ class Sprites:
         if picture is None or not picture.key or files is None or not files.exists(picture.key):
             return None
         with Image.open(files.path(picture.key)) as opened:
-            return opened.convert("RGBA" if picture.cutout else "RGB")
+            image = opened.convert("RGBA" if picture.cutout else "RGB")
+        return desaturate(image) if self.grey else image
 
     def _cached(self, key: tuple, build) -> Image.Image | None:
         if key not in self.cache:
@@ -453,7 +464,9 @@ class Sprites:
             original = picture
             picture = _wide(picture)
             width = _card_width(picture)
-            sprite = self._cached(("photo", show.photo, width), lambda: photo_card(picture, width, title))
+            sprite = self._cached(
+                ("photo", show.photo, width), lambda: photo_card(picture, width, title, self.frame)
+            )
             self.kinds[id(sprite)] = "photo"
             self.originals[id(sprite)] = original
             self.up_top.add(id(sprite))
@@ -481,7 +494,9 @@ class Sprites:
                 original = picture
                 picture = _wide(picture)
                 width = _card_width(picture)
-                sprite = self._cached(("scene", show.prop, width), lambda: photo_card(picture, width))
+                sprite = self._cached(
+                    ("scene", show.prop, width), lambda: photo_card(picture, width, frame=self.frame)
+                )
                 self.kinds[id(sprite)] = "photo"
                 self.originals[id(sprite)] = original
                 self.up_top.add(id(sprite))
@@ -497,10 +512,11 @@ class Sprites:
                     ("stand", cid),
                     lambda p=picture: cutout_sprite(p, round(STAND_W * W), round(STAND_H * H)),
                 )
+                self.kinds[id(sprite)] = "character"
             else:  # SAM missed: a small framed portrait instead, no taller than a standing figure
                 sprite = self._cached(
                     ("standcard", cid),
-                    lambda p=picture: card(p, round(0.34 * W), round(0.8 * STAND_H * H)),
+                    lambda p=picture: card(p, round(0.34 * W), round(0.8 * STAND_H * H), self.frame),
                 )
             x = round(SLOT_X[slot] * W) - sprite.width // 2
             y = round(STAND_BOTTOM * H) - sprite.height
@@ -556,7 +572,8 @@ def _wide(picture: Image.Image) -> Image.Image:
 
 
 class PartCompositor(Compositor):
-    """The reel for a novel part: the speaker, the beats' pictures, the poll, the end card."""
+    """The reel for a novel part: the speaker, the beats' pictures, the poll, the end card.
+    `genre` is the novel's (the part's theme on "auto")."""
 
     def __init__(
         self,
@@ -565,18 +582,20 @@ class PartCompositor(Compositor):
         novel_files: ProjectFiles | None,
         cast: dict[str, BibleCharacter] | None = None,
         motion: Renderer | None = None,
+        genre: str | None = None,
     ) -> None:
         self._novel_files = novel_files
         self._cast = cast or {}
         self._end_kinds: dict[int, str] = {}  # id of an end screen piece -> what it is
-        super().__init__(project, files, motion)
+        super().__init__(project, files, motion, genre)
 
     def _build_pictures(self, project: Project, files: ProjectFiles) -> list[tuple[float, float]]:
         story = project.story
         if story is None:
             return []
         style = project.style
-        sprites = Sprites(project, files, self._novel_files, self._cast)
+        grey = "desaturate" in self.extras
+        sprites = Sprites(project, files, self._novel_files, self._cast, self.card_frame, grey)
         language = project.script.language if project.script else "id"
         words = WORDS.get(language, WORDS["id"])
         lines = calm(timeline(project))
@@ -709,7 +728,11 @@ class PartCompositor(Compositor):
             room = pill_top - title_bottom - 2 * gap
             if picture is not None and room >= round(0.06 * H):
                 box = (round(0.6 * W), min(round(0.22 * H), room))
-                sprite = cutout_sprite(picture, *box) if info and info.cutout else card(picture, *box)
+                sprite = (
+                    cutout_sprite(picture, *box)
+                    if info and info.cutout
+                    else card(picture, *box, sprites.frame)
+                )
                 top = round(END_PROP_Y * H) - sprite.height // 2
                 top = min(max(top, title_bottom + gap), pill_top - gap - sprite.height)
                 out.append((sprite, (W // 2 - sprite.width // 2, top)))

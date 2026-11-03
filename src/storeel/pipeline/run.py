@@ -17,6 +17,7 @@ from .depth import needed as title_needs_masks
 from .depth import track_speaker
 from .detect import find_faces, references
 from .emphasis import pick_emphasis
+from .genre import pick_genre
 from .ingest import ingest
 from .motion import Renderer
 from .part import find_part_faces, make_part_pictures, outfit_entry, outfit_redraws
@@ -114,6 +115,8 @@ def handle_script(ctx: JobContext) -> None:
 
 
 def handle_story(ctx: JobContext) -> None:
+    pick_genre(ctx)  # a novel on "auto" gets its genre (its parts' theme) from its first part
+    ctx.flush_usage()
     if not ctx.params.get("from_video"):
         ctx.step(WRITE_STEP, 0.0, 0.6)
         write_story(ctx)
@@ -220,13 +223,20 @@ def _render(ctx: JobContext, fit_mb: int | None) -> None:
             find_part_faces(ctx)  # chosen after processing: check the face now
             project = ctx.project()
         cast: dict[str, BibleCharacter] = {}
+        genre = None  # the novel's, for a part on the theme "auto"
         novel_files = None
         if project.novel_id:
             novel_files = ctx.services.novel_files(project.novel_id)
             with contextlib.suppress(LookupError):  # the novel is gone: the part's own cast only
-                cast = ctx.services.db.get_novel(project.novel_id).bible.characters
+                novel = ctx.services.db.get_novel(project.novel_id)
+                cast, genre = novel.bible.characters, novel.genre
         compositor = PartCompositor(
-            project, ctx.files, novel_files, cast, motion=Renderer(ctx.files, ctx.log, ctx.cancelled)
+            project,
+            ctx.files,
+            novel_files,
+            cast,
+            motion=Renderer(ctx.files, ctx.log, ctx.cancelled),
+            genre=genre,
         )
     compose(ctx, project, fit_mb=fit_mb, compositor=compositor)
 

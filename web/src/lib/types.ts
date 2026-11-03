@@ -35,6 +35,8 @@ export interface Style {
   title_text: string;
   motion: string;
   background: string;
+  /** A genre theme over the look: "auto" follows a novel part's genre, "none" is the plain look. */
+  theme: string;
   speaker_scale: number;
   speaker_x: number;
   speaker_y: number;
@@ -235,6 +237,8 @@ export interface NovelPart {
   language: string;
   narration: string;
   visual_style: string;
+  /** The novel's genre: what a part on the theme "auto" is dressed in ("auto": not chosen yet). */
+  genre: string;
   chapter_title: string;
   chapter_text: string;
   opening: string;
@@ -366,6 +370,7 @@ export interface Novel {
   narration: string;
   visual_style: string;
   watermark: string;
+  genre: string;
   created_at: string;
   updated_at: string;
   bible: { characters: Record<string, BibleCharacter>; props: Record<string, BibleProp> };

@@ -17,6 +17,9 @@ Kind = Literal["character", "object", "place"]
 # the upper part of the frame, "cutout" is the subject alone with its background removed (SAM),
 # "cutaway" fills the screen.
 Display = Literal["overlay", "cutout", "cutaway"]
+# A reel's genre theme (see pipeline/themes.py), one per novel Genre (below) but "other": "auto"
+# follows a novel part's genre (no theme for other reels), "none" keeps the plain look.
+Theme = Literal["auto", "none", "romance", "horror", "mystery", "drama", "legend"]
 
 
 class Strict(BaseModel):
@@ -61,6 +64,11 @@ class Style(Strict):
     # frame by SAM 3.1: "scene" (each picture fills the screen behind them; their own video in
     # between) or "studio" (a moving glow in caption_color, the pictures as cards, an outline).
     background: Literal["dalang", "scene", "studio"] = "dalang"
+    # A genre theme over the look (free, never a cost choice): the colour grade of the speaker's
+    # video, the caption style and highlight (only while those are "pill" and the default red),
+    # the photo cards' frame, the title, the studio backdrop, an effect on the stressed words and
+    # one touch of its own. See pipeline/themes.py.
+    theme: Theme = "auto"
     # Where the cut-out speaker stands in the scene and studio looks: their video scaled about its
     # bottom middle (1 = as recorded), that middle across the frame (0 the left edge, 1 the right
     # edge), and the video's bottom edge down the frame (1 the frame's bottom; less lifts them,
@@ -156,6 +164,9 @@ class Script(Strict):
 # chapters before it added, so writing a chapter again redesigns only its own additions.
 
 Narration = Literal["casual", "warm", "dramatic", "funny"]
+# What a novel's parts are themed by (see Theme above): "auto" until Muse Spark picks one of the
+# others from the synopsis and the chapter, as the first part is written; "other" has no theme.
+Genre = Literal["auto", "romance", "horror", "mystery", "drama", "legend", "other"]
 VisualStyle = Literal["realistic_3d", "cinematic", "illustration", "3d", "anime", "watercolor", "comic"]
 Act = Literal["hook", "bridge", "setup", "rise", "turn", "cliffhanger", "outro"]
 
@@ -232,6 +243,7 @@ class Novel(Strict):
     narration: Narration = "casual"
     visual_style: VisualStyle = "realistic_3d"  # a novel's characters as realistic 3D renders
     watermark: str = Field("", max_length=60)
+    genre: Genre = "auto"  # its parts' theme, on the theme "auto"
     created_at: str
     updated_at: str
     chapters: list[Chapter] = Field(default_factory=list)

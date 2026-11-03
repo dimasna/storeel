@@ -12,6 +12,7 @@ export interface NovelFields {
   narration: string;
   visual_style: string;
   watermark: string;
+  genre: string;
   [key: string]: unknown;
 }
 
@@ -22,6 +23,7 @@ const EMPTY: NovelFields = {
   narration: "casual",
   visual_style: "realistic_3d",
   watermark: "",
+  genre: "auto",
 };
 
 export function NovelForm({
@@ -44,6 +46,7 @@ export function NovelForm({
           narration: novel.narration,
           visual_style: novel.visual_style,
           watermark: novel.watermark,
+          genre: novel.genre ?? "auto",
         }
       : {}),
   });
@@ -105,6 +108,20 @@ export function NovelForm({
         <p className="text-xs text-muted-foreground">
           Part one opens: “{sample.opening}…” · {sample.voice}
         </p>
+      ) : null}
+      {enumOf(config.novel, "genre").length ? (
+        <Field
+          label="Genre"
+          hint="Each part is dressed for it (unless the part picks its own theme): colours, cards, title and caption effects, at no cost. On Auto, Muse Spark picks it when the first part is written."
+        >
+          <Select value={fields.genre} onChange={(e) => set("genre", e.target.value)}>
+            {enumOf(config.novel, "genre").map((v) => (
+              <option key={v} value={v}>
+                {labelFor("genre", v)}
+              </option>
+            ))}
+          </Select>
+        </Field>
       ) : null}
       <Field label="Watermark" hint="Shown on every part, e.g. where to read the novel.">
         <Input

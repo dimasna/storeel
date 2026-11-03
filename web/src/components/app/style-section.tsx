@@ -99,6 +99,17 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
   // SAM 3.1 video: 12 frames a second at $0.20 per 1,000 frames (see storeel.pipeline.cutout).
   const seconds = project.transcript?.duration || project.input_seconds || project.novel?.estimate.seconds || 0;
   const cutoutCost = seconds > 0 ? ` (about $${(seconds * 0.0024).toFixed(2)})` : "";
+  // What the theme "auto" follows: a novel part's genre; any other reel has none.
+  const genre = project.path === "novel" ? project.novel?.genre ?? "auto" : null;
+  const autoTheme =
+    genre === null
+      ? "Auto (none: only a novel part has a genre)"
+      : genre === "auto"
+        ? "Auto (the novel's genre, not chosen yet)"
+        : genre === "other"
+          ? "Auto (the novel's genre: Other, no theme)"
+          : `Auto (the novel's genre: ${labelFor("genre", genre)})`;
+  const themes = enumOf(config.style, "theme");
 
   return (
     <Card title="Style">
@@ -154,6 +165,20 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
         />
 
         <SubHeading>Look</SubHeading>
+        {themes.length ? (
+          <Field
+            label="Theme"
+            hint="A genre look over any background, at no cost: the colour of your video, the cards, the title, a backdrop and an effect on the stressed words. It uses its own caption style and highlight while those are Highlight pill and red."
+          >
+            <Select value={style.theme ?? "auto"} onChange={(e) => update({ theme: e.target.value })}>
+              {themes.map((v) => (
+                <option key={v} value={v}>
+                  {v === "auto" ? autoTheme : labelFor("theme", v)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
         <SelectField
           name="background"
           label="Behind you"

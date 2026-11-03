@@ -208,6 +208,7 @@ function NovelDetails({ novel }: { novel: Novel }) {
     ["Language", labelFor("novel_language", novel.language)],
     ["Narration style", labelFor("narration", novel.narration)],
     ["Picture look", labelFor("visual_style", novel.visual_style)],
+    ["Genre", labelFor("genre", novel.genre ?? "auto")],
     ["Watermark", novel.watermark || "none"],
   ];
   return (

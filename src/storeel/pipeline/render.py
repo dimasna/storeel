@@ -254,6 +254,47 @@ def _rounded_mask(size: tuple[int, int], radius: int) -> Image.Image:
     return mask
 
 
+@dataclass(frozen=True)
+class Frame:
+    """A photo card's frame: its fill, a border round its edge (`line` wide), the room around
+    the photo (`pad`) and the corners' radius, all of the card's width; a tilt in degrees (a
+    print dropped on a desk), and the ink of the caption under a photo. The default is the
+    studio's dark rounded frame (a genre theme has its own, see themes.py)."""
+
+    fill: tuple[int, int, int, int] = (32, 33, 36, 245)
+    border: tuple[int, int, int, int] | None = None
+    line: float = 0.0
+    pad: float = 0.0165
+    radius: float = 0.036
+    tilt: float = 0.0
+    ink: tuple[int, int, int, int] = (232, 234, 237, 255)
+
+
+PLAIN_FRAME = Frame()
+
+
+def _framed(photo: Image.Image, size: tuple[int, int], unit: int, frame: Frame) -> Image.Image:
+    """`photo` in `frame`, `size` big with the photo at its top-left padding (not yet tilted)."""
+    pad = max(6, round(unit * frame.pad))
+    radius = max(10, round(unit * frame.radius)) if frame.radius else 0
+    framed = Image.new("RGBA", size, (0, 0, 0, 0))
+    if frame.border is not None and frame.line > 0:
+        line = max(2, round(unit * frame.line))
+        framed.paste(frame.border, (0, 0, *size), _rounded_mask(size, radius))
+        inside = (size[0] - 2 * line, size[1] - 2 * line)
+        box = (line, line, line + inside[0], line + inside[1])
+        framed.paste(frame.fill, box, _rounded_mask(inside, max(0, radius - line)))
+    else:
+        framed.paste(frame.fill, (0, 0, *size), _rounded_mask(size, radius))
+    inner_radius = max(4, radius - round(pad * 0.8)) if radius else 0
+    framed.paste(photo, (pad, pad), _rounded_mask(photo.size, inner_radius))
+    return framed
+
+
+def _tilted(image: Image.Image, frame: Frame) -> Image.Image:
+    return image.rotate(frame.tilt, resample=Image.BICUBIC, expand=True) if frame.tilt else image
+
+
 def _shadowed(image: Image.Image, blur: int, offset: int, opacity: float) -> Image.Image:
     """`image` (RGBA) on a soft drop shadow of its own shape, with room around it."""
     pad = blur * 2 + offset
@@ -266,18 +307,15 @@ def _shadowed(image: Image.Image, blur: int, offset: int, opacity: float) -> Ima
     return out
 
 
-def card(picture: Image.Image, max_width: int, max_height: int) -> Image.Image:
-    """The photo card: the whole picture (no crop) in a dark rounded
-    frame with a soft drop shadow, as wide as `max_width` allows within `max_height`."""
+def card(picture: Image.Image, max_width: int, max_height: int, frame: Frame = PLAIN_FRAME) -> Image.Image:
+    """The photo card: the whole picture (no crop) in `frame` (dark and rounded by default)
+    with a soft drop shadow, as wide as `max_width` allows within `max_height`."""
     unit = max(1, max_width)
-    pad = max(6, round(unit * 0.0165))  # the frame around the photo
-    radius = max(10, round(unit * 0.036))
+    pad = max(6, round(unit * frame.pad))  # the frame around the photo
     inner = (max(16, max_width - 2 * pad), max(16, max_height - 2 * pad))
     photo = ImageOps.contain(picture.convert("RGB"), inner, Image.LANCZOS)
     size = (photo.width + 2 * pad, photo.height + 2 * pad)
-    framed = Image.new("RGBA", size, (0, 0, 0, 0))
-    framed.paste((32, 33, 36, 245), (0, 0, *size), _rounded_mask(size, radius))
-    framed.paste(photo, (pad, pad), _rounded_mask(photo.size, max(4, radius - round(pad * 0.8))))
+    framed = _tilted(_framed(photo, size, unit, frame), frame)
     return _shadowed(framed, blur=max(6, round(unit * 0.02)), offset=max(4, round(unit * 0.015)), opacity=0.3)
 
 
@@ -401,29 +439,30 @@ def name_tag(text: str, size: int, max_width: int) -> Image.Image:
     return shadow
 
 
-def photo_card(picture: Image.Image, width: int, title: str = "") -> Image.Image:
-    """A photo in a dark rounded frame with its caption under it, the whole picture shown."""
-    pad = max(6, round(width * 0.0165))
-    radius = max(10, round(width * 0.036))
+def photo_card(picture: Image.Image, width: int, title: str = "", frame: Frame = PLAIN_FRAME) -> Image.Image:
+    """A photo in `frame` (dark and rounded by default) with its caption under it, the whole
+    picture shown."""
+    pad = max(6, round(width * frame.pad))
     inner = width - 2 * pad
     photo = picture.convert("RGB")
     photo = photo.resize((inner, max(1, round(inner * photo.height / photo.width))), Image.LANCZOS)
     title_font = font(max(16, round(width / 22)), 600)
     strip = round(title_font.size * 2.0) if title else 0
     size = (width, photo.height + 2 * pad + strip)
-    framed = Image.new("RGBA", size, (0, 0, 0, 0))
-    framed.paste((32, 33, 36, 245), (0, 0, *size), _rounded_mask(size, radius))
-    framed.paste(photo, (pad, pad), _rounded_mask(photo.size, max(4, radius - round(pad * 0.8))))
+    framed = _framed(photo, size, width, frame)
     if title:
         ImageDraw.Draw(framed).text(
             (pad + round(pad * 0.6), pad + photo.height + strip / 2),
             title,
             font=title_font,
             anchor="lm",
-            fill=(232, 234, 237, 255),
+            fill=frame.ink,
         )
     return _shadowed(
-        framed, blur=max(6, round(width * 0.02)), offset=max(4, round(width * 0.015)), opacity=0.3
+        _tilted(framed, frame),
+        blur=max(6, round(width * 0.02)),
+        offset=max(4, round(width * 0.015)),
+        opacity=0.3,
     )
 
 
@@ -568,19 +607,30 @@ class TitleSprite:
     line_height: int = 0
     baseline: int = 0  # the first line's baseline, from the image's top
     metrics: tuple[int, int] = (0, 0)  # the font's ascent and descent at `size`
+    ink: tuple[int, int, int] = (255, 255, 255)  # the letters' colour
+    face: str = "sans"  # "sans" (the heavy studio sans) or "serif" (Instrument Serif)
+    glow: tuple[int, int, int] | None = None  # a soft glow of this colour round the letters
 
 
 def title_sprite(
-    text: str, width: int, height: int, lines: int = 2, max_size: int | None = None
+    text: str,
+    width: int,
+    height: int,
+    lines: int = 2,
+    max_size: int | None = None,
+    ink: tuple[int, int, int] = (255, 255, 255),
+    face: str = "sans",
+    glow: tuple[int, int, int] | None = None,
 ) -> TitleSprite:
-    """The reel's title: heavy white capitals as big as `width` allows (up to `max_size`, 13% of
-    `height` by default), with a soft shadow. On one line, or with `lines` 2 on two that balance,
+    """The reel's title: capitals as big as `width` allows (up to `max_size`, 13% of `height`
+    by default), with a soft shadow, in `ink`: heavy sans, or a serif with `face` "serif", and
+    a soft `glow` round them when given. On one line, or with `lines` 2 on two that balance,
     when it does not fit on one at the biggest size."""
     words = text.upper().split() or [""]
     max_w = round(width * 0.92)
     size = max_size or round(height * 0.13)
     while True:
-        fnt = font(size, 800)
+        fnt = serif(size) if face == "serif" else font(size, 800)
         rows = [words]
         if lines > 1 and len(words) > 1 and fnt.getlength(" ".join(words)) > max_w:  # split where it balances
             best = min(
@@ -593,7 +643,7 @@ def title_sprite(
         size = round(size * 0.94)
     ascent, descent = fnt.getmetrics()
     line_h = round((ascent + descent) * 0.86)
-    pad = round(size * 0.3)
+    pad = round(size * (0.42 if glow else 0.3))  # a glow spreads further than the shadow
     box = (width, line_h * len(rows) + 2 * pad)
     glyphs = Image.new("L", box, 0)
     draw = ImageDraw.Draw(glyphs)
@@ -606,9 +656,15 @@ def title_sprite(
     shadow = Image.new("RGBA", box, (0, 0, 0, 0))
     shadow.putalpha(shade)
     canvas.alpha_composite(shadow, (0, round(size * 0.04)))
-    ink = Image.new("RGBA", box, (255, 255, 255, 255))
-    ink.putalpha(glyphs)
-    canvas.alpha_composite(ink)
+    if glow is not None:
+        halo = Image.new("RGBA", box, (*glow, 255))
+        halo.putalpha(
+            glyphs.filter(ImageFilter.GaussianBlur(max(3, size * 0.1))).point(lambda v: min(255, v * 2))
+        )
+        canvas.alpha_composite(halo)
+    paint = Image.new("RGBA", box, (*ink, 255))
+    paint.putalpha(glyphs)
+    canvas.alpha_composite(paint)
     crop = canvas.getbbox() or (0, 0, 1, 1)
     return TitleSprite(
         canvas.crop(crop),
@@ -620,4 +676,7 @@ def title_sprite(
         line_h,
         pad + ascent - crop[1],
         (ascent, descent),
+        ink,
+        face,
+        glow,
     )

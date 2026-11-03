@@ -206,6 +206,7 @@ def _novel_part(services: Services, project: Project) -> dict[str, Any] | None:
         "language": novel.language,
         "narration": novel.narration,
         "visual_style": novel.visual_style,
+        "genre": novel.genre,  # the part's theme on "auto" (see pipeline/themes.py)
         "chapter_title": chapter.title if chapter else "",
         "chapter_text": chapter.text if chapter else "",
         "opening": hook_opening(novel, number, any(c.number < number for c in novel.chapters)),

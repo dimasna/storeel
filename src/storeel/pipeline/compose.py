@@ -7,7 +7,9 @@ slow Ken Burns zoom). While a card or cut-out is up, the speaker can be blurred 
 behind it (style "speaker_behind"), fading in and out over half a second. Over the first
 seconds a big title can stand behind the speaker: their SAM 3.1 masks (see depth.py) choose
 where it stays readable and take its letters out where they are. The word-by-word caption
-styles bring each word in as it is said, with the stressed words set apart.
+styles bring each word in as it is said, with the stressed words set apart. A genre theme
+(see themes.py) can dress any of it: a grade on the video, the cards' frame, the title, the
+studio backdrop, an effect on the stressed words and one touch of its own.
 
 Python draws only the overlay layer (RGBA) and the blur level; ffmpeg decodes the user's
 video, blurs a copy, blends the two by that level, puts the layer on top and encodes. The
@@ -27,6 +29,7 @@ from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image, ImageChops, ImageFilter, ImageOps
@@ -36,6 +39,7 @@ from ..files import ProjectFiles
 from ..jobs import JobContext, PipelineError
 from ..media import ffmpeg as ff
 from ..models import Moment, Project, Region, Render, SpeakerMasks, Style
+from . import themes
 from .captions import build_pages, stressed
 from .layout import (
     CAPTION_CENTER,
@@ -50,6 +54,8 @@ from .layout import (
 )
 from .motion import Motion, Renderer, stage_page, swing_page, title_page
 from .render import (
+    PLAIN_FRAME,
+    Frame,
     TitleSprite,
     WordSprite,
     caption_page,
@@ -102,6 +108,18 @@ SWING_MIN = 1.4  # seconds a photo card must be up to swing in through 3D (see m
 CUTOUT_FEATHER = 1.2  # pixels at half size: the soft edge of the cut-out speaker
 OUTLINE = (4.0, 3.2, 230)  # the "studio" outline: blur (half-size px), gain, opacity
 BEHIND_SEEN = 0.6  # in "studio", a photo card goes behind the speaker when this much of it still shows
+# A theme's effect on the stressed words (see themes.py): how long each moves after the word
+# comes in, in seconds (its frames are drawn anew meanwhile), and what it leaves behind.
+EFFECT_SECONDS = {"pulse": 1.75, "shake": 0.6, "stamp": 0.4, "flash": 0.5, "glow": 0.9}
+BEAT = 0.8  # "pulse": a heartbeat's length; there are two
+STAMP_TILT = -3.0  # degrees a stamped word stays turned
+GLOW = 0.9  # the opacity of the glow a "glow" word keeps
+WORD_EDGE = 0.015  # of the width: how close to the frame's sides a word may grow
+# A theme's entrance for a card instead of its pop, in seconds: horror's photo cards glitch in,
+# legend's characters come in as shadow puppets that fill with colour.
+ENTRY_SECONDS = {"glitch": 0.5, "silhouette": 1.2}
+PUPPET = (26, 16, 10)  # the shadow puppet's colour
+LETTERBOX = 0.05  # drama's bars, top and bottom, of the height
 
 
 def _composite(canvas: Image.Image, image: Image.Image, x: int, y: int) -> None:
@@ -132,6 +150,50 @@ def _smooth(p: float) -> float:
     return p * p * (3 - 2 * p)
 
 
+def _bump(p: float) -> float:
+    """0, up to 1 halfway and back to 0, as `p` goes from 0 to 1 (0 outside)."""
+    return math.sin(math.pi * p) if 0.0 <= p <= 1.0 else 0.0
+
+
+def _ease_back(p: float) -> float:
+    """0 to 1, overshooting a little before it settles."""
+    p = min(1.0, max(0.0, p)) - 1
+    return 1 + 2.7 * p**3 + 1.7 * p**2
+
+
+def _heartbeat(u: float) -> float:
+    """How much bigger a "pulse" word is `u` seconds into its heartbeat: a swell and a smaller
+    one (lub-dub), twice."""
+    if not 0.0 <= u < 2 * BEAT:
+        return 0.0
+    u %= BEAT
+    return 0.17 * _bump(u / 0.16) + 0.09 * _bump((u - 0.22) / 0.16)
+
+
+def _transformed(image: Image.Image, scale: float, angle: float = 0.0) -> tuple[Image.Image, int, int]:
+    """`image` scaled and turned about its centre, and where its top-left moves to keep it there."""
+    out = image
+    if abs(scale - 1) > 0.002:
+        out = out.resize(
+            (max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.BILINEAR
+        )
+    if angle:
+        out = out.rotate(angle, resample=Image.BICUBIC, expand=True)
+    return out, round((image.width - out.width) / 2), round((image.height - out.height) / 2)
+
+
+def _room(size: tuple[int, int], left: int, angle: float) -> float:
+    """The most an image `size` big, its left edge at `left` on the frame, may be scaled about
+    its centre while turned by `angle` degrees and stay WORD_EDGE inside the frame's sides (under
+    1 when turning alone would take it out)."""
+    width, height = size
+    turn = math.radians(abs(angle))
+    turned = width * math.cos(turn) + height * math.sin(turn)
+    centre = left + width / 2
+    half = min(centre, W - centre) - WORD_EDGE * W
+    return max(0.5, 2 * half / max(1.0, turned))
+
+
 @dataclass
 class Placed:
     """Where a card or cut-out goes: the sprite (RGBA, shadow included), its centre, and the
@@ -153,8 +215,8 @@ def is_standing(moment: Moment, picture: Image.Image) -> bool:
     return is_cutout(moment) and picture.height >= picture.width * 1.15
 
 
-def place(moment: Moment, picture: Image.Image, style: Style) -> Placed:
-    """A card or cut-out sprite for `moment`, placed where the layout puts it."""
+def place(moment: Moment, picture: Image.Image, style: Style, frame: Frame = PLAIN_FRAME) -> Placed:
+    """A card (in `frame`) or cut-out sprite for `moment`, placed where the layout puts it."""
     position = style.caption_position
     if is_cutout(moment):
         if is_standing(moment, picture):
@@ -171,7 +233,7 @@ def place(moment: Moment, picture: Image.Image, style: Style) -> Placed:
         inner = ImageOps.contain(picture, (max_w, max_h)).size
         return Placed(sprite, (W // 2, cy), to_region(W // 2 - inner[0] // 2, cy - inner[1] // 2, *inner))
     max_w, max_h, cy = card_box(position)
-    sprite = card(picture, max_w, max_h)
+    sprite = card(picture, max_w, max_h, frame)
     inner = ImageOps.contain(picture, (max_w, max_h)).size
     return Placed(sprite, (W // 2, cy), to_region(W // 2 - inner[0] // 2, cy - inner[1] // 2, *inner))
 
@@ -218,7 +280,9 @@ class _Page:
 @dataclass
 class _Kinetic:
     """A caption page of the word-by-word styles: each word comes in (a fade and a small rise)
-    as it is said, and stays until the page ends."""
+    as it is said, and stays until the page ends. A theme's `effect` moves the stressed words:
+    "pulse" (a heartbeat), "shake", "stamp" (slammed down, left a little turned), "flash" (a
+    zoom with a flash of light) or "glow" (a glow of the highlight swells round them)."""
 
     start: float
     end: float
@@ -227,12 +291,24 @@ class _Kinetic:
     starts: list[float]
     reveal: float
     rise: int
+    effect: str = ""
+    size: int = 0  # the text size, in pixels: how far an effect moves a word
+    accent: tuple[int, int, int] = (255, 255, 255)  # the colour of a "glow"
+    _halos: dict[int, Image.Image] = field(default_factory=dict, repr=False)
+
+    def _moving(self, word: WordSprite) -> float:
+        """How long a word moves after it comes in: its reveal, or its effect's time."""
+        if self.effect and word.stressed:
+            return max(self.reveal, EFFECT_SECONDS[self.effect])
+        return self.reveal
 
     def shown(self, t: float) -> int:
         return sum(1 for s in self.starts if s - WORD_LEAD <= t)
 
     def animating(self, t: float) -> bool:
-        return any(0.0 <= t - (s - WORD_LEAD) < self.reveal for s in self.starts)
+        return any(
+            0.0 <= t - (s - WORD_LEAD) < self._moving(w) for w, s in zip(self.words, self.starts, strict=True)
+        )
 
     def draw(self, canvas: Image.Image, t: float) -> None:
         x, y = self.xy
@@ -240,9 +316,67 @@ class _Kinetic:
             since = t - (start - WORD_LEAD)
             if since < 0:
                 break
+            if self.effect and word.stressed:
+                image, dx, dy = self._stressed(word, since, x + word.xy[0])
+                _composite(canvas, image, x + word.xy[0] + dx, y + word.xy[1] + dy)
+                continue
             alpha = _ease_out(since / self.reveal)
             dy = round((1 - alpha) * self.rise)
             _composite(canvas, _faded(word.image, alpha), x + word.xy[0], y + word.xy[1] + dy)
+
+    def _stressed(self, word: WordSprite, since: float, left: int) -> tuple[Image.Image, int, int]:
+        """A stressed word `since` seconds after it comes in, moved by the effect: its image and
+        how far that is from the word's place (`left` is its left edge on the frame). Once the
+        effect is over, it stays as it ends."""
+        alpha = _ease_out(since / self.reveal)
+        dx, dy = 0, round((1 - alpha) * self.rise)
+        scale, angle, halo = 1.0, 0.0, 0.0
+        size = max(1, self.size)
+        if self.effect == "pulse":  # in as usual, then its heart beats
+            scale = 1 + _heartbeat(since - 0.6 * self.reveal)
+        elif self.effect == "shake":  # it comes in trembling, the shake dying away
+            fade = max(0.0, 1 - since / EFFECT_SECONDS["shake"])
+            dx = round(0.07 * size * fade * math.sin(since * 97))
+            dy += round(0.04 * size * fade * math.sin(since * 71 + 1.3))
+        elif self.effect == "stamp":  # dropped from above the page, landing with a thud
+            p = min(1.0, since / 0.24)
+            alpha, dy = min(1.0, since / 0.08), 0
+            scale = 1.85 - 0.85 * p * p if p < 1 else 1 - 0.06 * _bump((since - 0.24) / 0.14)
+            angle = STAMP_TILT - 9 * (1 - p)
+        elif self.effect == "flash":  # it zooms in white-hot, a flash of light round it
+            alpha, dy = min(1.0, since / 0.1), 0
+            scale = 0.6 + 0.4 * _ease_back(since / 0.3)
+            halo = max(0.0, 1 - since / EFFECT_SECONDS["flash"]) ** 1.5
+        elif self.effect == "glow":  # a glow of the highlight swells round it and stays
+            halo = GLOW * _smooth(since / EFFECT_SECONDS["glow"])
+        if scale > 1 or angle:  # a word growing or turned about its centre stays inside the frame
+            scale = min(scale, _room(word.image.size, left, angle))
+        image = self._halo(word, halo) if halo > 0.004 else word.image
+        image = _faded(image, alpha)
+        if abs(scale - 1) > 0.002 or angle:
+            image, ox, oy = _transformed(image, scale, angle)
+            dx, dy = dx + ox, dy + oy
+        return image, dx, dy
+
+    def _halo(self, word: WordSprite, strength: float) -> Image.Image:
+        """The word over a soft light of its own shape at `strength`: the highlight for a
+        "glow"; white for a "flash", the word itself white-hot with it."""
+        light = self._halos.get(id(word))
+        if light is None:
+            letters = word.image.getchannel("A").point(lambda v: max(0, v - 110) * 255 // 145)
+            soft = letters.filter(ImageFilter.GaussianBlur(max(2, self.size * 0.12)))
+            color = (255, 255, 255) if self.effect == "flash" else self.accent
+            light = Image.new("RGBA", word.image.size, (*color, 255))
+            light.putalpha(soft.point(lambda v: min(255, v * 2)))
+            self._halos[id(word)] = light
+        out = _faded(light, strength) if strength < 0.999 else light.copy()
+        ink = word.image
+        if self.effect == "flash":
+            white = Image.new("RGBA", ink.size, (255, 255, 255, 255))
+            white.putalpha(ink.getchannel("A"))
+            ink = Image.blend(ink, white, 0.85 * strength)
+        out.alpha_composite(ink)
+        return out
 
 
 @dataclass
@@ -305,24 +439,25 @@ def _overlap(a: Box, b: Box) -> bool:
 
 
 def fit_title(
-    text: str, cover: np.ndarray, band: tuple[float, float], avoid: tuple[Box, ...] = ()
+    text: str, cover: np.ndarray, band: tuple[float, float], avoid: tuple[Box, ...] = (), **look: Any
 ) -> tuple[TitleSprite, int, float]:
     """Where the title goes behind the speaker. `cover` is how often each pixel is the speaker
     over the title's time (the masks' mean, at their size). The title is tried on two lines, on
     one, and smaller on one, at every height in `band` where it meets none of the `avoid` boxes;
     the biggest that stays readable (READABLE of its letters showing) wins, at the height where
     the share showing is nearest TITLE_TARGET (then nearest TITLE_Y). Returns the title, its top
-    and the share showing; when no height is readable, its place in front (see below)."""
+    and the share showing; when no height is readable, its place in front (see below). `look`
+    sets its ink, face and glow (see render.title_sprite)."""
     sy, sx = cover.shape[0] / H, cover.shape[1] / W
-    two = title_sprite(text, W, H, 2)
+    two = title_sprite(text, W, H, 2, **look)
     layouts = [two]
-    one = title_sprite(text, W, H, 1) if two.lines == 2 else two
+    one = title_sprite(text, W, H, 1, **look) if two.lines == 2 else two
     if one is not two and one.size >= TITLE_SMALLEST * H:
         layouts.append(one)
     for shrink in TITLE_SHRINK:
         size = round(one.size * shrink)
         if size >= TITLE_SMALLEST * H:
-            layouts.append(title_sprite(text, W, H, 1, max_size=size))
+            layouts.append(title_sprite(text, W, H, 1, max_size=size, **look))
     tried: list[tuple[int, float, int, TitleSprite]] = []
     for rank, sprite in enumerate(layouts):
         w, h = max(1, round(sprite.image.width * sx)), max(1, round(sprite.image.height * sy))
@@ -338,7 +473,7 @@ def fit_title(
             showing = float((part * (1 - region)).sum()) / max(1e-6, float(part.sum()))
             tried.append((rank, showing, y, sprite))
     if not tried:  # the badge, a card or the watermark is everywhere it could go: go under them
-        return fit_title(text, cover, band)
+        return fit_title(text, cover, band, **look)
     readable = [t for t in tried if t[1] >= READABLE]
     if not readable:
         # Nowhere readable: the title goes in front of the speaker, as high as it can (over
@@ -575,7 +710,9 @@ class _Card:
     simply there for its time; with `enter` off it is there from its first frame (the part badge,
     which the platforms' cover frame must show) and still fades out when it leaves. One that
     replaces another in the same place comes in without the rise (`rise` off): a dissolve.
-    With an `intro` (HyperFrames frames, see motion.py) those frames are its entrance instead."""
+    With an `intro` (HyperFrames frames, see motion.py) those frames are its entrance instead;
+    with an `entry` a theme's: "glitch" (torn bands and split colours, settling) or "silhouette"
+    (a shadow puppet that fills with colour)."""
 
     start: float
     end: float
@@ -586,14 +723,20 @@ class _Card:
     enter: bool = True
     rise: bool = True
     fade: float = FADE_OUT  # seconds it takes to go, at the end of its time
-    kind: str = ""  # "photo" for a picture card (it may swing in through 3D); a part's end screen
+    # "photo" for a picture card (it may swing in through 3D), "character" for one standing at
+    # the bottom; a part's end screen
+    kind: str = ""
     group: str = ""  # its pieces: "titles", "picture", "pill", in the group "cta"
     intro: Motion | None = None
     picture: Image.Image | None = None  # a photo card's picture itself (a "scene" backdrop)
+    entry: str = ""
+    _puppet: Image.Image | None = field(default=None, repr=False)
 
     @property
     def entrance(self) -> float:
-        return self.intro.duration if self.intro is not None else POP_IN
+        if self.intro is not None:
+            return self.intro.duration
+        return ENTRY_SECONDS.get(self.entry, POP_IN)
 
     def _introducing(self, t: float) -> bool:
         return self.intro is not None and t - self.start < self.intro.duration
@@ -601,24 +744,58 @@ class _Card:
     def animating(self, t: float) -> bool:
         if self._introducing(t):
             return True
-        entering = self.enter and self.intro is None and t - self.start < POP_IN
+        entering = self.enter and self.intro is None and t - self.start < self.entrance
         return self.animate and (entering or self.end - t < self.fade)
 
     def draw(self, canvas: Image.Image, t: float) -> None:
         if self.intro is not None and self._introducing(t):
             _composite(canvas, self.intro.at(t - self.start), *self.intro.xy)
             return
-        alpha, rise = 1.0, 0.0
-        if self.animate and self.enter and self.intro is None and t - self.start < POP_IN:
+        alpha, rise, image = 1.0, 0.0, self.image
+        entering = self.animate and self.enter and self.intro is None and t - self.start < self.entrance
+        if entering and self.entry:
+            image = self._entering(t - self.start)
+        elif entering:
             alpha = _ease_out((t - self.start) / POP_IN)
             if self.rise:
                 rise = (1 - alpha) * 0.02 * H
         elif self.animate and self.end - t < self.fade:
             alpha = max(0.0, (self.end - t) / self.fade)
-        image = _faded(self.image, alpha)
+        image = _faded(image, alpha)
         x = round(self.center[0] - image.width / 2)
         y = round(self.center[1] - image.height / 2 + rise)
         _composite(canvas, image, x, y)
+
+    def _entering(self, since: float) -> Image.Image:
+        """The sprite `since` seconds into its theme entrance (the same size as the sprite)."""
+        if self.entry == "glitch":
+            return _glitch(self.image, since, self.ident)
+        if self._puppet is None:  # its shadow on the screen, in the shape of the sprite
+            self._puppet = Image.new("RGBA", self.image.size, (*PUPPET, 255))
+            self._puppet.putalpha(self.image.getchannel("A"))
+        filled = _smooth((since - 0.3) / (ENTRY_SECONDS["silhouette"] - 0.3))
+        image = Image.blend(self._puppet, self.image, filled) if filled > 0 else self._puppet
+        return _faded(image, _ease_out(since / 0.3))
+
+
+def _glitch(image: Image.Image, since: float, seed: int) -> Image.Image:
+    """A card glitching in: bands of it torn sideways, its red and blue pulled apart, flickering,
+    calming down as it comes in (the same frames every render)."""
+    calm = max(0.0, 1 - since / ENTRY_SECONDS["glitch"])
+    rng = np.random.default_rng(seed * 7919 + int(since * 30))
+    pixels = np.array(image.convert("RGBA"))
+    height, width = pixels.shape[:2]
+    split = round(width * 0.025 * calm)
+    if split:
+        pixels[..., 0] = np.roll(pixels[..., 0], split, axis=1)
+        pixels[..., 2] = np.roll(pixels[..., 2], -split, axis=1)
+    for _ in range(int(rng.integers(2, 6))):
+        top = int(rng.integers(0, height))
+        band = int(rng.integers(height // 40 + 1, height // 8 + 2))
+        shift = round(float(rng.uniform(-1, 1)) * width * 0.07 * calm)
+        pixels[top : top + band] = np.roll(pixels[top : top + band], shift, axis=1)
+    flicker = 0.35 if rng.random() < 0.4 * calm else 1.0
+    return _faded(Image.fromarray(pixels, "RGBA"), min(1.0, since / 0.12) * flicker)
 
 
 CUT_EPS = 0.02  # seconds: a picture ending this close to another's start is cut to it
@@ -712,15 +889,27 @@ def join_cuts(cards: list[_Card], cutaways: list[_Cutaway]) -> None:
 
 
 class Compositor:
-    """Builds every overlay element up front, then yields the layer frame by frame."""
+    """Builds every overlay element up front, then yields the layer frame by frame. `genre` is a
+    novel part's (its theme on "auto", see themes.py)."""
 
-    def __init__(self, project: Project, files: ProjectFiles, motion: Renderer | None = None) -> None:
+    def __init__(
+        self, project: Project, files: ProjectFiles, motion: Renderer | None = None, genre: str | None = None
+    ) -> None:
         if project.source is None:
             raise PipelineError("process the clips before rendering")
         self.duration = project.source.duration
         fps = project.source.fps
         self.overlay_fps = fps if fps <= OVERLAY_FPS_MAX else fps // 2
-        style = project.style
+        # A genre theme dresses the look: it fills in the caption style and highlight where the
+        # user kept the defaults, and the rest of what it changes is set below.
+        theme = self.theme = themes.resolve(project, genre)
+        style = theme.dress(project.style) if theme is not None else project.style
+        self.theme_note = themes.describe(theme, project, genre)
+        self.captions = style.captions
+        self.card_frame = theme.frame if theme is not None else PLAIN_FRAME  # the photo cards'
+        self.grade = theme.grade if theme is not None else ""  # on the speaker's video (see encode)
+        self.title_look: dict[str, Any] = theme.title if theme is not None else {}
+        self.extras = theme.extras if theme is not None else frozenset()
         self.pages: list[_Page] = []
         self.kinetic: list[_Kinetic] = []
         if style.captions in KINETIC and project.transcript is not None:
@@ -752,6 +941,9 @@ class Compositor:
                         [w.start for w in page.words],
                         spec["reveal"],
                         round(spec["rise"] * size),
+                        effect=theme.word if theme is not None else "",
+                        size=size,
+                        accent=hex_rgb(style.caption_color),
                     )
                 )
         elif style.captions != "off" and project.transcript is not None:
@@ -809,6 +1001,14 @@ class Compositor:
             clear += [(c.start, c.end) for c in self.cards if id(c) in self.behind]
             over = [(c.start, c.end) for c in self.cards if c.kind == "photo" and id(c) not in self.behind]
             self.blurs = _minus(self.blurs, _minus(clear, over))
+        for item in self.cards:  # a theme's entrances, in place of the pop (and of the 3D swing)
+            if not item.animate or not item.enter or item.group:
+                continue
+            if item.kind == "photo" and "glitch" in self.extras:
+                item.entry = "glitch"
+            elif item.kind == "character" and "silhouette" in self.extras:
+                item.entry = "silhouette"
+        self.letterbox = "letterbox" in self.extras
         self.mark: tuple[Image.Image, tuple[int, int]] | None = None
         if style.watermark:
             image = watermark(style.watermark, round(H * WATERMARK_SIZE), round(W * 0.8))
@@ -828,7 +1028,8 @@ class Compositor:
 
     def _add_motion(self, motion: Renderer) -> None:
         """HyperFrames entrances (see motion.py) for the title, the photo cards and a part's end
-        screen, rendered side by side; whatever does not render comes in the plain way."""
+        screen, rendered side by side; whatever does not render comes in the plain way. A card
+        with a theme's entrance keeps it (horror's photo cards glitch in instead of swinging)."""
         fps = self.overlay_fps
         pages = []
         if self.title is not None and self.title.still is not None:
@@ -836,7 +1037,7 @@ class Compositor:
         swinging = [
             c
             for c in self.cards
-            if c.kind == "photo" and c.animate and c.enter and c.end - c.start >= SWING_MIN
+            if c.kind == "photo" and c.animate and c.enter and not c.entry and c.end - c.start >= SWING_MIN
         ]
         sheet: list[Image.Image] = []
         for item in swinging:
@@ -916,7 +1117,7 @@ class Compositor:
                 with np.load(files.path(stored.key)) as data:
                     masks = data["masks"]
         if stored is None or masks is None or not len(masks):
-            sprite = title_sprite(text, W, H, 2)
+            sprite = title_sprite(text, W, H, 2, **self.title_look)
             top = round(TITLE_FRONT_Y * H - sprite.image.height / 2)
             box = (sprite.x, top, sprite.x + sprite.image.width, top + sprite.image.height)
             return self._until_covered(_Title(start, end, sprite.image, box, still=sprite))
@@ -927,7 +1128,8 @@ class Compositor:
         if self.mark is not None:
             image, (x, y) = self.mark
             avoid.append((x, y, x + image.width, y + image.height))
-        sprite, top, showing = fit_title(text, masks.mean(axis=0, dtype=np.float32), band, tuple(avoid))
+        cover = masks.mean(axis=0, dtype=np.float32)
+        sprite, top, showing = fit_title(text, cover, band, tuple(avoid), **self.title_look)
         box = (sprite.x, top, sprite.x + sprite.image.width, top + sprite.image.height)
         title = _Title(start, end, sprite.image, box, still=sprite)
         self.title_showing = showing
@@ -965,17 +1167,21 @@ class Compositor:
                 continue
             with Image.open(files.path(moment.asset.key)) as opened:
                 picture = opened.convert("RGBA" if moment.asset.cutout else "RGB")
+            if "desaturate" in self.extras:
+                picture = themes.desaturate(picture)
             if moment.display == "cutaway":
                 size = (round(W * (1 + ZOOM)), round(H * (1 + ZOOM)))
                 source = ImageOps.fit(picture.convert("RGB"), size, Image.LANCZOS)
                 self.cutaways.append(_Cutaway(start, end, source, zoom_in=len(self.cutaways) % 2 == 0))
                 continue
-            placed = place(moment, picture, style)
-            kind = "" if is_cutout(moment) else "photo"
+            placed = place(moment, picture, style, self.card_frame)
+            kind = "photo"  # a card; a cut-out standing at the bottom is a character
+            if is_cutout(moment):
+                kind = "character" if is_standing(moment, picture) else ""
             self.cards.append(
                 _Card(
                     start, end, placed.image, placed.center, ident=len(self.cards) + 1, kind=kind,
-                    picture=picture if kind else None,
+                    picture=picture if kind == "photo" else None,
                 )
             )  # fmt: skip
             blur = style.speaker_behind == "blur" or (
@@ -1020,8 +1226,10 @@ class Compositor:
     def frame(self, t: float) -> Image.Image:
         """The overlay layer at `t`, with MASK_ROWS extra rows at the bottom holding the blur level."""
         canvas = Image.new("RGBA", (W, H + MASK_ROWS), (0, 0, 0, 0))
-        if self.backdrop:
-            canvas.paste(studio_backdrop(t, self.accent), (0, 0))
+        if self.backdrop:  # a theme's own, or the studio's glow
+            theme = self.theme
+            ground = theme.backdrop(t, self.accent) if theme is not None else studio_backdrop(t, self.accent)
+            canvas.paste(ground, (0, 0))
         cuts = sorted((c for c in self.cutaways if c.start <= t < c.end), key=lambda c: c.start)
         for k, cut in enumerate(cuts):  # two at a cut: the next one fades in over the last
             if k == 0 and not self.backdrop:
@@ -1040,6 +1248,10 @@ class Compositor:
             self._cut_out(canvas, t)
             drawn = {id(c) for c in behind}
             front = [c for c in self.cards if id(c) not in drawn]
+        if self.letterbox:  # over the speaker, under the pictures, the badge and the captions
+            bar = round(LETTERBOX * H)
+            canvas.paste((0, 0, 0, 255), (0, 0, W, bar))
+            canvas.paste((0, 0, 0, 255), (0, H - bar, W, H))
         for item in front:
             if item.start <= t < item.end:
                 item.draw(canvas, t)
@@ -1154,18 +1366,23 @@ def encode(
     layer_in = f"[1:v]split=2[lraw][mraw];[lraw]crop={W}:{H}:0:0,"
     layer = layer_in + "scale=out_color_matrix=bt709:out_range=tv,format=yuva420p[layer]"
     finish = f"overlay=x=0:y=0:format=yuv420:eof_action=repeat,format=yuv420p,{ff.TAG_BT709}[v]"
-    video, moved = "[0:v]", ""
+    video, graded, moved = "[0:v]", "", ""
+    if compositor.grade:
+        # A theme's colour grade, on the speaker's video only (the layer keeps its colours, so the
+        # captions stay as drawn), before it is moved and blurred.
+        graded = f"[0:v]{compositor.grade}[graded];"
+        video = "[graded]"
     place = compositor.place
     if not place.identity:
         # The speaker resized and moved (a cut-out look): their video on black, where the
         # layer's cut-out of them is; the layer covers the rest.
-        video = "[moved]"
         moved = (
-            "[0:v]split=2[ground][speaker];"
+            f"{video}split=2[ground][speaker];"
             "[ground]drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill[black];"
             f"[speaker]scale={place.width}:{place.height}[small];"
             f"[black][small]overlay=x={place.x}:y={place.y}:format=yuv420[moved];"
         )
+        video = "[moved]"
     if compositor.blurs:
         # The blurred, dimmed copy is made at quarter size (cheap) and blended in by the level
         # carried in the layer's extra rows.
@@ -1178,9 +1395,9 @@ def encode(
             "[blurred][mask]alphamerge[veil];"
             "[sharp][veil]overlay=x=0:y=0:format=yuv420:eof_action=repeat[base]"
         )
-        graph = f"{moved}{layer};{blur};[base][layer]{finish}"
+        graph = f"{graded}{moved}{layer};{blur};[base][layer]{finish}"
     else:
-        graph = f"{moved}{layer};[mraw]nullsink;{video}[layer]{finish}"
+        graph = f"{graded}{moved}{layer};[mraw]nullsink;{video}[layer]{finish}"
     cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-i", str(master)]
     cmd += ["-f", "rawvideo", "-pix_fmt", "rgba", "-video_size", f"{W}x{H + MASK_ROWS}"]
     cmd += ["-framerate", str(compositor.overlay_fps), "-i", "pipe:0"]
@@ -1240,11 +1457,12 @@ def compose(
         title = f"title {title_words(project)!r} {where}"
     ctx.log(
         f"compose: {compositor.duration:.1f}s at {project.source.fps} fps,"
-        f" {pages} caption pages ({project.style.captions}), {title},"
+        f" {pages} caption pages ({compositor.captions}), {title},"
         f" {len(compositor.cutaways)} full-screen pictures,"
         f" {len(compositor.cards)} cards and cut-outs, speaker blurred in {len(compositor.blurs)}"
         f" stretch(es) ({project.style.speaker_behind}), motion: {compositor.motion_note}"
     )
+    ctx.log(f"theme: {compositor.theme_note}")
     if compositor.title_note:
         ctx.log(compositor.title_note)
     if compositor.background != "dalang":

@@ -45,6 +45,7 @@ from ..models import (
     AgentChat,
     AgentMessage,
     Display,
+    Genre,
     Idea,
     Narration,
     Novel,
@@ -157,6 +158,7 @@ class NovelFields(Body):
     narration: Narration = "casual"
     visual_style: VisualStyle = "realistic_3d"
     watermark: str = Field("", max_length=60)
+    genre: Genre = "auto"  # its parts' theme; "auto": Muse Spark picks it as the first part is written
 
 
 class NewChapter(Body):
@@ -685,9 +687,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.put("/api/novels/{novel_id}")
     def edit_novel(novel_id: str, body: NovelFields) -> dict[str, Any]:
         load_novel(novel_id)
+        fields = body.model_dump()
+        if "genre" not in body.model_fields_set:  # a form without it (the older UI) keeps the genre
+            del fields["genre"]
 
         def save(n: Novel) -> None:
-            for name, value in body.model_dump().items():
+            for name, value in fields.items():
                 setattr(n, name, value)
 
         novel, _ = db.update_novel(novel_id, save)
