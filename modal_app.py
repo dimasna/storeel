@@ -39,10 +39,34 @@ SHOWCASE: tuple[str, ...] = ()
 HERE = Path(__file__).parent
 
 # The web app's image. It carries ffmpeg (required at startup), the Python dependencies, the
-# storeel source, and the built frontend.
+# storeel source, the built frontend, and the motion renderer: Node, HyperFrames (pinned in
+# motion/package-lock.json) and the headless Chrome it drives, rendered with once at build time so
+# a broken install fails the build, not a user's render. HyperFrames' telemetry, update checks and
+# skill installs are off (see storeel.pipeline.motion).
+NODE = "22.23.4"
+NODE_SHA256 = "1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce"  # linux-x64.tar.xz
+HYPERFRAMES_ENV = {
+    "HYPERFRAMES_NO_TELEMETRY": "1",
+    "DO_NOT_TRACK": "1",
+    "HYPERFRAMES_NO_UPDATE_CHECK": "1",
+    "HYPERFRAMES_SKIP_SKILLS": "1",
+    "HYPERFRAMES_AGENT": "1",
+    "HYPERFRAMES_CACHE_DIR": "/opt/hyperframes-cache",
+}
+CHROME_LIBS = [
+    "libnss3", "libatk1.0-0", "libatk-bridge2.0-0", "libcups2", "libdrm2", "libxkbcommon0",
+    "libxcomposite1", "libxdamage1", "libxfixes3", "libxrandr2", "libgbm1", "libasound2",
+    "libpango-1.0-0", "libcairo2", "libx11-xcb1", "libxshmfence1", "libglib2.0-0", "libdbus-1-3",
+    "libexpat1", "libxext6", "libxcb1", "libx11-6",
+]
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .apt_install("ffmpeg")
+    .apt_install("ffmpeg", "curl", "xz-utils", "ca-certificates", *CHROME_LIBS)
+    .run_commands(
+        f"curl -fsSL -o /tmp/node.tar.xz https://nodejs.org/dist/v{NODE}/node-v{NODE}-linux-x64.tar.xz",
+        f"echo '{NODE_SHA256}  /tmp/node.tar.xz' | sha256sum -c -",
+        "tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 && rm /tmp/node.tar.xz",
+    )
     .pip_install(
         "fastapi>=0.162",
         "uvicorn>=0.35",
@@ -52,6 +76,17 @@ image = (
         "python-dotenv>=1.2",
         "python-multipart>=0.0.20",
         "meta-sam-parser>=0.1.0",
+    )
+    .add_local_file(HERE / "motion" / "package.json", "/opt/motion/package.json", copy=True)
+    .add_local_file(HERE / "motion" / "package-lock.json", "/opt/motion/package-lock.json", copy=True)
+    .add_local_dir(HERE / "motion" / "warmup", "/opt/motion/warmup", copy=True)
+    .run_commands(
+        "cd /opt/motion && npm ci --no-audit --no-fund",
+        "cd /opt/motion && ./node_modules/.bin/hyperframes browser ensure",
+        "cd /opt/motion && ./node_modules/.bin/hyperframes render warmup --format png-sequence --fps 24"
+        " --output /tmp/warm --quiet --workers 1 && test -f /tmp/warm/frame_000001.png"
+        " && rm -rf /tmp/warm warmup/.hyperframes",
+        env=HYPERFRAMES_ENV,
     )
     .env(
         {
@@ -66,6 +101,8 @@ image = (
             "STOREEL_PRIVATE_PROJECTS": "1",
             "STOREEL_SHOWCASE": ",".join(SHOWCASE),
             "STOREEL_TTL_HOURS": str(TTL_HOURS),
+            "STOREEL_HYPERFRAMES": "/opt/motion/node_modules/.bin/hyperframes",
+            **HYPERFRAMES_ENV,
             "PYTHONPATH": "/app",
         }
     )
