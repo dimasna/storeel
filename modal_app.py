@@ -33,9 +33,9 @@ import modal
 APP_NAME = "storeel-studio"
 DATA_DIR = "/data"            # the Modal Volume mount: SQLite + all media live here
 TTL_HOURS = 24               # projects/novels untouched this long are deleted
-# Reels and novels everyone can watch and nobody can change, never deleted: the demo novel
-# (its chapter reels come with it) and its Part 1 reel.
-SHOWCASE = ("204efb9e5932405f85e606f87fa766c7", "9f62c525b6a04edebd197859f890107d")
+# Reels and novels everyone can watch and nobody can change, never deleted: a demo novel (its
+# chapter reels come with it) and its Part 1 reel. Empty until the new demo reel is made.
+SHOWCASE: tuple[str, ...] = ()
 HERE = Path(__file__).parent
 
 # The web app's image. It carries ffmpeg (required at startup), the Python dependencies, the
