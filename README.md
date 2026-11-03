@@ -19,7 +19,9 @@ Create reel ┤                                                             ├�
 | Analyze | Muse Wonder 1.0, max effort (video) | Lists the characters, objects and places, and picks the moments that get a picture |
 | Analyze | SAM 3.1 | Cuts those seen in the video out as reference images; checks the face when needed |
 | Generate assets | Muse Image (+ SAM 3.1 for cut-outs) | Reference pictures for recurring entities, then one picture per moment |
-| Compile | ffmpeg + Pillow | Your video with the pictures floating over it (cards, SAM cut-outs, or full screen), word-highlighted captions, watermark, loudness-normalised audio |
+| Stress | Muse Spark 1.3, low effort | Picks the words the word-by-word captions stress (a name at a reveal, a number, the punch of a line) |
+| Title | SAM 3.1 (video) | Tracks the speaker through the first seconds, so the reel's title can stand behind their head |
+| Compile | ffmpeg + Pillow, HyperFrames | Your video with the pictures floating over it (cards, SAM cut-outs, or full screen), captions, the title, watermark, loudness-normalised audio; HyperFrames renders a few entrances (below) |
 
 Each text step has its own model and effort (`STOREEL_SCRIPT_*`, `STOREEL_PLAN_*`; see
 `.env.example`). The defaults come from a comparison on the real API (October 2026; 3
@@ -47,6 +49,10 @@ uv sync
 uv run storeel serve        # http://127.0.0.1:8000, or the next free port if 8000 is taken
 ```
 
+Optional, for the motion graphics (Node 22 or newer): `cd motion && npm ci`. This installs
+[HyperFrames](https://github.com/heygen-com/hyperframes) (Apache-2.0), pinned, which downloads
+its headless Chrome on first use. Without it, the same layers come in with plain fades.
+
 Each user brings their own Meta Model API key (create one in the Model API dashboard at
 https://dev.meta.ai). Add it with **Add API key** at the top right of the studio; **Check
 and save** asks Meta which models it can use. Usage is billed to that key.
@@ -70,8 +76,9 @@ Every option is documented in `.env.example`. Projects, uploads and renders are 
   lines as a teleprompter, countdown, review, retake) or upload a take per scene.
 - **Style**: picture look, how many pictures, the layout (cards and cut-outs over the speaker,
   or full screen), what the speaker looks like behind a picture (blurred, sharp, or blurred
-  only when the picture covers the face), caption style, colour, case and position, watermark
-  text and position.
+  only when the picture covers the face), caption style, colour, case and position, the title
+  over the first seconds (behind you, in front, or none, and its words), watermark text and
+  position.
 - **Review**: fix misheard caption words, hide a picture, show it as a card, a cut-out or full
   screen, or edit its prompt and regenerate it. "Update pictures" applies style changes and
   redoes only what changed.
@@ -104,6 +111,28 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   layout redraws the pictures without planning them again.
 - **Consistency** comes from reference images: what the video shows is cut out by SAM;
   what recurs but is not in the video gets a generated reference first.
+- **Captions**: a highlight pill, a coloured word or plain text, a few words a page; or
+  word by word ("bold" and "serif"), where each word comes in as it is said and the words
+  Muse Spark chose to stress are set in a larger italic serif in the highlight colour. That
+  choice is one small call after the transcription (about half a cent), kept on the words, so
+  switching styles later is free; without it a simple rule stresses the longest word of a
+  page. Word-by-word pages break at commas, so they read a phrase at a time.
+- **The title behind you**: the reel's title (a novel part's: the novel's) comes in over the
+  first three seconds. SAM 3.1 tracks you through that stretch of the video in one request
+  (video segmentation, about $0.015), and the masks are decoded once and kept, so renders stay
+  free. The compositor tries the title on two lines and on one, at every height in the upper
+  half, and puts it where your head and shoulders cover a little of it but at least 70% of
+  its letters show; their pixels where you are are taken out frame by frame. When you fill
+  the frame so that no place is readable, it goes in front of you, as high as it can.
+- **Motion graphics**: three entrances are rendered by HyperFrames, an open-source
+  HTML-to-video renderer, run locally: the title's letters rising in one by one, photo cards
+  swinging in through 3D with a light crossing them, and a novel part's end screen coming in
+  piece by piece. Pillow still draws every layer; HyperFrames only moves them, from fixed
+  templates in `pipeline/motion.py` (the words and pictures go in as data, never as code; the
+  fonts are the studio's own, so nothing is fetched). Its transparent frames are cached per
+  reel, so a second render of the same reel costs nothing; if HyperFrames is missing or
+  fails, the layers come in the plain way. Its telemetry, update checks and skill installs
+  are switched off.
 - **Jobs** run on background threads, one at a time per project, with progress, a log and
   cancel. Each stage reuses its output when its inputs have not changed, so retries and
   edits only redo what is missing.
@@ -111,22 +140,24 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
 ## Privacy and cost
 
 - **API keys**: the key stays in the user's browser. It is sent to the studio's server only
-  with actions that start a job (writing a script, processing, regenerating a picture),
-  held in memory until that job ends, and never written to the database, disk or logs. A
-  restart forgets every key; jobs that were waiting are marked failed and can be started
-  again. Rendering needs no key.
+  with actions that start a job (writing a script, processing, regenerating a picture,
+  rendering), held in memory until that job ends, and never written to the database, disk or
+  logs. A restart forgets every key; jobs that were waiting are marked failed and can be
+  started again. Rendering needs no key; given one, a render uses it only for what was chosen
+  after processing (tracking you for a title behind you, or finding your face).
 - Every Model API request is sent with `store: false`. The video sent to the plan model is a
   small silent copy, uploaded with a one-hour expiry and deleted right after the call.
 - The default models run in Standard mode. The cheaper `-contributor` Muse Spark models let
   Meta train on what you send; don't use them for other people's videos.
 - The server has no login. It binds to 127.0.0.1, rejects unknown Host headers and
   cross-site requests, and should not be exposed on a network you don't trust.
-- List prices: $0.01 per picture, $0.0025 per SAM image, $0.18 per hour of transcription,
-  plus text-model tokens. Muse Wonder costs $4 per 1M input and $20 per 1M output tokens
-  (Muse Spark: $1.25 and $4.25), and reasoning tokens count as output. With the defaults, a
-  30-second reel costs about $0.17: around $0.03 for the script, $0.09 for the picture plan
-  and $0.05 for five pictures. The studio shows each reel's usage and an estimate priced by
-  the model that was used.
+- List prices: $0.01 per picture, $0.0025 per SAM image, $0.20 per 1,000 SAM video frames
+  (at least 50 a request), $0.18 per hour of transcription, plus text-model tokens. Muse
+  Wonder costs $4 per 1M input and $20 per 1M output tokens (Muse Spark: $1.25 and $4.25),
+  and reasoning tokens count as output. With the defaults, a 30-second reel costs about
+  $0.19: around $0.03 for the script, $0.09 for the picture plan, $0.05 for five pictures and
+  $0.02 for the stressed words and the title's tracking. The studio shows each reel's usage
+  and an estimate priced by the model that was used.
 
 ## Not verified yet
 
@@ -149,11 +180,13 @@ uv run storeel serve --port 8001
 src/storeel/
   meta/        Model API client (Responses, Files, Voice), strict JSON schemas, SAM parsing
   media/       ffmpeg/ffprobe helpers and speech detection
-  pipeline/    ingest, script, transcribe, analyze, detect, assets, layout, captions, compose
+  pipeline/    ingest, script, transcribe, analyze, detect, assets, layout, captions, compose,
+               emphasis (stressed words), title + depth (the title behind you), motion (HyperFrames)
   prompts/     model instructions (Markdown)
   web/         FastAPI app and the static single-page UI
   db.py        SQLite: project documents and the job queue
   jobs.py      worker threads and the job context
+motion/        the pinned HyperFrames install (npm), and the page the server image renders once
 ```
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
