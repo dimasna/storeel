@@ -3,8 +3,9 @@
 SAM 3.1 tracks "person" through that stretch of the video in one request (video segmentation
 is billed per frame, at least 50 a request: about $0.015 for three seconds). The masks are
 decoded once, here, by a few processes at a time (Meta's decoder is pure Python, about a second
-a mask; see maskdecode.py), and kept as one compressed array at half the reel's width and
-height. Rendering only reads them, so it stays free.
+a mask; see maskdecode.py), every other frame (the one between keeps the mask before it), and
+kept as one compressed array at half the reel's width and height. Rendering only reads them,
+so it stays free.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from ..common import Cancelled, digest
 from ..jobs import JobContext, PipelineError
 from ..media import ffmpeg as ff
 from ..meta import MetaAPIError
+from ..meta.sam import FRAME
 from ..models import SAM_MIN_FRAMES, Project, SpeakerMasks
 from .title import title_window, title_words
 
@@ -28,6 +30,7 @@ MASK_W, MASK_H = 540, 960  # half the reel's size: SAM's masks come back at the 
 MASK_VERSION = 1
 MIN_FOUND = 0.5  # the share of frames SAM must find the speaker on for the title to go behind
 DECODERS = 4
+DECODE_STEP = 2  # decode every this many frames
 DECODE_TIMEOUT = 300.0
 KEY = "work/speaker-masks.npz"
 CLIP = "work/title-window.mp4"
@@ -146,20 +149,25 @@ def _track(ctx: JobContext) -> None:
     lines = [line for line in result.text.splitlines() if line.strip()]
     ctx.log(f"SAM 3.1: tracked the speaker over {billed} frames in {result.seconds:.0f}s; decoding the masks")
     began = time.monotonic()
-    decoded = _decode_all(ctx, lines) if lines else {}
+    # Every other frame is decoded (half the time); the one between keeps the mask before it,
+    # a frame late at most, which a talking head never shows.
+    wanted = [
+        line for line in lines if (m := FRAME.match(line.strip())) and int(m.group(1)) % DECODE_STEP == 0
+    ]
+    decoded = _decode_all(ctx, wanted) if wanted else {}
     masks = np.zeros((frames, MASK_H, MASK_W), dtype=bool)
-    found = 0
+    found = looked = 0
     for frame in range(frames):
         packed = decoded.get(frame)
         if packed is not None:
             masks[frame] = np.unpackbits(packed)[: MASK_H * MASK_W].reshape(MASK_H, MASK_W).astype(bool)
-        if masks[frame].any():
-            found += 1
-        elif frame:  # a frame SAM skipped keeps the one before it
+            looked += 1
+            found += int(masks[frame].any())
+        elif frame:  # a frame not decoded (or that SAM skipped) keeps the one before it
             masks[frame] = masks[frame - 1]
-    ctx.log(f"decoded {len(decoded)} masks in {time.monotonic() - began:.0f}s")
-    if found < MIN_FOUND * frames:
-        ctx.log(f"SAM found the speaker on {found} of {frames} frames, so the title goes in front of them")
+    ctx.log(f"decoded {looked} masks in {time.monotonic() - began:.0f}s")
+    if found < MIN_FOUND * max(1, len(range(0, frames, DECODE_STEP))):
+        ctx.log(f"SAM found the speaker on {found} of {looked} frames, so the title goes in front of them")
         missing = SpeakerMasks(  # remembered, so the next render does not ask again
             key="", start=start, fps=fps, frames=frames, width=MASK_W, height=MASK_H, digest=key_digest
         )
@@ -172,4 +180,4 @@ def _track(ctx: JobContext) -> None:
         key=KEY, start=start, fps=fps, frames=frames, width=MASK_W, height=MASK_H, digest=key_digest
     )
     ctx.update(lambda p: setattr(p, "speaker_masks", stored))
-    ctx.log(f"the title {title_words(project)!r} goes behind the speaker ({found} of {frames} frames)")
+    ctx.log(f"the title {title_words(project)!r} goes behind the speaker ({found} of {looked} frames)")

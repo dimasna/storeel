@@ -94,6 +94,8 @@ TITLE_TARGET = 0.85  # the share it aims for: the speaker covers a little of it,
 TITLE_SMALLEST = 0.035  # of the height: a title this small on one line is not tried
 TITLE_SHRINK = (0.75, 0.56)  # then smaller sizes of the one-line title, before it goes in front
 TITLE_IN, TITLE_OUT = 0.35, 0.3
+TITLE_UNDER = 0.15  # seconds a picture coming in over the title takes to cover it: then it is gone
+TITLE_SHORTEST = 1.0  # seconds: a title cut shorter than this by a picture is left out
 TITLE_FEATHER = 1.6  # pixels: the soft edge where the speaker covers the title
 SWING_MIN = 1.4  # seconds a photo card must be up to swing in through 3D (see motion.py)
 
@@ -648,9 +650,11 @@ class Compositor:
             sprite = title_sprite(text, W, H, 2)
             top = round(TITLE_FRONT_Y * H - sprite.image.height / 2)
             box = (sprite.x, top, sprite.x + sprite.image.width, top + sprite.image.height)
-            return _Title(start, end, sprite.image, box, still=sprite)
+            return self._until_covered(_Title(start, end, sprite.image, box, still=sprite))
         band = TITLE_BAND.get(style.caption_position, TITLE_BAND["lower"])
-        avoid = [_box(c) for c in self.cards if c.start < end and start < c.end]  # e.g. a part's badge
+        # Out of the way of what is there from the start (a part's badge, the watermark); a
+        # picture that comes in later ends the title instead (see _until_covered).
+        avoid = [_box(c) for c in self.cards if c.start <= start + 0.05 and start < c.end]
         if self.mark is not None:
             image, (x, y) = self.mark
             avoid.append((x, y, x + image.width, y + image.height))
@@ -663,8 +667,20 @@ class Compositor:
                 f"the speaker fills the frame (only {showing:.0%} of the title would show behind them),"
                 " so it is drawn in front of them, as high as it goes"
             )
-            return title
+            return self._until_covered(title)
         title.masks, title.mask_start, title.fps = masks, stored.start, stored.fps
+        return self._until_covered(title)
+
+    def _until_covered(self, title: _Title) -> _Title | None:
+        """The title, ending as the first picture that comes in over it does (or none, when that
+        leaves it too short to read)."""
+        later = [c for c in self.cards if title.start < c.start < title.end and _overlap(_box(c), title.box)]
+        if not later:
+            return title
+        title.end = min(c.start for c in later) + TITLE_UNDER
+        if title.end - title.start < TITLE_SHORTEST:
+            self.title_note = "a picture comes in over the title too soon, so the reel has no title"
+            return None
         return title
 
     def _build_pictures(self, project: Project, files: ProjectFiles) -> list[tuple[float, float]]:
