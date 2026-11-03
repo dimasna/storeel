@@ -1,7 +1,8 @@
 """Decode SAM 3.1's video masks in a process of its own, so several decode at once.
 
 Meta's mask decoder is pure Python (about a second for a person-sized mask), so the masks of a
-few seconds of video are shared out over a few of these processes by depth.py:
+few seconds of video are shared out over a few of these processes by depth.py, or, on the
+server, over many machines at once (`decode_packed`, see modal_app.py):
 
     python -m storeel.pipeline.maskdecode LINES.txt OUT.npz WIDTH HEIGHT
 
@@ -12,6 +13,7 @@ frame, the union of every person found, as packed bits.
 from __future__ import annotations
 
 import sys
+import zlib
 
 import numpy as np
 
@@ -35,6 +37,19 @@ def decode(lines: list[str], width: int, height: int) -> tuple[list[int], list[n
         frames.append(frame)
         masks.append(np.packbits(union))
     return frames, masks
+
+
+def decode_packed(lines: list[str], width: int, height: int) -> tuple[list[int], bytes]:
+    """`decode`, its masks stacked and compressed: what a decoding machine sends back."""
+    frames, masks = decode(lines, width, height)
+    stacked = np.stack(masks) if masks else np.zeros((0, (width * height + 7) // 8), dtype=np.uint8)
+    return frames, zlib.compress(stacked.tobytes(), 3)
+
+
+def unpack(frames: list[int], data: bytes, width: int, height: int) -> dict[int, np.ndarray]:
+    row = (width * height + 7) // 8
+    stacked = np.frombuffer(zlib.decompress(data), dtype=np.uint8).reshape(len(frames), row)
+    return {frame: stacked[k] for k, frame in enumerate(frames)}
 
 
 def main(argv: list[str]) -> int:

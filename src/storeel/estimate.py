@@ -10,6 +10,7 @@ These are estimates: the writer's thinking varies.
 from __future__ import annotations
 
 from .models import PRICE_ASR_SECOND, PRICE_IMAGE, PRICE_SAM_FRAME, PRICE_SAM_IMAGE
+from .pipeline.cutout import TRACK_FPS
 from .pipeline.story import MAX_SECONDS
 
 TEXT_BASE_USD = 0.13  # the prompts, the storyboard check, a fix round and the portrait checks
@@ -29,20 +30,24 @@ def part_seconds(chapter_chars: int) -> int:
     return min(MAX_SECONDS, round(90 + chapter_chars / 200))
 
 
-def estimate_part(chapter_chars: int) -> dict[str, float | int]:
+def estimate_part(chapter_chars: int, background: str = "original") -> dict[str, float | int]:
     """The cost of a part's first pass: writing, transcribing (with the stressed words),
-    drawing (with the title's tracking); rendering is free."""
+    drawing (with the title's tracking, or the speaker cut out all through for a `background`
+    other than their own video); rendering is free."""
     chars = max(0, chapter_chars)
     pictures = part_pictures(chars)
     seconds = part_seconds(chars)
     write = TEXT_BASE_USD + chars * TEXT_PER_CHAR_USD
-    draw = pictures * (PRICE_IMAGE + CUT_OUT_SHARE * PRICE_SAM_IMAGE) + TITLE_FRAMES * PRICE_SAM_FRAME
+    draw = pictures * (PRICE_IMAGE + CUT_OUT_SHARE * PRICE_SAM_IMAGE)
+    cutout = seconds * TRACK_FPS * PRICE_SAM_FRAME
+    draw += cutout if background != "original" else TITLE_FRAMES * PRICE_SAM_FRAME  # (the title reuses it)
     transcribe = seconds * PRICE_ASR_SECOND + STRESS_USD
     return {
         "write_usd": round(write, 3),
         "draw_usd": round(draw, 3),
         "transcribe_usd": round(transcribe, 4),
         "total_usd": round(write + draw + transcribe, 2),
+        "cutout_usd": round(cutout, 3),  # what cutting the speaker out costs, chosen or not
         "pictures": pictures,
         "seconds": seconds,
     }

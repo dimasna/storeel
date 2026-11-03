@@ -29,13 +29,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageFilter, ImageOps
 
 from ..common import Cancelled, now_iso
 from ..files import ProjectFiles
 from ..jobs import JobContext, PipelineError
 from ..media import ffmpeg as ff
-from ..models import Moment, Project, Region, Render, Style
+from ..models import Moment, Project, Region, Render, SpeakerMasks, Style
 from .captions import build_pages, stressed
 from .layout import (
     CAPTION_CENTER,
@@ -55,6 +55,7 @@ from .render import (
     caption_page,
     card,
     cutout_sprite,
+    hex_rgb,
     kinetic_page,
     title_sprite,
     watermark,
@@ -98,6 +99,9 @@ TITLE_UNDER = 0.15  # seconds a picture coming in over the title takes to cover 
 TITLE_SHORTEST = 1.0  # seconds: a title cut shorter than this by a picture is left out
 TITLE_FEATHER = 1.6  # pixels: the soft edge where the speaker covers the title
 SWING_MIN = 1.4  # seconds a photo card must be up to swing in through 3D (see motion.py)
+CUTOUT_FEATHER = 1.2  # pixels at half size: the soft edge of the cut-out speaker
+OUTLINE = (4.0, 3.2, 230)  # the "studio" outline: blur (half-size px), gain, opacity
+BEHIND_SEEN = 0.6  # in "studio", a photo card goes behind the speaker when this much of it still shows
 
 
 def _composite(canvas: Image.Image, image: Image.Image, x: int, y: int) -> None:
@@ -181,6 +185,17 @@ def blur_windows(spans: list[tuple[float, float]], duration: float) -> list[tupl
         else:
             merged.append([start, end])
     return [(max(0.0, a), min(duration, b)) for a, b in merged]
+
+
+def _minus(spans: list[tuple[float, float]], cut: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """`spans` with the stretches in `cut` taken out (pieces shorter than BLUR_FADE dropped)."""
+    out = list(spans)
+    for c0, c1 in cut:
+        pieces = []
+        for a, b in out:
+            pieces += [(a, min(b, c0)), (max(a, c1), b)] if a < c1 and c0 < b else [(a, b)]
+        out = [(a, b) for a, b in pieces if b - a >= BLUR_FADE]
+    return out
 
 
 @dataclass
@@ -362,6 +377,108 @@ class _Cutaway:
 
 
 @dataclass
+class _Pan:
+    """A wide picture filling the screen behind the cut-out speaker, panning slowly across it so
+    its whole width is seen (a full-screen picture of a card, in the "scene" background)."""
+
+    start: float
+    end: float
+    source: Image.Image  # RGB, the frame's height (and a little more), wider than the frame
+    rightward: bool
+
+    def frame(self, t: float) -> Image.Image:
+        progress = _smooth((t - self.start) / max(0.01, self.end - self.start))
+        travel = self.source.width - W
+        x = round(travel * (progress if self.rightward else 1 - progress))
+        y = (self.source.height - H) // 2
+        frame = self.source.crop((x, y, x + W, y + H)).convert("RGBA")
+        alpha = min(1.0, (t - self.start) / CUT_FADE, (self.end - t) / CUT_FADE)
+        return _faded(frame, max(0.0, alpha))
+
+
+def scene_of(picture: Image.Image, start: float, end: float, index: int) -> _Cutaway | _Pan:
+    """A picture as the backdrop behind the speaker: a slow zoom when it is tall enough for the
+    frame, a slow pan across it when it is wide."""
+    picture = picture.convert("RGB")
+    if picture.width / picture.height <= W / H * 1.15:
+        size = (round(W * (1 + ZOOM)), round(H * (1 + ZOOM)))
+        return _Cutaway(start, end, ImageOps.fit(picture, size, Image.LANCZOS), zoom_in=index % 2 == 0)
+    height = round(H * 1.02)
+    width = max(W + 2, round(picture.width * height / picture.height))
+    return _Pan(start, end, picture.resize((width, height), Image.LANCZOS), rightward=index % 2 == 0)
+
+
+@dataclass
+class _Track:
+    """The speaker in every frame of the reel (SAM 3.1 masks at `fps`, packed bits at half the
+    reel's size), eased from one mask to the next so the cut-out moves at the reel's rate."""
+
+    packed: np.ndarray  # frames x bytes
+    fps: float
+    width: int
+    height: int
+    _half: dict[int, np.ndarray] = field(default_factory=dict, repr=False)
+
+    def _mask(self, k: int) -> np.ndarray:
+        k = min(max(k, 0), len(self.packed) - 1)
+        mask = self._half.get(k)
+        if mask is None:
+            bits = np.unpackbits(self.packed[k])[: self.width * self.height]
+            mask = bits.reshape(self.height, self.width).astype(np.float32)
+            if len(self._half) > 6:  # frames are read in order: keep only the latest few
+                self._half.pop(min(self._half))
+            self._half[k] = mask
+        return mask
+
+    def half(self, t: float) -> Image.Image:
+        """The speaker at `t` (L, half size, soft-edged)."""
+        position = max(0.0, t * self.fps)
+        k = int(position)
+        f = position - k
+        mask = self._mask(k) if f < 0.05 else (1 - f) * self._mask(k) + f * self._mask(k + 1)
+        image = Image.fromarray((mask * 255).astype(np.uint8))
+        return image.filter(ImageFilter.GaussianBlur(CUTOUT_FEATHER))
+
+    def visible(self, start: float, end: float, box: tuple[float, float, float, float]) -> float:
+        """The share of `box` (frame pixels) the speaker leaves uncovered from `start` to `end`."""
+        masks, _ = self.window(start, end)
+        sx, sy = self.width / W, self.height / H
+        x0, y0 = max(0, int(box[0] * sx)), max(0, int(box[1] * sy))
+        x1, y1 = min(self.width, int(np.ceil(box[2] * sx))), min(self.height, int(np.ceil(box[3] * sy)))
+        if x1 <= x0 or y1 <= y0:
+            return 1.0
+        return 1.0 - float(masks[:, y0:y1, x0:x1].mean())
+
+    def window(self, start: float, end: float) -> tuple[np.ndarray, float]:
+        """The masks from `start` to `end` as booleans (for the title), and the first one's time."""
+        first = int(start * self.fps)
+        last = min(len(self.packed), int(np.ceil(end * self.fps)) + 1)
+        masks = np.stack([self._mask(k) > 0.5 for k in range(first, max(first + 1, last))])
+        return masks, first / self.fps
+
+
+def studio_backdrop(t: float, color: str) -> Image.Image:
+    """The "studio" background: a dark ground with two soft glows of the highlight colour that
+    drift slowly, drawn at a quarter of the frame and scaled up (it is all soft)."""
+    w, h = W // 4, H // 4
+    accent = np.array(hex_rgb(color), dtype=np.float32)
+    ground = np.array((10, 10, 16), dtype=np.float32)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    out = np.broadcast_to(ground, (h, w, 3)).copy()
+    for (cx, cy, r, strength), (ax, ay, px, py) in (
+        ((0.5, 0.3, 0.75, 0.62), (0.16, 0.05, 13.0, 11.0)),
+        ((0.5, 0.86, 0.6, 0.38), (0.22, 0.04, 17.0, 9.0)),
+    ):
+        x = (cx + ax * np.sin(2 * np.pi * t / px)) * w
+        y = (cy + ay * np.cos(2 * np.pi * t / py)) * h
+        d2 = ((xx - x) ** 2 + (yy - y) ** 2) / (r * w) ** 2
+        glow = (strength * np.exp(-2.2 * d2))[..., None]
+        out = out * (1 - glow) + accent * glow
+    small = Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), "RGB")
+    return small.resize((W, H), Image.BILINEAR)
+
+
+@dataclass
 class _Card:
     """A card or cut-out: pops in (fade and a small rise), fades out. With `animate` off it is
     simply there for its time; with `enter` off it is there from its first frame (the part badge,
@@ -381,6 +498,7 @@ class _Card:
     kind: str = ""  # "photo" for a picture card (it may swing in through 3D); a part's end screen
     group: str = ""  # its pieces: "titles", "picture", "pill", in the group "cta"
     intro: Motion | None = None
+    picture: Image.Image | None = None  # a photo card's picture itself (a "scene" backdrop)
 
     @property
     def entrance(self) -> float:
@@ -425,6 +543,16 @@ def _box(card: _Card) -> tuple[float, float, float, float]:
 def _top_left(card: _Card) -> tuple[int, int]:
     """Where a card's sprite goes on the frame, as _Card.draw puts it."""
     return round(card.center[0] - card.image.width / 2), round(card.center[1] - card.image.height / 2)
+
+
+def _load_track(project: Project, files: ProjectFiles) -> _Track | None:
+    """The speaker's masks for the whole reel, when a cut-out background has them."""
+    stored = project.speaker_track
+    if project.style.background == "original" or stored is None or not files.exists(stored.key):
+        return None
+    with np.load(files.path(stored.key)) as data:
+        packed = data["masks"]
+    return _Track(packed, stored.fps, stored.width, stored.height) if len(packed) else None
 
 
 def _covers(a: _Card, b: _Card) -> bool:
@@ -545,10 +673,42 @@ class Compositor:
                 xy = (round(W / 2 - layout.image.width / 2), round(center_y - layout.image.height / 2))
                 starts = [w.start for w in page.words]
                 self.pages.append(_Page(page.start, page.end, layout.image, xy, layout.marks, starts))
-        self.cutaways: list[_Cutaway] = []
+        self.cutaways: list[_Cutaway | _Pan] = []
         self.cards: list[_Card] = []
         self.unchecked_faces = 0  # "auto" blur without face boxes: blurred to be safe
         self.blurs = blur_windows(self._build_pictures(project, files), self.duration)
+        # A cut-out background, when SAM found the speaker all through (else their own video).
+        self.track = _load_track(project, files)
+        self.background = style.background if self.track is not None else "original"
+        self.accent = style.caption_color
+        self.background_note = ""
+        if style.background != "original" and self.track is None:
+            self.background_note = (
+                "the speaker is not cut out for this reel yet (process it, or render with your key),"
+                " so they keep their own background"
+            )
+        if self.background == "scene":  # each photo card becomes the scene behind them
+            keep = []
+            for item in self.cards:
+                if item.kind == "photo" and item.picture is not None:
+                    self.cutaways.append(scene_of(item.picture, item.start, item.end, len(self.cutaways)))
+                else:
+                    keep.append(item)
+            self.cards = keep
+            self.cutaways.sort(key=lambda c: c.start)
+        self.behind: set[int] = set()  # ids of the photo cards drawn behind the cut-out speaker
+        if self.background == "studio" and self.track is not None:
+            for item in self.cards:
+                if (
+                    item.kind == "photo"
+                    and self.track.visible(item.start, item.end, _box(item)) >= BEHIND_SEEN
+                ):
+                    self.behind.add(id(item))
+        if self.background != "original":  # no blur while a picture is behind them, only over them
+            clear = [(c.start, c.end) for c in self.cutaways] if self.background == "scene" else []
+            clear += [(c.start, c.end) for c in self.cards if id(c) in self.behind]
+            over = [(c.start, c.end) for c in self.cards if c.kind == "photo" and id(c) not in self.behind]
+            self.blurs = _minus(self.blurs, _minus(clear, over))
         self.mark: tuple[Image.Image, tuple[int, int]] | None = None
         if style.watermark:
             image = watermark(style.watermark, round(H * WATERMARK_SIZE), round(W * 0.8))
@@ -639,7 +799,14 @@ class Compositor:
         stored = project.speaker_masks
         masks = None
         if style.title_style == "behind":
-            if stored is not None and not stored.key and abs(stored.start - start) <= 0.01:
+            if self.track is not None:  # the speaker is cut out all through: those masks serve
+                window_masks, mask_start = self.track.window(start, end)
+                masks = window_masks
+                stored = SpeakerMasks(
+                    key="track", start=mask_start, fps=self.track.fps, frames=len(window_masks),
+                    width=self.track.width, height=self.track.height, digest="",
+                )  # fmt: skip
+            elif stored is not None and not stored.key and abs(stored.start - start) <= 0.01:
                 self.title_note = "SAM found no speaker while the title is up, so it is drawn in front"
             elif stored is None or not files.exists(stored.key) or abs(stored.start - start) > 0.01:
                 self.title_note = (
@@ -706,8 +873,11 @@ class Compositor:
             placed = place(moment, picture, style)
             kind = "" if is_cutout(moment) else "photo"
             self.cards.append(
-                _Card(start, end, placed.image, placed.center, ident=len(self.cards) + 1, kind=kind)
-            )
+                _Card(
+                    start, end, placed.image, placed.center, ident=len(self.cards) + 1, kind=kind,
+                    picture=picture if kind else None,
+                )
+            )  # fmt: skip
             blur = style.speaker_behind == "blur" or (
                 style.speaker_behind == "top" and not is_standing(moment, picture)
             )
@@ -750,15 +920,27 @@ class Compositor:
     def frame(self, t: float) -> Image.Image:
         """The overlay layer at `t`, with MASK_ROWS extra rows at the bottom holding the blur level."""
         canvas = Image.new("RGBA", (W, H + MASK_ROWS), (0, 0, 0, 0))
+        if self.background == "studio":
+            canvas.paste(studio_backdrop(t, self.accent), (0, 0))
         cuts = sorted((c for c in self.cutaways if c.start <= t < c.end), key=lambda c: c.start)
         for k, cut in enumerate(cuts):  # two at a cut: the next one fades in over the last
-            if k == 0:
+            if k == 0 and self.background != "studio":
                 canvas.paste(cut.frame(t), (0, 0))
             else:
                 _composite(canvas, cut.frame(t), 0, 0)
+        cutout = self.track is not None and (self.background == "studio" or bool(cuts))
         if self.title is not None and self.title.start <= t < self.title.end:
-            self.title.draw(canvas, t, behind=not cuts)  # over a full-screen picture: in front
-        for item in self.cards:
+            self.title.draw(canvas, t, behind=cutout or not cuts)  # over a full-screen picture: in front
+        front = self.cards
+        if cutout:
+            behind = [c for c in self.cards if id(c) in self.behind]
+            for item in behind:  # the pictures behind the speaker
+                if item.start <= t < item.end:
+                    item.draw(canvas, t)
+            self._cut_out(canvas, t)
+            drawn = {id(c) for c in behind}
+            front = [c for c in self.cards if id(c) not in drawn]
+        for item in front:
             if item.start <= t < item.end:
                 item.draw(canvas, t)
         index = self._page_at(t)
@@ -777,8 +959,29 @@ class Compositor:
         canvas.paste((0, 0, 0, level), (0, H, W, H + MASK_ROWS))  # after the sprites: nothing spills
         return canvas
 
+    def _cut_out(self, canvas: Image.Image, t: float) -> None:
+        """Take what is drawn so far out where the speaker is, so they stand in front of it (the
+        video under the layer shows through); "studio" draws an outline around them too."""
+        assert self.track is not None
+        half = self.track.half(t)
+        person = half.resize((W, H), Image.BILINEAR)
+        alpha = canvas.getchannel("A")
+        top = ImageChops.multiply(alpha.crop((0, 0, W, H)), ImageChops.invert(person))
+        alpha.paste(top, (0, 0))
+        canvas.putalpha(alpha)
+        if self.background == "studio" and (fade := 1.0 - self.blur_level(t)) > 0.01:
+            blur, gain, opacity = OUTLINE  # (it goes as the speaker blurs behind a picture)
+            grown = np.asarray(half.filter(ImageFilter.GaussianBlur(blur)), dtype=np.float32) * gain
+            ring = np.clip(grown - np.asarray(half, dtype=np.float32) * gain, 0, 255) * (opacity * fade / 255)
+            line = Image.fromarray(ring.astype(np.uint8)).resize((W, H), Image.BILINEAR)
+            white = Image.new("RGBA", (W, H), (255, 255, 255, 255))
+            white.putalpha(line)
+            canvas.alpha_composite(white, (0, 0))
+
     def _key(self, t: float) -> tuple | None:
         """Identifies what is on screen; None while something is moving."""
+        if self.background == "studio" and self.track is not None:
+            return None  # the speaker moves in front of the backdrop
         if any(c.start <= t < c.end for c in self.cutaways):
             return None
         if self.title is not None and self.title.start <= t < self.title.end:
@@ -932,6 +1135,13 @@ def compose(
     )
     if compositor.title_note:
         ctx.log(compositor.title_note)
+    if compositor.background != "original":
+        behind = (
+            f", {len(compositor.behind)} picture(s) behind them" if compositor.background == "studio" else ""
+        )
+        ctx.log(f"background: {compositor.background}, the speaker cut out by SAM 3.1 in front of it{behind}")
+    if compositor.background_note:
+        ctx.log(compositor.background_note)
     if compositor.unchecked_faces:
         ctx.log(
             f"{compositor.unchecked_faces} picture(s) have no face check yet, so the speaker is blurred"

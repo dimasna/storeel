@@ -24,6 +24,11 @@ export const LABELS: Record<string, Record<string, string>> = {
   caption_case: { original: "As spoken", upper: "UPPERCASE" },
   title_style: { behind: "Behind the speaker", front: "In front of the speaker", off: "No title" },
   motion: { animated: "Animated (HyperFrames)", plain: "Plain fades" },
+  background: {
+    original: "Your own video",
+    scene: "Cut out, the pictures behind you",
+    studio: "Cut out, studio backdrop",
+  },
   watermark_position: { center: "Centre", top: "Top", bottom: "Bottom" },
   language: { auto: "Detect", id: "Indonesian (+ English)", en: "English" },
   format: { storytime: "Storytime", explainer: "Explainer", tips: "Tips", review: "Review", opinion: "Opinion" },

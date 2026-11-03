@@ -34,6 +34,7 @@ export interface Style {
   title_style: string;
   title_text: string;
   motion: string;
+  background: string;
 }
 
 export interface Idea {
@@ -220,6 +221,7 @@ export interface PartEstimate {
   draw_usd: number;
   transcribe_usd: number;
   total_usd: number;
+  cutout_usd: number;
   pictures: number;
   seconds: number;
 }

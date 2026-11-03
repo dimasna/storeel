@@ -120,6 +120,28 @@ if _dist.is_dir():
 app = modal.App(APP_NAME)
 volume = modal.Volume.from_name(f"{APP_NAME}-data", create_if_missing=True)
 
+# SAM 3.1's video masks are decoded by Meta's parser, which is pure Python (about a second a
+# mask): a whole reel's masks for a cut-out background are shared out over many small machines
+# at once (see storeel.pipeline.depth.decode_masks), each taking about 20 of them. They only
+# get SAM's answer text and give back packed masks: no key, no files, no Volume.
+decoder_image = (
+    modal.Image.debian_slim(python_version="3.12")
+    .pip_install("numpy>=2.3", "pillow>=12.0", "httpx>=0.28", "meta-sam-parser>=0.1.0")
+    .env({"PYTHONPATH": "/app"})
+    .add_local_dir(HERE / "src" / "storeel", remote_path="/app/storeel", ignore=["__pycache__"])
+)
+
+
+@app.function(image=decoder_image, cpu=1.0, memory=1024, max_containers=80, timeout=300)
+def decode_masks(lines: list[str], width: int, height: int) -> tuple[list[int], bytes]:
+    from storeel.pipeline.maskdecode import decode_packed
+
+    return decode_packed(lines, width, height)
+
+
+def _remote_decode(batches: list[tuple[list[str], int, int]]) -> list[tuple[list[int], bytes]]:
+    return list(decode_masks.starmap(batches))
+
 
 @app.function(
     image=image,
@@ -134,6 +156,8 @@ volume = modal.Volume.from_name(f"{APP_NAME}-data", create_if_missing=True)
 @modal.concurrent(max_inputs=100)  # one ASGI app serving many concurrent HTTP requests
 @modal.asgi_app()
 def web():
+    from storeel.pipeline import depth
     from storeel.web.app import create_app
 
+    depth.REMOTE_DECODE = _remote_decode
     return create_app()

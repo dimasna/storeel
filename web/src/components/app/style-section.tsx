@@ -63,6 +63,9 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
   };
 
   const pictureHint = project.analysis ? "Picture changes apply when you update the pictures." : undefined;
+  // SAM 3.1 video: 12 frames a second at $0.20 per 1,000 frames (see storeel.pipeline.cutout).
+  const seconds = project.transcript?.duration || project.input_seconds || project.novel?.estimate.seconds || 0;
+  const cutoutCost = seconds > 0 ? ` (about $${(seconds * 0.0024).toFixed(2)})` : "";
 
   return (
     <Card title="Style">
@@ -115,6 +118,21 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
           name="motion"
           label="Entrances"
           hint="The title's letters, photo cards swinging in through 3D, and a part's end screen."
+        />
+
+        <SubHeading>Background</SubHeading>
+        <SelectField
+          name="background"
+          label="Behind you"
+          hint={
+            style.background === "original"
+              ? `SAM 3.1 can cut you out of the video${cutoutCost}: the pictures behind you, or a studio backdrop.`
+              : `SAM 3.1 cuts you out${cutoutCost}, when processing or rendering with your key. ${
+                  style.background === "scene"
+                    ? "Each photo fills the screen behind you."
+                    : "A dark backdrop glowing in your highlight colour."
+                }`
+          }
         />
 
         <SubHeading>Watermark</SubHeading>

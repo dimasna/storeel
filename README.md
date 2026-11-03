@@ -21,6 +21,7 @@ Create reel ┤                                                             ├�
 | Generate assets | Muse Image (+ SAM 3.1 for cut-outs) | Reference pictures for recurring entities, then one picture per moment |
 | Stress | Muse Spark 1.3, low effort | Picks the words the word-by-word captions stress (a name at a reveal, a number, the punch of a line) |
 | Title | SAM 3.1 (video) | Tracks the speaker through the first seconds, so the reel's title can stand behind their head |
+| Background (optional) | SAM 3.1 (video) | Cuts the speaker out of the whole video, so a scene or a studio backdrop can go behind them |
 | Compile | ffmpeg + Pillow, HyperFrames | Your video with the pictures floating over it (cards, SAM cut-outs, or full screen), captions, the title, watermark, loudness-normalised audio; HyperFrames renders a few entrances (below) |
 
 Each text step has its own model and effort (`STOREEL_SCRIPT_*`, `STOREEL_PLAN_*`; see
@@ -124,6 +125,18 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   half, and puts it where your head and shoulders cover a little of it but at least 70% of
   its letters show; their pixels where you are are taken out frame by frame. When you fill
   the frame so that no place is readable, it goes in front of you, as high as it can.
+- **A background behind you** (optional, off by default): SAM 3.1 tracks you through the
+  whole video at 12 frames a second, in 20-second stretches sent side by side (about $0.0024
+  a second: $0.24 for a 100-second reel). Meta's mask decoder is pure Python, about a second
+  a mask, so on the server the masks are shared out over many small machines at once; on
+  your own computer a few processes decode them. They are kept as packed bits at half size,
+  with the holes SAM leaves (a clip-on microphone) filled, and the compositor eases from one
+  mask to the next, so the cut-out moves at the reel's frame rate and renders stay free.
+  *Scene* puts each photo card's picture full screen behind you, slowly zooming, or panning
+  across a wide one. *Studio* puts you in front of a dark backdrop with two slow glows in the
+  highlight colour and a light outline; a photo card that would cover little of you goes
+  behind you, one over your face stays in front. You are blurred only while a picture is in
+  front of you. The title behind you reuses these masks.
 - **Motion graphics**: three entrances are rendered by HyperFrames, an open-source
   HTML-to-video renderer, run locally: the title's letters rising in one by one, photo cards
   swinging in through 3D with a light crossing them, and a novel part's end screen coming in
@@ -144,7 +157,7 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   rendering), held in memory until that job ends, and never written to the database, disk or
   logs. A restart forgets every key; jobs that were waiting are marked failed and can be
   started again. Rendering needs no key; given one, a render uses it only for what was chosen
-  after processing (tracking you for a title behind you, or finding your face).
+  after processing (tracking you for a title behind you or a background, or finding your face).
 - Every Model API request is sent with `store: false`. The video sent to the plan model is a
   small silent copy, uploaded with a one-hour expiry and deleted right after the call.
 - The default models run in Standard mode. The cheaper `-contributor` Muse Spark models let
@@ -181,7 +194,8 @@ src/storeel/
   meta/        Model API client (Responses, Files, Voice), strict JSON schemas, SAM parsing
   media/       ffmpeg/ffprobe helpers and speech detection
   pipeline/    ingest, script, transcribe, analyze, detect, assets, layout, captions, compose,
-               emphasis (stressed words), title + depth (the title behind you), motion (HyperFrames)
+               emphasis (stressed words), title + depth (the title behind you), cutout (you cut
+               out for a background), motion (HyperFrames)
   prompts/     model instructions (Markdown)
   web/         FastAPI app and the static single-page UI
   db.py        SQLite: project documents and the job queue

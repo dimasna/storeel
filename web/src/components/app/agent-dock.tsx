@@ -20,6 +20,8 @@ export function agentSuggestions(project: Project): string[] {
   const out: string[] = [];
   if (project.path === "novel" && project.part_pictures)
     out.push("Show each character when they're talked about");
+  if (project.source && project.style.background === "original")
+    out.push("Cut me out and put the pictures behind me");
   if (Object.values(project.caption_notes || {}).some((n) => n.script))
     out.push("Use the script's words where the captions differ");
   if (project.analysis?.moments.length) out.push("Hide the pictures in the first 5 seconds");

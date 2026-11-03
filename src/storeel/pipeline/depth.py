@@ -15,6 +15,8 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 
@@ -24,6 +26,7 @@ from ..media import ffmpeg as ff
 from ..meta import MetaAPIError
 from ..meta.sam import FRAME
 from ..models import SAM_MIN_FRAMES, Project, SpeakerMasks
+from .maskdecode import unpack
 from .title import title_window, title_words
 
 MASK_W, MASK_H = 540, 960  # half the reel's size: SAM's masks come back at the clip's size
@@ -31,16 +34,78 @@ MASK_VERSION = 1
 MIN_FOUND = 0.5  # the share of frames SAM must find the speaker on for the title to go behind
 DECODERS = 4
 DECODE_STEP = 2  # decode every this many frames
-DECODE_TIMEOUT = 300.0
+DECODE_TIMEOUT = 600.0
 KEY = "work/speaker-masks.npz"
 CLIP = "work/title-window.mp4"
 
+# On the server, set by modal_app.py: decodes batches of SAM's answer lines on many machines at
+# once. Takes [(lines, width, height)], gives back for each the frame numbers and their packed
+# masks (see maskdecode.decode_packed). Without it, a few local processes decode.
+RemoteDecode = Callable[[list[tuple[list[str], int, int]]], list[tuple[list[int], bytes]]]
+REMOTE_DECODE: RemoteDecode | None = None
+REMOTE_BATCH = 20  # lines a machine decodes (about 20 seconds)
+
 
 def needed(project: Project) -> bool:
-    return project.style.title_style == "behind" and title_window(project) is not None
+    """Whether the title needs its own masks: a title behind the speaker, unless the speaker is
+    tracked all through for a cut-out background (those masks serve the title too)."""
+    return (
+        project.style.title_style == "behind"
+        and project.style.background == "original"
+        and title_window(project) is not None
+    )
 
 
-def _decode_all(ctx: JobContext, lines: list[str]) -> dict[int, np.ndarray]:
+def sam_video(ctx: JobContext, clip: Path, frames: int) -> tuple[list[str], int, float]:
+    """SAM 3.1 finding "person" in every frame of `clip`: its answer lines (one a frame), the
+    frames billed (counted as spent) and how long it took."""
+    payload = {
+        "model": ctx.settings.sam_model,
+        "store": False,
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "person"},
+                    {
+                        "type": "input_video",
+                        "video_url": "data:video/mp4;base64," + base64.b64encode(clip.read_bytes()).decode(),
+                    },
+                ],
+            }
+        ],
+        "metadata": {"mask_encoding": "one_bit", "include_confidence": "true"},  # strings on this endpoint
+    }
+    result = ctx.client.responses(payload, cancel=ctx.cancelled)
+    billed = int(result.usage.get("video_frames_processed") or frames)
+    ctx.spend(sam_frames=max(SAM_MIN_FRAMES, billed))
+    return [line for line in result.text.splitlines() if line.strip()], billed, result.seconds
+
+
+def decode_masks(
+    ctx: JobContext, lines: list[str], width: int = MASK_W, height: int = MASK_H
+) -> dict[int, np.ndarray]:
+    """SAM's answer lines decoded: frame number -> packed mask. Many machines at once on the
+    server, a few local processes otherwise (or when those machines fail)."""
+    if REMOTE_DECODE is not None and len(lines) > REMOTE_BATCH:
+        try:
+            batches = [
+                (lines[k : k + REMOTE_BATCH], width, height) for k in range(0, len(lines), REMOTE_BATCH)
+            ]
+            out: dict[int, np.ndarray] = {}
+            for frames, data in REMOTE_DECODE(batches):
+                out.update(unpack(frames, data, width, height))
+            ctx.check()
+            return out
+        except Cancelled:
+            raise
+        except Exception as exc:  # the machines are a speed-up only
+            ctx.log(f"decoding on more machines failed ({type(exc).__name__}: {exc}); decoding here")
+    return _decode_all(ctx, lines, width, height)
+
+
+def _decode_all(ctx: JobContext, lines: list[str], width: int, height: int) -> dict[int, np.ndarray]:
     """SAM's answer lines decoded in parallel processes: frame number -> packed mask."""
     count = max(1, min(DECODERS, os.cpu_count() or 1, len(lines)))
     chunks = [lines[k::count] for k in range(count)]
@@ -50,17 +115,18 @@ def _decode_all(ctx: JobContext, lines: list[str]) -> dict[int, np.ndarray]:
         source.write_text("\n".join(chunk), encoding="utf-8")
         target = ctx.files.prepare(f"work/sam-masks-{k}.npz")
         cmd = [sys.executable, "-m", "storeel.pipeline.maskdecode", str(source), str(target)]
-        cmd += [str(MASK_W), str(MASK_H)]
+        cmd += [str(width), str(height)]
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         jobs.append((proc, source, target))
     started = time.monotonic()
+    limit = max(DECODE_TIMEOUT, 1.5 * len(lines) / count)  # about a second a mask, on each process
     out: dict[int, np.ndarray] = {}
     try:
         for proc, _, _ in jobs:
             while proc.poll() is None:
                 if ctx.cancelled():
                     raise Cancelled
-                if time.monotonic() - started > DECODE_TIMEOUT:
+                if time.monotonic() - started > limit:
                     raise PipelineError("decoding the speaker's masks took too long")
                 time.sleep(0.2)
             if proc.returncode != 0:
@@ -122,39 +188,18 @@ def _track(ctx: JobContext) -> None:
         what="cutting the title's stretch of video",
         cancel=ctx.cancelled,
     )  # fmt: skip
-    payload = {
-        "model": ctx.settings.sam_model,
-        "store": False,
-        "input": [
-            {
-                "type": "message",
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": "person"},
-                    {
-                        "type": "input_video",
-                        "video_url": "data:video/mp4;base64," + base64.b64encode(clip.read_bytes()).decode(),
-                    },
-                ],
-            }
-        ],
-        "metadata": {"mask_encoding": "one_bit", "include_confidence": "true"},  # strings on this endpoint
-    }
     try:
-        result = ctx.client.responses(payload, cancel=ctx.cancelled)
+        lines, billed, seconds = sam_video(ctx, clip, frames)
     finally:
         ctx.files.delete(CLIP)
-    billed = int(result.usage.get("video_frames_processed") or frames)
-    ctx.spend(sam_frames=max(SAM_MIN_FRAMES, billed))
-    lines = [line for line in result.text.splitlines() if line.strip()]
-    ctx.log(f"SAM 3.1: tracked the speaker over {billed} frames in {result.seconds:.0f}s; decoding the masks")
+    ctx.log(f"SAM 3.1: tracked the speaker over {billed} frames in {seconds:.0f}s; decoding the masks")
     began = time.monotonic()
     # Every other frame is decoded (half the time); the one between keeps the mask before it,
     # a frame late at most, which a talking head never shows.
     wanted = [
         line for line in lines if (m := FRAME.match(line.strip())) and int(m.group(1)) % DECODE_STEP == 0
     ]
-    decoded = _decode_all(ctx, wanted) if wanted else {}
+    decoded = decode_masks(ctx, wanted) if wanted else {}
     masks = np.zeros((frames, MASK_H, MASK_W), dtype=bool)
     found = looked = 0
     for frame in range(frames):

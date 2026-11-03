@@ -209,7 +209,7 @@ def _novel_part(services: Services, project: Project) -> dict[str, Any] | None:
         "chapter_title": chapter.title if chapter else "",
         "chapter_text": chapter.text if chapter else "",
         "opening": hook_opening(novel, number, any(c.number < number for c in novel.chapters)),
-        "estimate": estimate_part(len(chapter.text) if chapter else 0),
+        "estimate": estimate_part(len(chapter.text) if chapter else 0, project.style.background),
     }
 
 

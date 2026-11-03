@@ -56,6 +56,10 @@ class Style(Strict):
     # "animated": HyperFrames brings in the title's letters, the photo cards (a 3D swing) and a
     # part's end screen; "plain": they fade in.
     motion: Literal["animated", "plain"] = "animated"
+    # Behind the speaker, who SAM 3.1 cuts out of every frame: "original" (their own video),
+    # "scene" (each picture fills the screen behind them; their own video in between) or
+    # "studio" (a moving glow in caption_color, the pictures as cards behind them, an outline).
+    background: Literal["original", "scene", "studio"] = "original"
 
     _clean_watermark = field_validator("watermark")(_one_line)
     _clean_title = field_validator("title_text")(_one_line)
@@ -429,6 +433,19 @@ class SpeakerMasks(Strict):
     digest: str  # the source video and the window they were made for
 
 
+class SpeakerTrack(Strict):
+    """Where the speaker is in every frame of the reel, for the cut-out backgrounds: SAM 3.1
+    video masks at `fps` from the start, packed bits (frames x bytes) at `width` x `height`.
+    An empty key: SAM found no speaker, remembered so it is not asked again."""
+
+    key: str
+    fps: float
+    frames: int
+    width: int
+    height: int
+    digest: str
+
+
 class Entity(Strict):
     id: str
     kind: Kind
@@ -653,6 +670,7 @@ class Project(Strict):
     part_pictures: dict[str, PartPicture] | None = None  # path C: what the part shows, by id
     part_faces: dict[str, list[Region]] = Field(default_factory=dict)  # path C: face boxes per take
     speaker_masks: SpeakerMasks | None = None  # the speaker while the title is up (SAM 3.1 video)
+    speaker_track: SpeakerTrack | None = None  # the speaker all through, for a cut-out background
     source: Source | None = None
     transcript: Transcript | None = None
     analysis: Analysis | None = None

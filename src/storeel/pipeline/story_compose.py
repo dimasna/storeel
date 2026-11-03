@@ -364,6 +364,7 @@ class Sprites:
         self.bases = {v.id: v.base for v in self.story.variants} if self.story else {}
         self.cache: dict[tuple, Image.Image] = {}
         self.kinds: dict[int, str] = {}  # id of a sprite -> "photo" for the photo and scene cards
+        self.originals: dict[int, Image.Image] = {}  # id of a photo or scene card -> its picture
 
     def image(self, picture_id: str) -> Image.Image | None:
         picture = self.pictures.get(picture_id)
@@ -445,10 +446,12 @@ class Sprites:
                 )
         elif show.photo and (picture := self.image(show.photo)) is not None:
             title = self.photos[show.photo].title if show.photo in self.photos else ""
+            original = picture
             picture = _wide(picture)
             width = _card_width(picture)
             sprite = self._cached(("photo", show.photo, width), lambda: photo_card(picture, width, title))
             self.kinds[id(sprite)] = "photo"
+            self.originals[id(sprite)] = original
             centred(sprite, CARD_Y + shift)
         elif show.prop and (picture := self.image(show.prop)) is not None:
             meta = self.props.get(show.prop)
@@ -465,10 +468,12 @@ class Sprites:
                     y = 0.4 if size == "large" else 0.35 + shift
                 centred(self._cached(("object", show.prop, size), lambda: cutout_sprite(picture, *box)), y)
             else:
+                original = picture
                 picture = _wide(picture)
                 width = _card_width(picture)
                 sprite = self._cached(("scene", show.prop, width), lambda: photo_card(picture, width))
                 self.kinds[id(sprite)] = "photo"
+                self.originals[id(sprite)] = original
                 centred(sprite, 0.30 + shift)
         named: tuple[Image.Image, tuple[int, int]] | None = None
         for cid, slot in zip(chars, slots, strict=True):
@@ -581,8 +586,9 @@ class PartCompositor(Compositor):
             center = (xy[0] + image.width // 2, xy[1] + image.height // 2)
             kind = (self._end_kinds if group else sprites.kinds).get(id(image), "")
             card = _Card(
-                start, end, image, center, ident=ident, animate=animate, enter=enter, kind=kind, group=group
-            )
+                start, end, image, center, ident=ident, animate=animate, enter=enter, kind=kind, group=group,
+                picture=None if group else sprites.originals.get(id(image)),
+            )  # fmt: skip
             self.cards.append(card)
             return card
 

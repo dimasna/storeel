@@ -11,6 +11,8 @@ from .agent import handle_agent
 from .analyze import analyze
 from .assets import make_anchors, make_pictures
 from .compose import compose
+from .cutout import needed as cutout_needed
+from .cutout import track_reel
 from .depth import needed as title_needs_masks
 from .depth import track_speaker
 from .detect import find_faces, references
@@ -70,6 +72,9 @@ def _pictures(
     if only is None and title_needs_masks(ctx.project()):
         track_speaker(ctx)
         ctx.flush_usage()
+    if only is None and cutout_needed(ctx.project()):
+        track_reel(ctx)
+        ctx.flush_usage()
     ctx.step("Generating pictures", middle, end)
     make_anchors(ctx, analysis, style, only)
     make_pictures(ctx, analysis, style, only)
@@ -88,6 +93,10 @@ def _part_pictures(ctx: JobContext, end: float = 1.0) -> None:
     if title_needs_masks(ctx.project()):
         ctx.step("Tracking you for the title", end - 0.04, end)
         track_speaker(ctx)
+        ctx.flush_usage()
+    if cutout_needed(ctx.project()):
+        ctx.step("Cutting you out of the video", end - 0.04, end)
+        track_reel(ctx)
         ctx.flush_usage()
 
     def done(p: Project) -> None:  # the reel is processed: an empty plan marks it (no moments)
@@ -199,6 +208,10 @@ def _render(ctx: JobContext, fit_mb: int | None) -> None:
     keyed = ctx.services.keys.get(ctx.job.id) is not None  # renders are free; a key is optional
     if keyed and title_needs_masks(project):
         track_speaker(ctx)  # "behind" chosen after processing (reuses the masks when they fit)
+        ctx.flush_usage()
+        project = ctx.project()
+    if keyed and cutout_needed(project):
+        track_reel(ctx)  # a cut-out background chosen after processing (reused when it fits)
         ctx.flush_usage()
         project = ctx.project()
     compositor = None
