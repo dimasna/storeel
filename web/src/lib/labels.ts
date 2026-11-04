@@ -67,6 +67,8 @@ export const LABELS: Record<string, Record<string, string>> = {
     on: "On: particles, living pictures, a talking puppet, punch-ins",
     off: "Off",
   },
+  punch_in: { on: "On", off: "Off" },
+  particles: { on: "On", off: "Off" },
   display: { none: "Speaker only", overlay: "Card", cutout: "Cut-out", cutaway: "Full screen" },
   novel_language: { id: "Indonesian", en: "English" },
   narration: {

@@ -1198,7 +1198,8 @@ class Compositor:
         # the storyteller voices.
         self.effects = style.effects == "on"
         kind = effects.PARTICLES.get(theme.name) if theme is not None else None
-        self.particles = effects.Particles(kind, W, H) if self.effects and kind else None
+        wanted = self.effects and style.particles == "on"
+        self.particles = effects.Particles(kind, W, H) if wanted and kind else None
         self.voice: effects.Voice | None = None
         audio = project.source.audio_key
         if self.effects and self.talking and audio and files.exists(audio):
@@ -1225,7 +1226,7 @@ class Compositor:
         self.title_note = ""
         self.title_showing: float | None = None  # the share of the title showing past the speaker
         self.title = self._build_title(project, files)
-        self.punch = self._punch_windows() if self.effects else []
+        self.punch = self._punch_windows() if self.effects and style.punch_in == "on" else []
         if style.motion == "plain":
             self.motion_note = "plain (chosen in the style)"
         elif motion is None or not motion.available:

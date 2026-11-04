@@ -106,6 +106,14 @@ Every option is documented in `.env.example`. Projects, uploads and renders are 
 - **Review**: fix misheard caption words, hide a picture, show it as a card, a cut-out or full
   screen, or edit its prompt and regenerate it. "Update pictures" applies style changes and
   redoes only what changed.
+- **Editor**: ask the chat on the reel's page for changes in your own words. Applied at once,
+  free: caption words, the words a caption stresses ("stress *never*"), showing, hiding and
+  moving a picture ("bring the second picture in a second earlier"), a novel part's beat
+  screens and the poll's options on screen, and any style setting ("no zooms", "make it
+  scarier"). "Undo" puts back the last request's free changes, one request at a time (up to
+  five). Redrawing a picture, a new outfit and a render are proposed, with their cost, and
+  run only when you approve them. It cannot cut your video, rewrite the script or delete
+  anything.
 - **Render**: optionally keep the file under 25 MB (the Messenger and Instagram DM limit).
 
 The browser only allows the camera on `localhost` or HTTPS. To record on a phone, put the
@@ -182,7 +190,8 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   cutting in 12% on your face, at the end of the hook and at the cliffhanger (never under
   the title or while you step back); the room going dark round you at the cliffhanger, your
   masks keeping you lit; a rim of light in the theme's colour as you step back; and in
-  horror, a ghost of the last frames trailing you on each stressed word.
+  horror, a ghost of the last frames trailing you on each stressed word. *Punch-in* and
+  *Particles* turn those two off on their own ("no zooms", "no particles" in the editor).
 - **Your size and place** in the cut-out looks: make yourself smaller or bigger and move
   anywhere on the frame, with three sliders or by asking the editor ("make me small in the
   bottom left corner", "a bit bigger", "move me up a little"). The encoder scales and moves

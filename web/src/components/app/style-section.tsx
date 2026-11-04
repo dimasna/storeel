@@ -152,6 +152,12 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
               : undefined
           }
         />
+        {style.effects === "on" ? (
+          <div className="grid grid-cols-2 gap-3">
+            <SelectField name="punch_in" label="Punch-in" />
+            <SelectField name="particles" label="Particles" />
+          </div>
+        ) : null}
         {project.path === "video" ? <SelectField name="language" label="Spoken language" /> : null}
 
         <SubHeading>Captions</SubHeading>

@@ -84,6 +84,10 @@ class Style(Strict):
     # with the voice, living stills, characters sliding in, a rim of light round the stepped-back
     # speaker, a spotlight at the cliffhanger and the theme's particles; "off" leaves them out.
     effects: Literal["on", "off"] = "on"
+    # Two of the effects on their own, while effects is "on": the punch-in on the face (at the
+    # hook's end and the cliffhanger), and the theme's particles.
+    punch_in: Literal["on", "off"] = "on"
+    particles: Literal["on", "off"] = "on"
 
     _clean_watermark = field_validator("watermark")(_one_line)
     _clean_title = field_validator("title_text")(_one_line)
@@ -654,7 +658,7 @@ class AgentAction(Strict):
     """
 
     id: str
-    kind: Literal["caption", "pictures", "style", "picture", "outfit", "render", "screen"]
+    kind: Literal["caption", "pictures", "style", "picture", "outfit", "render", "screen", "undo"]
     summary: str  # what the chat shows, e.g. 'Caption at 0:12: "..."'
     status: Literal["done", "pending", "approved", "dismissed", "failed"] = "done"
     moment_id: str | None = None  # "picture": the moment to draw again
@@ -674,8 +678,42 @@ class AgentMessage(Strict):
     actions: list[AgentAction] = Field(default_factory=list)
 
 
+class MomentWas(Strict):
+    """A picture's visibility and times before an edit."""
+
+    id: str
+    enabled: bool
+    start: float
+    end: float
+
+
+class BeatWas(Strict):
+    """A novel part's beat screens before an edit, by the beat's index."""
+
+    index: int
+    show: StoryShow
+    switch: StorySwitch | None = None
+    pinned: bool = False
+
+
+class EditUndo(Strict):
+    """What one request to the editor changed, as it was before, so "undo" can put it back.
+    Only the free edits: a new picture, an outfit or a render is not undone."""
+
+    summary: str  # what the request changed, for the chat
+    style: dict[str, str | float] = Field(default_factory=dict)  # changed settings: old values
+    transcript_digest: str = ""  # the captions below belong to this transcription
+    turns: list[Turn] = Field(default_factory=list)  # the captions it changed, as they were
+    emphasis_picked: bool | None = None
+    moments: list[MomentWas] = Field(default_factory=list)
+    beats: list[BeatWas] = Field(default_factory=list)
+    poll: Poll | None = None
+    cta: str | None = None
+
+
 class AgentChat(Strict):
     messages: list[AgentMessage] = Field(default_factory=list)
+    undo: list[EditUndo] = Field(default_factory=list)  # the latest last
 
     def latest_actions(self, status: str) -> list[AgentAction]:
         """The actions with `status` in the agent's latest reply (older replies are history)."""

@@ -42,6 +42,8 @@ export interface Style {
   speaker_y: number;
   speaker_room: "auto" | "off";
   effects: "on" | "off";
+  punch_in: "on" | "off";
+  particles: "on" | "off";
 }
 
 export interface Idea {
@@ -261,7 +263,7 @@ export type AgentActionStatus = "done" | "pending" | "approved" | "dismissed" | 
 
 export interface AgentAction {
   id: string;
-  kind: "caption" | "pictures" | "style" | "picture" | "outfit" | "render" | "screen";
+  kind: "caption" | "pictures" | "style" | "picture" | "outfit" | "render" | "screen" | "undo";
   summary: string;
   status: AgentActionStatus;
   moment_id: string | null;
