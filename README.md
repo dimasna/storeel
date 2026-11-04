@@ -165,6 +165,13 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   pill, red); any other choice wins. *Auto* (the default) follows a novel part's genre (see
   "Novels"); other reels have no theme on Auto. *None* is the plain look. The editor sets a
   theme for the mood you ask for ("make it scarier", "pakai tema romance").
+- **Style examples**: the home page and the style pickers show every look with every theme
+  on one example part, *Sealed Since 1986* (an original story), made by the studio from one
+  video: processed once, then rendered 18 ways, which is free after the first.
+  `scripts/make_style_previews.py` cuts each render into a few silent seconds, taken at the
+  same moments in each, and a still (`web/src/assets/styles`, about 4 MB in all). The home
+  gallery plays a tile while it is on screen, a picker only the chosen one; with reduced
+  motion every tile is a still. Without the examples, the pickers are plain menus.
 - **Motion graphics**: three entrances are rendered by HyperFrames, an open-source
   HTML-to-video renderer, run locally: the title's letters rising in one by one, photo cards
   swinging in through 3D with a light crossing them, and a novel part's end screen coming in

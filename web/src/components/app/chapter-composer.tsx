@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
-import { BookText, Check, ChevronDown, FileUp, Languages, Loader2, Mic, Palette, Sparkles } from "lucide-react";
+import { BookText, Check, ChevronDown, Clapperboard, FileUp, Languages, Loader2, Mic, Palette, Sparkles } from "lucide-react";
 import { api, ApiError, apiKey } from "@/lib/api";
 import type { Novel, NovelSummary, PartEstimate } from "@/lib/types";
 import { useConfig } from "@/lib/config";
 import { enumOf, labelFor } from "@/lib/labels";
 import { lookPicture } from "@/lib/gallery";
+import { HAS_PREVIEWS, lookName, themeCard, type Look } from "@/lib/styles";
 import { useToast } from "@/lib/toast";
 import { navigate } from "@/lib/router";
 import { requestKey } from "@/App";
@@ -12,10 +13,25 @@ import { cn } from "@/lib/utils";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/primitives";
+import { StylePicker } from "./style-picker";
 
 // The home page's card, after OpusClip's: two large tiles (the chapter, and an optional look),
-// a row of chips (the voice and the language) and a send button. Send makes the novel, the
-// chapter and its part, and starts writing it; the part's page takes over from there.
+// a row of chips (the voice, the language and the reel's style) and a send button. Send makes
+// the novel, the chapter and its part, and starts writing it; the part's page takes over from
+// there.
+
+/** What the reel looks like: what is behind the speaker, and its theme ("auto": by genre). */
+export interface ReelStyle {
+  look: Look;
+  theme: string;
+}
+
+/** "Noir · Studio", or "Auto" for the default (the dalang look, the theme by genre). */
+export function reelStyleName(style: ReelStyle | null): string {
+  if (!style || (style.look === "dalang" && style.theme === "auto")) return "Auto";
+  const theme = style.theme === "auto" ? "Auto" : themeCard(style.theme)?.name ?? style.theme;
+  return `${theme} · ${lookName(style.look)}`;
+}
 
 const DRAFT = "storeel.chapterDraft";
 const MIN_CHARS = 200;
@@ -124,10 +140,16 @@ export function ChapterComposer({
   look,
   onLook,
   highlightLook,
+  reelStyle = null,
+  onReelStyle,
+  highlightStyle,
 }: {
   look: string | null;
   onLook: (look: string) => void;
   highlightLook?: boolean;
+  reelStyle?: ReelStyle | null;
+  onReelStyle?: (style: ReelStyle) => void;
+  highlightStyle?: boolean;
 }) {
   const config = useConfig();
   const { toast } = useToast();
@@ -143,6 +165,8 @@ export function ChapterComposer({
   const [sending, setSending] = useState(false);
   const [pasting, setPasting] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [styling, setStyling] = useState(false);
+  const background = reelStyle?.look ?? "dalang";
 
   const chars = text.trim().length;
   const lang = language === "auto" ? guessLanguage(text) : language;
@@ -178,7 +202,7 @@ export function ChapterComposer({
     let stale = false;
     const timer = window.setTimeout(() => {
       api
-        .estimatePart(Math.max(chars, MIN_CHARS))
+        .estimatePart(Math.max(chars, MIN_CHARS), background)
         .then((e) => !stale && setEstimate(e))
         .catch(() => {});
     }, 350);
@@ -186,7 +210,7 @@ export function ChapterComposer({
       stale = true;
       window.clearTimeout(timer);
     };
-  }, [chars]);
+  }, [chars, background]);
 
   const options = (field: string, kind = field): [string, string][] =>
     enumOf(config.novel, field).map((v) => [v, labelFor(kind, v)]);
@@ -220,6 +244,9 @@ export function ChapterComposer({
       const number = Math.max(...updated.chapters.map((c) => c.number));
       const part = await api.openChapterReel(novelId, number);
       partId = part.id;
+      if (reelStyle && (reelStyle.look !== part.style.background || reelStyle.theme !== part.style.theme)) {
+        await api.setStyle(part.id, { ...part.style, background: reelStyle.look, theme: reelStyle.theme });
+      }
       await api.writePart(part.id, false, brief.trim() || undefined);
       sessionStorage.removeItem(DRAFT);
       navigate(`/p/${part.id}`);
@@ -285,6 +312,21 @@ export function ChapterComposer({
           ]}
           onChange={setLanguage}
         />
+        {HAS_PREVIEWS ? (
+          <button
+            type="button"
+            title="The reel's style: what is behind you, and its theme"
+            onClick={() => setStyling(true)}
+            className={cn(
+              "relative col-span-2 inline-flex h-10 min-w-0 items-center gap-2 rounded-xl bg-panel-tile pl-3 pr-8 text-left text-sm font-medium text-foreground transition-[filter,box-shadow] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 sm:col-span-1",
+              highlightStyle && "ring-2 ring-accent/70",
+            )}
+          >
+            <Clapperboard className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">Style: {reelStyleName(reelStyle)}</span>
+            <ChevronDown className="pointer-events-none absolute right-2.5 size-4 text-muted-foreground" />
+          </button>
+        ) : null}
         <div className="hidden flex-1 items-center justify-end gap-3 sm:flex">
           {cost ? <span className="text-xs text-muted-foreground">{cost}</span> : null}
           <button
@@ -347,6 +389,23 @@ export function ChapterComposer({
           setPicking(false);
         }}
       />
+      <Modal open={styling} onClose={() => setStyling(false)} title="Pick a style" className="max-w-2xl">
+        <p className="-mt-2 mb-4 text-sm text-muted-foreground">
+          The same example part in each style. Auto keeps your own video and picks the theme from the
+          novel's genre. You can change it on the part's page before you render.
+        </p>
+        <StylePicker
+          look={reelStyle?.look ?? "dalang"}
+          theme={reelStyle?.theme ?? "auto"}
+          autoLabel="By genre"
+          onChange={(nextLook, nextTheme) => onReelStyle?.({ look: nextLook, theme: nextTheme })}
+        />
+        <div className="mt-4 flex justify-end">
+          <Button variant="primary" className="h-11 px-6" onClick={() => setStyling(false)}>
+            Done
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

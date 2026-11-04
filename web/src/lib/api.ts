@@ -162,8 +162,11 @@ export const api = {
     }),
   editPart: (id: string, body: Record<string, unknown>) =>
     request<Project>("PUT", `/api/projects/${id}/story`, body),
-  estimatePart: (chars: number) =>
-    request<PartEstimate>("GET", `/api/estimate/part?chars=${Math.max(0, Math.round(chars))}`),
+  estimatePart: (chars: number, background = "dalang") =>
+    request<PartEstimate>(
+      "GET",
+      `/api/estimate/part?chars=${Math.max(0, Math.round(chars))}${background !== "dalang" ? `&background=${background}` : ""}`,
+    ),
 
   // Editing agent
   agentSend: (id: string, message: string) =>

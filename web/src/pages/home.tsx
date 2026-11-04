@@ -7,11 +7,14 @@ import { useToast } from "@/lib/toast";
 import { labelFor } from "@/lib/labels";
 import { Link, navigate } from "@/lib/router";
 import { EASE_OUT } from "@/lib/ease";
-import { ChapterComposer } from "@/components/app/chapter-composer";
+import { ChapterComposer, type ReelStyle } from "@/components/app/chapter-composer";
 import { Gallery } from "@/components/app/gallery";
+import { StyleGallery } from "@/components/app/style-picker";
+import { HAS_PREVIEWS, lookName, themeCard, type Look } from "@/lib/styles";
 
 // The home page, after OpusClip's AI Producer: a badge, one line of headline, the card, the
-// gallery of looks, the questions people ask, and a short footer.
+// gallery of reel styles (real examples), the gallery of picture looks, the questions people
+// ask, and a short footer.
 
 // Lines from the stories in the gallery, set as a faint texture behind the headline.
 const TEXTURE = (
@@ -64,8 +67,11 @@ export function HomePage() {
   const showcase = useShowcase();
   const [look, setLook] = useState<string | null>(null);
   const [flash, setFlash] = useState(false);
+  const [reelStyle, setReelStyle] = useState<ReelStyle | null>(null);
+  const [styleFlash, setStyleFlash] = useState(false);
   const card = useRef<HTMLDivElement>(null);
   const flashTimer = useRef<number | null>(null);
+  const styleTimer = useRef<number | null>(null);
 
   const pickLook = (value: string) => {
     setLook(value);
@@ -74,6 +80,16 @@ export function HomePage() {
     if (flashTimer.current) window.clearTimeout(flashTimer.current);
     flashTimer.current = window.setTimeout(() => setFlash(false), 1800);
     toast(`${labelFor("visual_style", value)} it is. Paste a chapter to start.`, "info");
+  };
+
+  const pickStyle = (nextLook: Look, theme: string) => {
+    setReelStyle({ look: nextLook, theme });
+    card.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setStyleFlash(true);
+    if (styleTimer.current) window.clearTimeout(styleTimer.current);
+    styleTimer.current = window.setTimeout(() => setStyleFlash(false), 1800);
+    const name = `${themeCard(theme)?.name ?? theme} · ${lookName(nextLook)}`;
+    toast(`${name} it is. Paste a chapter to start.`, "info");
   };
 
   const create = async (path: "video" | "idea") => {
@@ -128,7 +144,14 @@ export function HomePage() {
           transition={{ duration: 0.5, delay: 0.15, ease: EASE_OUT }}
           className="mt-8 w-full scroll-mt-24 text-left"
         >
-          <ChapterComposer look={look} onLook={setLook} highlightLook={flash} />
+          <ChapterComposer
+            look={look}
+            onLook={setLook}
+            highlightLook={flash}
+            reelStyle={reelStyle}
+            onReelStyle={setReelStyle}
+            highlightStyle={styleFlash}
+          />
         </motion.div>
 
         <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-muted-foreground">
@@ -146,8 +169,19 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="mt-16 sm:mt-24">
-        <h2 className="text-2xl font-semibold tracking-tight">Choose a look for your story</h2>
+      {HAS_PREVIEWS ? (
+        <section className="mt-16 sm:mt-24">
+          <h2 className="text-2xl font-semibold tracking-tight">Pick a style for your reel</h2>
+          <p className="mb-5 mt-1 text-sm text-muted-foreground">
+            One part, made by Storeel from one video, in every style. Pick one and your part is made
+            that way; you can still change it before you render.
+          </p>
+          <StyleGallery chosen={reelStyle} onUse={pickStyle} />
+        </section>
+      ) : null}
+
+      <section className={HAS_PREVIEWS ? "mt-16 sm:mt-20" : "mt-16 sm:mt-24"}>
+        <h2 className="text-2xl font-semibold tracking-tight">Choose how the pictures are drawn</h2>
         <p className="mb-5 mt-1 text-sm text-muted-foreground">
           Frames of novel parts, drawn by Muse Image. Pick one and every part of your novel is drawn that way.
         </p>

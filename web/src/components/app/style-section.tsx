@@ -3,9 +3,11 @@ import { api } from "@/lib/api";
 import type { Project, Style } from "@/lib/types";
 import { useConfig } from "@/lib/config";
 import { enumOf, labelFor } from "@/lib/labels";
+import { HAS_PREVIEWS, themeCard, type Look } from "@/lib/styles";
 import { useToast } from "@/lib/toast";
 import { Card, Field, Select, Input, SubHeading } from "@/components/ui/primitives";
 import type { UseProjectState } from "./project-view";
+import { StylePicker } from "./style-picker";
 
 function RangeField({
   label,
@@ -110,6 +112,19 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
           ? "Auto (the novel's genre: Other, no theme)"
           : `Auto (the novel's genre: ${labelFor("genre", genre)})`;
   const themes = enumOf(config.style, "theme");
+  // On the picker, "auto" shows the theme it comes to: none for a reel that is not a novel part
+  // or a novel of another genre, nothing yet while Muse Spark has not picked the genre.
+  const autoPreview = genre === null || genre === "other" ? "none" : genre === "auto" ? null : genre;
+  const autoShort =
+    genre === null || genre === "other" ? "No theme" : genre === "auto" ? "Not picked yet" : themeCard(genre)?.name ?? genre;
+  const backgroundHint =
+    style.background === "dalang"
+      ? `Your own video, the characters standing at the bottom and the pictures up top. SAM 3.1 can also cut you out${cutoutCost}: Scene puts the pictures behind you, Studio a backdrop.`
+      : `SAM 3.1 cuts you out${cutoutCost}, when processing or rendering with your key. ${
+          style.background === "scene"
+            ? "Each photo fills the screen behind you."
+            : "A dark backdrop glowing in your highlight colour."
+        }`;
 
   return (
     <Card title="Style">
@@ -165,33 +180,41 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
         />
 
         <SubHeading>Look</SubHeading>
-        {themes.length ? (
-          <Field
-            label="Theme"
-            hint="A genre look over any background, at no cost: the colour of your video, the cards, the title, a backdrop and an effect on the stressed words. It uses its own caption style and highlight while those are Highlight pill and red."
-          >
-            <Select value={style.theme ?? "auto"} onChange={(e) => update({ theme: e.target.value })}>
-              {themes.map((v) => (
-                <option key={v} value={v}>
-                  {v === "auto" ? autoTheme : labelFor("theme", v)}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        ) : null}
-        <SelectField
-          name="background"
-          label="Behind you"
-          hint={
-            style.background === "dalang"
-              ? `Your own video, the characters standing at the bottom and the pictures up top. SAM 3.1 can also cut you out${cutoutCost}: Scene puts the pictures behind you, Studio a backdrop.`
-              : `SAM 3.1 cuts you out${cutoutCost}, when processing or rendering with your key. ${
-                  style.background === "scene"
-                    ? "Each photo fills the screen behind you."
-                    : "A dark backdrop glowing in your highlight colour."
-                }`
-          }
-        />
+        {HAS_PREVIEWS ? (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-semibold text-muted-foreground">Behind you, and the theme</span>
+            <StylePicker
+              look={style.background as Look}
+              theme={style.theme ?? "auto"}
+              autoTheme={autoPreview}
+              autoLabel={autoShort}
+              onChange={(background, theme) => update({ background, theme })}
+            />
+            <span className="text-xs text-muted-foreground/80">
+              {backgroundHint} Themes are free: the colour of your video, the cards, the title, a backdrop and an
+              effect on the stressed words. A theme sets the caption style and highlight while those are Highlight
+              pill and red.
+            </span>
+          </div>
+        ) : (
+          <>
+            {themes.length ? (
+              <Field
+                label="Theme"
+                hint="A genre look over any background, at no cost: the colour of your video, the cards, the title, a backdrop and an effect on the stressed words. It uses its own caption style and highlight while those are Highlight pill and red."
+              >
+                <Select value={style.theme ?? "auto"} onChange={(e) => update({ theme: e.target.value })}>
+                  {themes.map((v) => (
+                    <option key={v} value={v}>
+                      {v === "auto" ? autoTheme : labelFor("theme", v)}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            ) : null}
+            <SelectField name="background" label="Behind you" hint={backgroundHint} />
+          </>
+        )}
         {style.background !== "dalang" ? (
           <>
             <RangeField

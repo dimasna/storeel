@@ -420,9 +420,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse({"ok": True, "models": models, "missing": [m for m in needed if m not in models]})
 
     @app.get("/api/estimate/part")
-    def part_estimate(chars: Annotated[int, Query(ge=0, le=200_000)]) -> dict[str, float | int]:
-        """What making a part of a chapter this long costs at list prices (nothing runs)."""
-        return estimate_part(chars)
+    def part_estimate(
+        chars: Annotated[int, Query(ge=0, le=200_000)],
+        background: Annotated[Literal["dalang", "scene", "studio"], Query()] = "dalang",
+    ) -> dict[str, float | int]:
+        """What making a part of a chapter this long costs at list prices (nothing runs), in the
+        look chosen for it (the scene and studio looks cut the speaker out all through)."""
+        return estimate_part(chars, background)
 
     @app.get("/api/projects")
     def list_projects(request: Request) -> list[dict[str, Any]]:
