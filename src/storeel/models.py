@@ -88,6 +88,9 @@ class Style(Strict):
     # hook's end and the cliffhanger), and the theme's particles.
     punch_in: Literal["on", "off"] = "on"
     particles: Literal["on", "off"] = "on"
+    # "trim": the render cuts the long pauses out of the finished reel, sound and picture together
+    # (see pipeline/pauses.py); "keep" leaves the recording's timing as it is.
+    pauses: Literal["keep", "trim"] = "keep"
 
     _clean_watermark = field_validator("watermark")(_one_line)
     _clean_title = field_validator("title_text")(_one_line)
@@ -580,6 +583,9 @@ class Render(Strict):
     duration: float
     size: int
     fit_mb: int | None = None
+    # The pauses cut out of it (Style.pauses "trim"), in seconds of the recording, so the page can
+    # line its timeline up with the render.
+    cuts: list[tuple[float, float]] = Field(default_factory=list)
 
 
 # Standard-mode list prices (https://dev.meta.ai/docs/pricing-rate-limits), for estimates only.

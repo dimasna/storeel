@@ -158,6 +158,15 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
             <SelectField name="particles" label="Particles" />
           </div>
         ) : null}
+        <SelectField
+          name="pauses"
+          label="Pauses"
+          hint={
+            style.pauses === "trim"
+              ? "Free, at render: every silence over 0.7 s is cut to about half a second. The timeline here stays on your recording."
+              : undefined
+          }
+        />
         {project.path === "video" ? <SelectField name="language" label="Spoken language" /> : null}
 
         <SubHeading>Captions</SubHeading>

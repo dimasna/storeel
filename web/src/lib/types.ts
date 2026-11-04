@@ -44,6 +44,7 @@ export interface Style {
   effects: "on" | "off";
   punch_in: "on" | "off";
   particles: "on" | "off";
+  pauses: "keep" | "trim";
 }
 
 export interface Idea {
@@ -159,6 +160,8 @@ export interface Render {
   duration: number;
   size: number;
   fit_mb: number | null;
+  /** The pauses cut out of it, in seconds of the recording. */
+  cuts?: [number, number][];
 }
 
 export interface Usage {

@@ -69,6 +69,7 @@ export const LABELS: Record<string, Record<string, string>> = {
   },
   punch_in: { on: "On", off: "Off" },
   particles: { on: "On", off: "Off" },
+  pauses: { keep: "Keep them", trim: "Cut the long pauses" },
   display: { none: "Speaker only", overlay: "Card", cutout: "Cut-out", cutaway: "Full screen" },
   novel_language: { id: "Indonesian", en: "English" },
   narration: {

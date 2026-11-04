@@ -40,7 +40,7 @@ from ..jobs import JobContext, PipelineError
 from ..media import ffmpeg as ff
 from ..media.speech import Envelope
 from ..models import Moment, Project, Region, Render, SpeakerMasks, Style
-from . import effects, themes
+from . import effects, pauses, themes
 from .captions import build_pages, stressed
 from .layout import (
     CAPTION_CENTER,
@@ -1227,6 +1227,9 @@ class Compositor:
         self.title_showing: float | None = None  # the share of the title showing past the speaker
         self.title = self._build_title(project, files)
         self.punch = self._punch_windows() if self.effects and style.punch_in == "on" else []
+        # The long pauses the render cuts out of the finished reel (Style.pauses "trim").
+        self.cuts = pauses.cuts(project, files) if style.pauses == "trim" else []
+        self.out_duration = self.duration - sum(end - start for start, end in self.cuts)
         if style.motion == "plain":
             self.motion_note = "plain (chosen in the style)"
         elif motion is None or not motion.available:
@@ -1736,10 +1739,10 @@ def encode(
     fit_mb: int | None = None,
     factor: float = 1.0,
 ) -> None:
-    rate, audio_bitrate = _rate_args(fit_mb, compositor.duration, factor)
+    rate, audio_bitrate = _rate_args(fit_mb, compositor.out_duration, factor)
     fades = [
         "afade=t=in:d=0.04",
-        f"afade=t=out:st={max(0.0, compositor.duration - 0.08):.3f}:d=0.08",
+        f"afade=t=out:st={max(0.0, compositor.out_duration - 0.08):.3f}:d=0.08",
     ]
     audio = ",".join([audio_filter, *fades] if audio_filter else fades)
     extra = compositor.person_rows
@@ -1838,13 +1841,30 @@ def encode(
         graph = f"{graded}{moved}{echo}{layer};{blur};[base][layer]{finish}"
     else:
         graph = f"{graded}{moved}{echo}{layer};[mraw]nullsink;{video}[layer]{finish}"
+    sound = ["-map", "0:a:0", "-af", audio]
+    if compositor.cuts:
+        # The long pauses cut out of the finished reel: whole frames of the picture (each cut
+        # starts and ends on a frame) and the same stretches of the sound, to the sample.
+        fps = compositor.fps
+        half = 0.5 / fps
+        drop = "+".join(f"between(t,{a - half:.4f},{b - half - 1e-4:.4f})" for a, b in compositor.cuts)
+        graph = graph.removesuffix("[v]") + f"[full];[full]select='not({drop})',setpts=N/({fps})/TB[v]"
+        keep = pauses.kept(compositor.cuts, compositor.duration)
+        split = "".join(f"[as{i}]" for i in range(len(keep)))
+        pieces = ";".join(
+            f"[as{i}]atrim=start={a:.4f}:end={b:.4f},asetpts=PTS-STARTPTS[ak{i}]"
+            for i, (a, b) in enumerate(keep)
+        )
+        joined = "".join(f"[ak{i}]" for i in range(len(keep)))
+        graph += f";[0:a:0]asplit={len(keep)}{split};{pieces};{joined}concat=n={len(keep)}:v=0:a=1,{audio}[a]"
+        sound = ["-map", "[a]"]
     cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-i", str(master)]
     cmd += ["-f", "rawvideo", "-pix_fmt", "rgba", "-video_size", f"{W}x{H + MASK_ROWS + extra}"]
     cmd += ["-framerate", str(compositor.overlay_fps), "-i", "pipe:0"]
-    cmd += ["-filter_complex", graph, "-map", "[v]", "-map", "0:a:0"]
+    cmd += ["-filter_complex", graph, "-map", "[v]", *sound]
     cmd += ["-c:v", "libx264", "-preset", "medium", "-profile:v", "high", *rate]
     cmd += ["-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv"]
-    cmd += ["-af", audio, "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "48000", "-ac", "2"]
+    cmd += ["-c:a", "aac", "-b:a", audio_bitrate, "-ar", "48000", "-ac", "2"]
     cmd += ["-movflags", "+faststart", str(out)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     errors: deque[str] = deque(maxlen=50)
@@ -1930,6 +1950,14 @@ def compose(
             f"{compositor.unchecked_faces} picture(s) have no face check yet, so the speaker is blurred"
             " behind them; update the pictures to check"
         )
+    if compositor.cuts:
+        removed = compositor.duration - compositor.out_duration
+        ctx.log(
+            f"pauses: {len(compositor.cuts)} long pause(s) shortened, {removed:.1f}s cut,"
+            f" {compositor.duration:.1f}s -> {compositor.out_duration:.1f}s"
+        )
+    elif project.style.pauses == "trim":
+        ctx.log("pauses: none long enough to cut")
     stats = ff.measure_loudness(master, cancel=ctx.cancelled)
     audio_filter = ff.loudnorm_filter(stats)
     if stats is not None:
@@ -1948,10 +1976,10 @@ def compose(
             factor *= 0.9 * fit_mb * 1_000_000 / size
             ctx.log(f"{size / 1e6:.1f} MB is over {fit_mb} MB; encoding again at a lower bitrate")
         info = ff.probe(tmp)
-        if abs(info.duration - compositor.duration) > 0.35 or (info.width, info.height) != (W, H):
+        if abs(info.duration - compositor.out_duration) > 0.35 or (info.width, info.height) != (W, H):
             raise ff.FFmpegError(
                 f"the rendered file looks wrong ({info.width}x{info.height}, {info.duration:.2f}s"
-                f" instead of {compositor.duration:.2f}s)"
+                f" instead of {compositor.out_duration:.2f}s)"
             )
         if fit_mb is not None and tmp.stat().st_size > fit_mb * 1_000_000:
             ctx.log(f"still {tmp.stat().st_size / 1e6:.1f} MB, over the {fit_mb} MB target")
@@ -1965,6 +1993,7 @@ def compose(
         duration=round(info.duration, 3),
         size=out.stat().st_size,
         fit_mb=fit_mb,
+        cuts=[(round(a, 4), round(b, 4)) for a, b in compositor.cuts],
     )
 
     def add(p: Project) -> list[str]:

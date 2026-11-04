@@ -81,9 +81,32 @@ function ToolButton({
   );
 }
 
-/** The reel's video, and the state the player bar and the timeline share. */
-function usePlayer(src: string | null) {
+/** A render's time as a time of the recording, when pauses were cut out of the render. */
+function toRecording(t: number, cuts: [number, number][]): number {
+  let out = t;
+  for (const [a, b] of cuts) {
+    if (out < a) break;
+    out += b - a;
+  }
+  return out;
+}
+
+/** A time of the recording as a time of the render (inside a cut: where the cut is). */
+function toRender(t: number, cuts: [number, number][]): number {
+  let out = t;
+  for (const [a, b] of cuts) {
+    if (t <= a) break;
+    out -= Math.min(t, b) - a;
+  }
+  return out;
+}
+
+/** The reel's video, and the state the player bar and the timeline share, in the recording's
+ * time (a render with its pauses cut out is mapped back onto it). */
+function usePlayer(src: string | null, cuts: [number, number][] = []) {
   const video = useRef<HTMLVideoElement>(null);
+  const cutsRef = useRef(cuts);
+  cutsRef.current = cuts;
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -98,8 +121,9 @@ function usePlayer(src: string | null) {
     const el = video.current;
     if (!el) return;
     let frame = 0;
+    const now = () => toRecording(el.currentTime, cutsRef.current);
     const tick = () => {
-      setTime(el.currentTime);
+      setTime(now());
       frame = requestAnimationFrame(tick);
     };
     const onPlay = () => {
@@ -109,10 +133,10 @@ function usePlayer(src: string | null) {
     const onPause = () => {
       setPlaying(false);
       cancelAnimationFrame(frame);
-      setTime(el.currentTime);
+      setTime(now());
     };
-    const onMeta = () => setDuration(el.duration || 0);
-    const onSeeked = () => setTime(el.currentTime);
+    const onMeta = () => setDuration(el.duration ? toRecording(el.duration, cutsRef.current) : 0);
+    const onSeeked = () => setTime(now());
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
     el.addEventListener("ended", onPause);
@@ -132,7 +156,10 @@ function usePlayer(src: string | null) {
   const seek = useCallback((t: number) => {
     const el = video.current;
     setTime(t);
-    if (el && Number.isFinite(t)) el.currentTime = Math.max(0, Math.min(t, el.duration || t));
+    if (el && Number.isFinite(t)) {
+      const at = toRender(t, cutsRef.current);
+      el.currentTime = Math.max(0, Math.min(at, el.duration || at));
+    }
   }, []);
   const toggle = useCallback(() => {
     const el = video.current;
@@ -172,7 +199,7 @@ export function PartEditor({
 }) {
   const last = project.renders[project.renders.length - 1];
   const src = last ? mediaUrl(project.id, last.key) : null;
-  const player = usePlayer(src);
+  const player = usePlayer(src, last?.cuts);
   const active = jobActive(project);
   const job = project.job;
   const screens = project.screens ?? [];

@@ -112,8 +112,13 @@ Every option is documented in `.env.example`. Projects, uploads and renders are 
   screens and the poll's options on screen, and any style setting ("no zooms", "make it
   scarier"). "Undo" puts back the last request's free changes, one request at a time (up to
   five). Redrawing a picture, a new outfit and a render are proposed, with their cost, and
-  run only when you approve them. It cannot cut your video, rewrite the script or delete
-  anything.
+  run only when you approve them. It cannot cut a chosen stretch of your video, rewrite the
+  script or delete anything.
+- **Pauses** (free, at render; "remove the pauses" in the editor): *Cut the long pauses*
+  shortens every silence over 0.7 s to about half a second. The render cuts them out of the
+  finished reel, sound and picture together on whole frames, so the captions and pictures
+  drawn over it stay in step; nothing is transcribed or tracked again. The editor's timeline
+  stays on your recording and follows the shorter render.
 - **Render**: optionally keep the file under 25 MB (the Messenger and Instagram DM limit).
 
 The browser only allows the camera on `localhost` or HTTPS. To record on a phone, put the
