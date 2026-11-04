@@ -5,7 +5,8 @@ through the studio itself: process the part once, then render it in each style, 
 Each becomes a few seconds of it, silent and small, cut from the same moments of every render so
 only the style changes from one to the next, and a still from one of those moments.
 
-    uv run python scripts/make_style_previews.py RENDERS --cuts 0.4-2.8,5.8-8.6,14.4-16.4 --still 7.0
+    uv run python scripts/make_style_previews.py RENDERS --cuts 0.3-2.8,25.6-27.9,33.8-36.6 \
+        --still 26.6 --still-for dalang=35.2
 """
 
 from __future__ import annotations
@@ -56,8 +57,12 @@ def main() -> None:
     parser.add_argument("renders", type=Path, help="a folder of <look>-<theme>.mp4 renders")
     parser.add_argument("--cuts", required=True, help="the moments to keep, in seconds: a-b,c-d,...")
     parser.add_argument("--still", type=float, required=True, help="the still's moment, in seconds")
+    parser.add_argument(
+        "--still-for", default="", help="another moment for a look's stills, e.g. dalang=35 (comma-separated)"
+    )
     args = parser.parse_args()
     cuts = [tuple(float(x) for x in part.split("-")) for part in args.cuts.split(",")]
+    still_at = {look: float(t) for look, t in (part.split("=") for part in args.still_for.split(",") if part)}
     OUT.mkdir(parents=True, exist_ok=True)
     total = 0
     for src in sorted(args.renders.glob("*-*.mp4")):
@@ -66,7 +71,7 @@ def main() -> None:
             continue
         video, picture = OUT / f"{src.stem}.mp4", OUT / f"{src.stem}.webp"
         loop(src, video, cuts)  # type: ignore[arg-type]
-        still(src, picture, args.still)
+        still(src, picture, still_at.get(look, args.still))
         size = video.stat().st_size + picture.stat().st_size
         total += size
         print(f"{src.stem}: {video.stat().st_size / 1000:.0f} KB + {picture.stat().st_size / 1000:.0f} KB")
