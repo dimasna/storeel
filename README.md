@@ -230,12 +230,17 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   pill, red); any other choice wins. *Auto* (the default) follows a novel part's genre (see
   "Novels"); other reels have no theme on Auto. *None* is the plain look. The editor sets a
   theme for the mood you ask for ("make it scarier", "pakai tema romance").
-- **Style examples**: the home page and the style pickers show every look with every theme
-  on one example part, *Sealed Since 1986* (an original story), made by the studio from one
-  video: processed once, then rendered 18 ways, which is free after the first.
-  `scripts/make_style_previews.py` cuts each render into a few silent seconds, taken at the
-  same moments in each, and a still (`web/src/assets/styles`, about 3 MB in all). The home
-  gallery plays a tile while it is on screen, a picker only the chosen one; with reduced
+- **Style examples**: the home page's showcase plays every way a reel can look, filtered by
+  chips: the three looks, the six themes, the effects (each cut from the moment it happens:
+  the title behind you, word-by-word captions, the punch-in, stepping back, the spotlight,
+  living pictures, particles, horror's echo, translated captions) and the picture styles Muse
+  Image draws in. One tap puts a look, a theme or a picture style on the card. The looks,
+  themes and effects all come from one example part, *Sealed Since 1986* (an original story),
+  made by the studio from one video: processed once, then rendered 18 ways, which is free
+  after the first. `scripts/make_style_previews.py` cuts each render into a few silent seconds,
+  taken at the same moments in each, and a still (`web/src/assets/styles`, about 3 MB);
+  `scripts/make_effect_previews.py` cuts each effect from its moment (`web/src/assets/effects`,
+  0.7 MB). A tile plays while it is on screen, a picker only the chosen one; with reduced
   motion every tile is a still. Without the examples, the pickers are plain menus.
 - **Motion graphics**: three entrances are rendered by HyperFrames, an open-source
   HTML-to-video renderer, run locally: the title's letters rising in one by one, photo cards

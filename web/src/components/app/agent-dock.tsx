@@ -532,7 +532,7 @@ export function AssistantBubble({ children, className }: { children: ReactNode; 
 }
 
 /** How the chat draws messages: in bubbles (the editor's sheet) or as plain text beside a
- * neutral bubble for the user (the part studio, after OpusClip's editor). */
+ * neutral bubble for the user (the part studio's chat panel). */
 export const ChatLook = createContext<"bubbles" | "plain">("bubbles");
 
 function ActionLine({ action, applying }: { action: AgentAction; applying: boolean }) {

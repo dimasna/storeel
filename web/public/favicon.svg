@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
   <defs>
     <linearGradient id="storeel" x1="3" y1="2" x2="45" y2="46" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#00C6CF"/>
-      <stop offset="0.55" stop-color="#3D7BF7"/>
-      <stop offset="1" stop-color="#7B5CFA"/>
+      <stop offset="0" stop-color="#3AA5FF"/>
+      <stop offset="0.5" stop-color="#0082FB"/>
+      <stop offset="1" stop-color="#0058CC"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="12" fill="url(#storeel)"/>

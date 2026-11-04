@@ -5,9 +5,9 @@ import { cn } from "@/lib/utils";
 // the brand gradient. The same drawing is web/public/favicon.svg; keep the two in step.
 
 export const BRAND_STOPS: [number, string][] = [
-  [0, "#00C6CF"],
-  [0.55, "#3D7BF7"],
-  [1, "#7B5CFA"],
+  [0, "#3AA5FF"],
+  [0.5, "#0082FB"],
+  [1, "#0058CC"],
 ];
 
 export function LogoMark({ size = 32, className, title }: { size?: number; className?: string; title?: string }) {

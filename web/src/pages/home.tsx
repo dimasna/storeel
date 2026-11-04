@@ -8,13 +8,12 @@ import { labelFor } from "@/lib/labels";
 import { Link, navigate } from "@/lib/router";
 import { EASE_OUT } from "@/lib/ease";
 import { ChapterComposer, type ReelStyle } from "@/components/app/chapter-composer";
-import { Gallery } from "@/components/app/gallery";
-import { StyleGallery } from "@/components/app/style-picker";
+import { Showcase } from "@/components/app/showcase";
 import { HAS_PREVIEWS, lookName, themeCard, type Look } from "@/lib/styles";
 
-// The home page, after OpusClip's AI Producer: a badge, one line of headline, the card, the
-// gallery of reel styles (real examples), the gallery of picture looks, the questions people
-// ask, and a short footer.
+// The home page: a badge, one line of headline, the card, the showcase of every style (the
+// looks, themes and effects by example, and the picture styles), the questions people ask, and
+// a short footer.
 
 // Lines from the stories in the gallery, set as a faint texture behind the headline.
 const TEXTURE = (
@@ -171,22 +170,21 @@ export function HomePage() {
 
       {HAS_PREVIEWS ? (
         <section className="mt-16 sm:mt-24">
-          <h2 className="text-2xl font-semibold tracking-tight">Pick a style for your reel</h2>
+          <h2 className="text-2xl font-semibold tracking-tight">Choose a style for your reel</h2>
           <p className="mb-5 mt-1 text-sm text-muted-foreground">
-            One part, made by Storeel from one video, in every style. Pick one and your part is made
-            that way; you can still change it before you render.
+            The same part, made by Storeel from one video, in every look, theme and effect, and the
+            picture styles Muse Image draws in. Pick one and your part is made that way; you can still
+            change it before you render.
           </p>
-          <StyleGallery chosen={reelStyle} onUse={pickStyle} />
+          <Showcase
+            look={reelStyle?.look ?? "dalang"}
+            theme={reelStyle?.theme ?? "auto"}
+            pictureLook={look}
+            onStyle={pickStyle}
+            onPictureLook={pickLook}
+          />
         </section>
       ) : null}
-
-      <section className={HAS_PREVIEWS ? "mt-16 sm:mt-20" : "mt-16 sm:mt-24"}>
-        <h2 className="text-2xl font-semibold tracking-tight">Choose how the pictures are drawn</h2>
-        <p className="mb-5 mt-1 text-sm text-muted-foreground">
-          Frames of novel parts, drawn by Muse Image. Pick one and every part of your novel is drawn that way.
-        </p>
-        <Gallery onUse={pickLook} />
-      </section>
 
       <section className="mt-20 grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-10 sm:mt-28">
         <div>

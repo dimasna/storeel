@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/primitives";
 import { StylePicker } from "./style-picker";
 
-// The home page's card, after OpusClip's: two large tiles (the chapter, and an optional look),
+// The home page's card: two large tiles (the chapter, and an optional look),
 // a row of chips (the voice, the language and the reel's style) and a send button. Send makes
 // the novel, the chapter and its part, and starts writing it; the part's page takes over from
 // there.
@@ -345,7 +345,7 @@ export function ChapterComposer({
           </button>
         </div>
       </div>
-      {/* Phones: one wide button, as on OpusClip. */}
+      {/* Phones: one wide button. */}
       <button
         type="button"
         onClick={send}

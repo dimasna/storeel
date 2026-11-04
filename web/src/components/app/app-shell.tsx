@@ -15,7 +15,7 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { LogoLockup, LogoMark } from "@/components/brand/logo";
 import { cn } from "@/lib/utils";
 
-// The app frame, after OpusClip's studio: on large screens a dark sidebar (create, my reels,
+// The app frame: on large screens a dark sidebar (create, my reels,
 // the projects, the API key) beside one large rounded panel that scrolls on its own; the
 // sidebar folds to a rail. A page that brings its own panels (the part studio's chat and
 // editor) asks for a bare frame. On phones a slim bar sits on top and the page below it.

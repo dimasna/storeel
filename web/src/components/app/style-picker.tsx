@@ -1,23 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import { Check, Scissors, Sparkles } from "lucide-react";
-import { LOOKS, THEME_CARDS, preview, themeCard, type Look, type ThemeCard } from "@/lib/styles";
+import { LOOKS, THEME_CARDS, preview, themeCard, type Look } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 
-// The reel styles shown by example (see lib/styles.ts): the home page's gallery, after
-// OpusClip's grid of styles, and a compact picker for the home card and a reel's style card.
+// The reel styles shown by example (see lib/styles.ts): the tiles of the home page's
+// showcase, and a compact picker for the home card and a reel's style card.
 // Every example is the same part, so only the style changes from one to the next.
 
-/** A style's example filling its box: the loop while it is on screen and `play` allows it,
- * the still otherwise (and always with reduced motion). */
-export function StyleVideo({
-  look,
-  theme,
+/** A short silent loop filling its box: played while it is on screen and `play` allows it,
+ * its still otherwise (and always with reduced motion). */
+export function LoopVideo({
+  video: src,
+  still,
   play = true,
   className,
 }: {
-  look: string;
-  theme: string;
+  video?: string;
+  still?: string;
   play?: boolean;
   className?: string;
 }) {
@@ -25,7 +25,6 @@ export function StyleVideo({
   const box = useRef<HTMLDivElement>(null);
   const video = useRef<HTMLVideoElement>(null);
   const [seen, setSeen] = useState(false);
-  const example = preview(look, theme);
 
   useEffect(() => {
     const element = box.current;
@@ -40,19 +39,19 @@ export function StyleVideo({
     if (!element) return;
     if (play && seen) element.play().catch(() => {}); // a browser may refuse; the still stays
     else element.pause();
-  }, [play, seen, example?.video]);
+  }, [play, seen, src]);
 
   return (
     <div ref={box} className={cn("absolute inset-0 bg-panel-tile", className)}>
-      {example ? (
+      {src && still ? (
         reduce ? (
-          <img src={example.still} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
+          <img src={still} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
         ) : (
           <video
-            key={example.video}
+            key={src}
             ref={video}
-            src={example.video}
-            poster={example.still}
+            src={src}
+            poster={still}
             muted
             loop
             playsInline
@@ -64,6 +63,22 @@ export function StyleVideo({
       ) : null}
     </div>
   );
+}
+
+/** A style's example (a look with a theme), as a LoopVideo. */
+export function StyleVideo({
+  look,
+  theme,
+  play = true,
+  className,
+}: {
+  look: string;
+  theme: string;
+  play?: boolean;
+  className?: string;
+}) {
+  const example = preview(look, theme);
+  return <LoopVideo video={example?.video} still={example?.still} play={play} className={className} />;
 }
 
 /** What is behind the speaker: dalang, scene or studio (the two cut-out looks cost SAM time). */
@@ -96,88 +111,6 @@ export function LookSwitch({
         </button>
       ))}
     </div>
-  );
-}
-
-/** The home page's gallery: every theme in the look chosen above it. */
-export function StyleGallery({
-  chosen,
-  onUse,
-}: {
-  chosen?: { look: string; theme: string } | null;
-  onUse: (look: Look, theme: string) => void;
-}) {
-  const [look, setLook] = useState<Look>("dalang");
-  const about = LOOKS.find((l) => l.look === look);
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-        <span className="text-sm font-semibold text-foreground">Behind you</span>
-        <LookSwitch value={look} onChange={setLook} className="w-full sm:w-80" />
-        <span className="text-sm text-muted-foreground">
-          {about?.blurb}. SAM 3.1 cuts you out, about $0.24 for 100 seconds
-          {about?.cutout ? "" : ", so you can step back under the pictures"}
-        </span>
-      </div>
-      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {THEME_CARDS.map((card) => (
-          <GalleryTile
-            key={card.theme}
-            look={look}
-            card={card}
-            chosen={chosen?.look === look && chosen?.theme === card.theme}
-            onUse={() => onUse(look, card.theme)}
-          />
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function GalleryTile({
-  look,
-  card,
-  chosen,
-  onUse,
-}: {
-  look: Look;
-  card: ThemeCard;
-  chosen: boolean;
-  onUse: () => void;
-}) {
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={onUse}
-        aria-label={`Use the ${card.name} style`}
-        className="group flex w-full flex-col gap-2 text-left focus-visible:outline-none"
-      >
-        <span
-          className={cn(
-            "relative block aspect-[9/16] w-full overflow-hidden rounded-xl transition-shadow group-focus-visible:ring-2 group-focus-visible:ring-accent",
-            chosen && "ring-2 ring-accent",
-          )}
-        >
-          <StyleVideo look={look} theme={card.theme} />
-          {/* Hover (pointer screens): how to use it; a tap on a touch screen uses it at once. */}
-          <span className="absolute inset-x-2 bottom-2 hidden items-center justify-center gap-1.5 rounded-[10px] bg-white py-2 text-[13px] font-semibold text-black opacity-0 shadow-sm transition-opacity duration-200 group-hover:opacity-100 [@media(hover:hover)]:flex">
-            <Sparkles className="size-3.5" /> Use this style
-          </span>
-          {chosen ? (
-            <span className="absolute right-2 top-2 grid size-6 place-items-center rounded-full bg-accent text-accent-foreground">
-              <Check className="size-3.5" />
-            </span>
-          ) : null}
-        </span>
-        <span className="flex flex-col px-0.5">
-          <span className="text-sm font-semibold text-foreground">
-            {card.name} <span className="font-normal text-muted-foreground">· {card.genre}</span>
-          </span>
-          <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">{card.blurb}</span>
-        </span>
-      </button>
-    </li>
   );
 }
 

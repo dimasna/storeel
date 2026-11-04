@@ -6,56 +6,58 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Storeel's palette. The neutrals lean a little cool, toward the brand gradient (the logo's:
- * teal, blue, violet); the accent is its teal and the primary its blue. Light first, then dark.
+ * Storeel's palette, in Meta's blues: the primary is Meta blue, the accent its lighter azure,
+ * and the text the slate of Meta's wordmark; the neutrals lean a little cool toward them. The
+ * brand gradient (the logo's, web/src/components/brand/logo.tsx) runs azure to Meta blue.
+ * Light first, then dark.
  */
 :root {
   color-scheme: light;
 
-  --background: #fbfbfd;
-  --foreground: #101114;
-  --muted-foreground: #5f636e;
-  --card: #f2f3f6;
-  --frame: #e9eaee; /* the app frame around the panels */
-  --panel-tile: #e4e5ea; /* tiles and bubbles inside a panel */
-  --border: #1011140f;
-  --border-strong: #10111421;
+  --background: #fbfcfe;
+  --foreground: #1c2b33;
+  --muted-foreground: #5b6b78;
+  --card: #f1f4f7;
+  --frame: #e8ecf0; /* the app frame around the panels */
+  --panel-tile: #e3e8ed; /* tiles and bubbles inside a panel */
+  --border: #1c2b3312;
+  --border-strong: #1c2b3324;
 
-  --primary: #2f6df0;
+  --primary: #0064e0;
   --primary-foreground: #ffffff;
-  --accent: #00939d;
-  --accent-foreground: #061417;
+  --accent: #0072ec;
+  --accent-foreground: #ffffff;
   --danger: #e5484d;
   --success: #13a05a;
   --warning: #e8930c;
 
   /* Frosted surfaces over the video and the gallery. */
-  --glass: #fbfbfda3;
-  --glass-line: #10111414;
+  --glass: #fbfcfea3;
+  --glass-line: #1c2b3314;
   --glass-solid: #ffffffc4;
 
-  /* The brand gradient, the same as the logo's (web/src/components/brand/logo.tsx). */
-  --gradient-accent: linear-gradient(to right, #00c6cf 0%, #3d7bf7 55%, #7b5cfa 100%);
+  /* The brand gradient, the same as the logo's. */
+  --gradient-accent: linear-gradient(to right, #0064e0 0%, #0082fb 60%, #3aa5ff 100%);
 }
 
 .dark {
   color-scheme: dark;
 
-  --background: #121316;
-  --foreground: #f3f4f6;
-  --muted-foreground: #8a8d96;
-  --card: #1a1b1f;
+  --background: #11151a;
+  --foreground: #f1f4f7;
+  --muted-foreground: #8b98a5;
+  --card: #181d23;
   --frame: #000000;
-  --panel-tile: #26272c;
-  --border: #ffffff0f;
+  --panel-tile: #232a31;
+  --border: #ffffff10;
   --border-strong: #ffffff1f;
 
-  --primary: #3d7bf7;
-  --accent: #00c6cf;
+  --primary: #0082fb;
+  --accent: #3a9bff;
 
-  --glass: #1a1b1f99;
+  --glass: #181d2399;
   --glass-line: #ffffff17;
-  --glass-solid: #1a1b1fb8;
+  --glass-solid: #181d23b8;
 }
 
 /* The Tailwind colour utilities (bg-card, text-muted-foreground, border-border-strong…). The names
@@ -114,7 +116,7 @@
   }
 }
 
-/* The hero's badge: a pill with a thin rainbow edge, drawn as a ring masked to its border so the
+/* The hero's badge: a pill with a thin blue edge, drawn as a ring masked to its border so the
    pill itself stays see-through. */
 .rainbow-ring {
   position: relative;
@@ -125,7 +127,7 @@
   inset: 0;
   border: 1px solid transparent;
   border-radius: inherit;
-  background: conic-gradient(from 200deg, #00c6cf, #3d7bf7, #7b5cfa, #ff7ab2, #00c6cf) border-box;
+  background: conic-gradient(from 200deg, #0064e0, #0082fb, #7cc3ff, #0082fb, #0064e0) border-box;
   mask:
     linear-gradient(#000 0 0) padding-box exclude,
     linear-gradient(#000 0 0) border-box;
