@@ -1,0 +1,18 @@
+# An allowlist: nothing goes into the build unless it is named here. That keeps .env, data/ (your
+# projects and uploads), .git and local tooling folders out of the image.
+*
+
+!pyproject.toml
+!uv.lock
+!README.md
+!src
+!web
+!motion
+
+# Inside those folders: no installs, build output or caches (the image builds its own)
+**/node_modules
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store
+**/.hyperframes
+web/dist

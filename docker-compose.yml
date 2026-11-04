@@ -1,0 +1,38 @@
+# Run Storeel Studio on this machine:
+#
+#   docker compose up --build        then open http://localhost:8000
+#
+# Add your Meta Model API key in the studio (top right). It stays in your browser.
+
+name: storeel-studio
+
+services:
+  studio:
+    image: storeel-studio
+    build: .
+    ports:
+      # Published on this machine only: the studio has no login. A different port:
+      #   STOREEL_PORT=8080 docker compose up
+      - "127.0.0.1:${STOREEL_PORT:-8000}:8000"
+    volumes:
+      # Projects, uploads and renders. `docker compose down` keeps them, `down -v` deletes them.
+      - storeel-data:/data
+    environment:
+      # Host names the studio answers to besides localhost and 127.0.0.1 (comma-separated).
+      # 0.0.0.0 is the address the log prints, so it stays in the list. To reach the studio from
+      # another device, add its name here and publish the port on all interfaces above.
+      STOREEL_ALLOWED_HOSTS: "${STOREEL_ALLOWED_HOSTS:-0.0.0.0}"
+      # Any option in .env.example can be set here the same way, for example:
+      # STOREEL_TTL_HOURS: "24"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  storeel-data:
