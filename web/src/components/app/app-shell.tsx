@@ -7,7 +7,7 @@ import {
   type ComponentType,
   type ReactNode,
 } from "react";
-import { KeyRound, Library, PenLine } from "lucide-react";
+import { KeyRound, Library, PanelLeftClose, PanelLeftOpen, SquarePen } from "lucide-react";
 import { api, apiKey } from "@/lib/api";
 import type { ProjectSummary } from "@/lib/types";
 import { Link, PANEL_ID, useHashPath } from "@/lib/router";
@@ -15,15 +15,17 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { LogoLockup, LogoMark } from "@/components/brand/logo";
 import { cn } from "@/lib/utils";
 
-// The app frame: one bar across the top (the name, Write and My reels, the theme and the API
-// key) over a page of warm paper. A page that brings its own panels (the part studio's chat and
-// editor) asks for a bare frame: below the bar, its panels fill the window on large screens.
+// The app frame, after OpusClip's studio: on large screens a dark sidebar (create, my reels,
+// the projects, the API key) beside one large rounded panel that scrolls on its own; the
+// sidebar folds to a rail. A page that brings its own panels (the part studio's chat and
+// editor) asks for a bare frame. On phones a slim bar sits on top and the page below it.
 
+const COLLAPSED = "storeel.sidebar";
 const ACTIVE_STAGES = new Set(["scripting", "processing", "rendering", "regenerating", "editing"]);
 
 const Frame = createContext<(bare: boolean) => void>(() => {});
 
-/** For a page that draws its own panels on the frame: no shared page around it. */
+/** For a page that draws its own panels on the frame: no shared panel around it. */
 export function useBareFrame(): void {
   const setBare = useContext(Frame);
   useEffect(() => {
@@ -36,9 +38,9 @@ function useKeyHint(): string {
   return useSyncExternalStore(apiKey.subscribe, apiKey.hint, () => "");
 }
 
-/** Whether one of the browser's own reels is being worked on: rechecked when the page changes
- * and, while one is, every few seconds (the bar's My reels shows a lit dot meanwhile). */
-function useMaking(path: string): boolean {
+/** The browser's own reels, newest first, refreshed whenever the page changes and while one
+ * of them is being worked on. */
+function useRecentReels(path: string): ProjectSummary[] | null {
   const [reels, setReels] = useState<ProjectSummary[] | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -57,7 +59,7 @@ function useMaking(path: string): boolean {
     const timer = window.setTimeout(() => setTick((t) => t + 1), 6000);
     return () => window.clearTimeout(timer);
   }, [busy, reels]);
-  return busy;
+  return reels;
 }
 
 export function Logo({ className, mark }: { className?: string; mark?: boolean }) {
@@ -73,83 +75,192 @@ function NavItem({
   icon: Icon,
   label,
   active,
-  lit,
+  rail,
 }: {
   to: string;
   icon: ComponentType<{ className?: string }>;
   label: string;
   active: boolean;
-  lit?: boolean;
+  rail: boolean;
 }) {
   return (
     <Link
       to={to}
-      aria-current={active ? "page" : undefined}
+      title={rail ? label : undefined}
+      aria-label={rail ? label : undefined}
       className={cn(
-        "relative inline-flex h-10 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-colors",
-        active ? "bg-foreground text-background" : "text-foreground/80 hover:bg-card hover:text-foreground",
+        "flex h-11 items-center gap-3 rounded-xl text-[15px] font-medium transition-colors",
+        rail ? "justify-center px-0" : "px-3",
+        active
+          ? "bg-background text-foreground dark:bg-panel-tile"
+          : "text-foreground/85 hover:bg-background/60 hover:text-foreground dark:hover:bg-panel-tile/60",
       )}
     >
-      <Icon className="size-4 shrink-0" />
-      {label}
-      {lit ? (
-        <span
-          title="A reel is being made"
-          className="absolute right-1.5 top-1.5 size-2 animate-pulse rounded-full"
-          style={{ background: "var(--gradient-accent)" }}
-        />
-      ) : null}
+      <Icon className="size-[18px] shrink-0" />
+      {rail ? null : label}
     </Link>
   );
 }
 
-function KeyButton({ onClick }: { onClick: () => void }) {
+/** A project's state as a dot: white for the open one, a pulsing ring while it is being made,
+ * green once it has a reel. */
+function StatusDot({ reel, current }: { reel: ProjectSummary; current: boolean }) {
+  if (ACTIVE_STAGES.has(reel.stage))
+    return <span className="size-2.5 shrink-0 animate-pulse rounded-full border-2 border-success" />;
+  if (current) return <span className="size-2.5 shrink-0 rounded-full bg-foreground" />;
+  if (reel.renders) return <span className="size-2.5 shrink-0 rounded-full bg-success/80" />;
+  return <span className="size-2.5 shrink-0 rounded-full border-2 border-muted-foreground/50" />;
+}
+
+function KeyRow({ onClick, rail }: { onClick: () => void; rail: boolean }) {
   const hint = useKeyHint();
+  if (rail)
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={hint ? `API key ${hint}` : "Add your API key"}
+        aria-label={hint ? `API key ${hint}` : "Add your API key"}
+        className={cn(
+          "grid size-11 place-items-center rounded-full transition-colors",
+          hint ? "bg-panel-tile text-foreground" : "bg-foreground text-background",
+        )}
+      >
+        <KeyRound className="size-4" />
+      </button>
+    );
   return (
     <button
       type="button"
       onClick={onClick}
-      title={hint ? "Your Muse / Model API key, kept only in this browser" : "Add your Muse / Model API key"}
-      className={cn(
-        "inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-full px-4 text-sm font-semibold transition-[filter,colors]",
-        hint
-          ? "border border-border-strong text-foreground hover:bg-card"
-          : "bg-primary text-primary-foreground hover:brightness-105",
-      )}
+      className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-background/60 dark:hover:bg-panel-tile/60"
     >
-      <KeyRound className="size-4" />
-      <span>{hint ? `Key ${hint}` : "Add key"}</span>
+      <span
+        className={cn(
+          "grid size-10 shrink-0 place-items-center rounded-full",
+          hint ? "bg-panel-tile text-foreground" : "text-white",
+        )}
+        style={hint ? undefined : { background: "var(--gradient-accent)" }}
+      >
+        <KeyRound className="size-4" />
+      </span>
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate text-sm font-semibold text-foreground">
+          {hint ? `Muse key ${hint}` : "Add your API key"}
+        </span>
+        <span className="truncate text-xs text-muted-foreground">
+          {hint ? "Only in this browser" : "Needed to make reels"}
+        </span>
+      </span>
     </button>
   );
 }
 
-function TopBar({ path, onKeyClick, making }: { path: string; onKeyClick: () => void; making: boolean }) {
-  const create = path === "/" || path === "";
-  const reels = path.startsWith("/reels");
+function Sidebar({
+  path,
+  rail,
+  onToggle,
+  onKeyClick,
+}: {
+  path: string;
+  rail: boolean;
+  onToggle: () => void;
+  onKeyClick: () => void;
+}) {
+  const reels = useRecentReels(path);
   return (
-    <header className="sticky top-0 z-40 h-16 border-b border-border bg-background/85 backdrop-blur-xl">
-      <div className="mx-auto flex h-full max-w-[90rem] items-center gap-2 px-4 sm:px-6">
-        <Logo className="mr-auto lg:mr-6" />
-        <nav className="hidden items-center gap-1 lg:mr-auto lg:flex">
-          <NavItem to="/" icon={PenLine} label="Write" active={create} />
-          <NavItem to="/reels" icon={Library} label="My reels" active={reels} lit={making} />
-        </nav>
-        <Link
-          to="/reels"
-          aria-label="My reels"
-          className={cn(
-            "relative grid size-10 place-items-center rounded-full border border-border-strong transition-colors lg:hidden",
-            reels ? "text-foreground" : "text-muted-foreground hover:text-foreground",
-          )}
+    <aside
+      className={cn(
+        "fixed inset-y-0 left-0 hidden flex-col pb-3 pt-4 transition-[width] duration-200 lg:flex",
+        rail ? "w-[4.5rem] items-center px-2" : "w-64 px-3",
+      )}
+    >
+      <div className={cn("flex items-center", rail ? "flex-col gap-3" : "justify-between pl-2")}>
+        <Logo mark={rail} />
+        <button
+          type="button"
+          onClick={onToggle}
+          title={rail ? "Open the sidebar" : "Fold the sidebar"}
+          aria-label={rail ? "Open the sidebar" : "Fold the sidebar"}
+          className="grid size-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground dark:hover:bg-panel-tile"
         >
-          <Library className="size-4" />
-          {making ? (
-            <span className="absolute right-1 top-1 size-2 animate-pulse rounded-full" style={{ background: "var(--gradient-accent)" }} />
-          ) : null}
-        </Link>
-        <ThemeToggle />
-        <KeyButton onClick={onKeyClick} />
+          {rail ? <PanelLeftOpen className="size-[18px]" /> : <PanelLeftClose className="size-[18px]" />}
+        </button>
       </div>
+
+      <nav className={cn("mt-6 flex flex-col gap-1", rail && "w-full")}>
+        <NavItem to="/" icon={SquarePen} label="Create" active={path === "/" || path === ""} rail={rail} />
+        <NavItem to="/reels" icon={Library} label="My reels" active={path.startsWith("/reels")} rail={rail} />
+      </nav>
+
+      {rail ? (
+        <div className="flex-1" />
+      ) : (
+        <>
+          <p className="mt-7 px-3 text-sm font-medium text-muted-foreground">Projects</p>
+          <div className="mt-1.5 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+            {reels === null ? null : reels.length === 0 ? (
+              <p className="px-3 py-2 text-sm text-muted-foreground/80">No projects yet</p>
+            ) : (
+              reels.slice(0, 14).map((p) => {
+                const current = path.startsWith(`/p/${p.id}`);
+                return (
+                  <Link
+                    key={p.id}
+                    to={`/p/${p.id}`}
+                    title={`${p.title} · ${p.stage}`}
+                    className={cn(
+                      "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] transition-colors",
+                      current
+                        ? "bg-background font-medium text-foreground dark:bg-panel-tile"
+                        : "text-foreground/85 hover:bg-background/60 hover:text-foreground dark:hover:bg-panel-tile/60",
+                    )}
+                  >
+                    <StatusDot reel={p} current={current} />
+                    <span className="min-w-0 flex-1 truncate">{p.title.replace(/^.* - (Part \d+)/, "$1")}</span>
+                  </Link>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
+
+      <div className={cn("mt-3 flex items-center gap-1", rail && "flex-col gap-2")}>
+        <KeyRow onClick={onKeyClick} rail={rail} />
+        <ThemeToggle />
+      </div>
+    </aside>
+  );
+}
+
+function MobileBar({ path, onKeyClick }: { path: string; onKeyClick: () => void }) {
+  const hint = useKeyHint();
+  return (
+    <header className="sticky top-0 z-40 flex items-center gap-2 bg-frame/80 px-4 py-3 backdrop-blur-xl lg:hidden">
+      <Logo className="mr-auto" />
+      <Link
+        to="/reels"
+        aria-label="My reels"
+        className={cn(
+          "grid size-9 place-items-center rounded-full border border-border-strong transition-colors",
+          path.startsWith("/reels") ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <Library className="size-4" />
+      </Link>
+      <ThemeToggle />
+      <button
+        type="button"
+        onClick={onKeyClick}
+        className={cn(
+          "inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-xl px-3 text-sm font-semibold transition-colors",
+          hint ? "border border-border-strong text-foreground" : "bg-foreground text-background",
+        )}
+      >
+        <KeyRound className="size-4" />
+        <span>{hint || "Add key"}</span>
+      </button>
     </header>
   );
 }
@@ -157,16 +268,28 @@ function TopBar({ path, onKeyClick, making }: { path: string; onKeyClick: () => 
 export function AppShell({ onKeyClick, children }: { onKeyClick: () => void; children: ReactNode }) {
   const path = useHashPath();
   const [bare, setBare] = useState(false);
-  const making = useMaking(path);
+  const [rail, setRail] = useState(() => localStorage.getItem(COLLAPSED) === "1");
+  const toggle = () =>
+    setRail((r) => {
+      localStorage.setItem(COLLAPSED, r ? "0" : "1");
+      return !r;
+    });
   return (
     <Frame.Provider value={setBare}>
-      <div className={cn("min-h-dvh", bare ? "bg-frame" : "paper bg-background")}>
-        <TopBar path={path} onKeyClick={onKeyClick} making={making} />
+      <div className="min-h-dvh bg-frame">
+        <Sidebar path={path} rail={rail} onToggle={toggle} onKeyClick={onKeyClick} />
+        <MobileBar path={path} onKeyClick={onKeyClick} />
         <main
           id={PANEL_ID}
-          className={cn(bare ? "lg:fixed lg:inset-x-3 lg:bottom-3 lg:top-[4.75rem] lg:overflow-hidden" : "min-h-[calc(100dvh-4rem)]")}
+          className={cn(
+            "lg:fixed lg:inset-y-2 lg:right-2 lg:transition-[left] lg:duration-200",
+            rail ? "lg:left-[4.5rem]" : "lg:left-64",
+            bare
+              ? "lg:overflow-hidden"
+              : "min-h-[calc(100dvh-4rem)] bg-background lg:min-h-0 lg:overflow-y-auto lg:rounded-3xl",
+          )}
         >
-          <div className={bare ? "px-2 pt-2 lg:h-full lg:p-0" : "mx-auto max-w-6xl px-4 pb-24 pt-6 sm:px-6 lg:px-10 lg:pt-10"}>
+          <div className={bare ? "px-2 lg:h-full lg:p-0" : "mx-auto max-w-6xl px-4 pb-24 pt-6 sm:px-6 lg:px-10 lg:pt-8"}>
             {children}
           </div>
         </main>

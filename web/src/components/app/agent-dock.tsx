@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { AnimatePresence, motion, useDragControls, useReducedMotion } from "motion/react";
-import { AlertCircle, ArrowUp, Check, Clock, Feather, Loader2, RotateCcw, X } from "lucide-react";
+import { AlertCircle, ArrowUp, Check, Clock, Loader2, RotateCcw, Sparkles, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { AgentAction, AgentMessage, Project } from "@/lib/types";
 import { jobActive } from "@/lib/use-project";
@@ -109,14 +109,13 @@ export function AgentDock({ project, state }: { project: Project; state: UseProj
             exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.85 }}
             whileTap={reduce ? undefined : { scale: 0.95 }}
             transition={SPRING_PANEL}
-            className="fixed bottom-[calc(env(safe-area-inset-bottom)+1rem)] right-4 z-[45] flex h-13 items-center gap-2.5 rounded-full border border-[#1f1a15]/10 bg-primary pl-3 pr-5 text-sm font-semibold text-primary-foreground shadow-[0_16px_36px_-14px_rgb(120_60_10/0.6)] lg:bottom-6 lg:right-6"
+            className="fixed bottom-[calc(env(safe-area-inset-bottom)+1rem)] right-4 z-[45] flex h-14 items-center gap-2 rounded-full pl-4 pr-5 text-sm font-semibold text-white shadow-lg shadow-black/30 lg:bottom-6 lg:right-6"
+            style={{ background: "var(--gradient-accent)" }}
           >
-            <span className="grid size-8 place-items-center rounded-full bg-[#1f1a15] text-primary">
-              <Feather className="size-4" />
-            </span>
-            Ask Storeel
+            <Sparkles className="size-5" />
+            Edit with AI
             {attention ? (
-              <span className="absolute -right-0.5 -top-0.5 size-3.5 rounded-full border-2 border-background bg-accent" />
+              <span className="absolute -right-0.5 -top-0.5 size-3.5 rounded-full border-2 border-background bg-warning" />
             ) : null}
           </motion.button>
         )}
@@ -163,13 +162,16 @@ export function AgentDock({ project, state }: { project: Project; state: UseProj
             >
               <div className="mx-auto mt-2.5 h-1.5 w-10 rounded-full bg-border-strong lg:hidden" />
               <div className="flex items-center gap-3 px-4 pb-3 pt-2 lg:pt-4">
-                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground">
-                  <Feather className="size-4" />
+                <span
+                  className="grid size-9 shrink-0 place-items-center rounded-xl text-white"
+                  style={{ background: "var(--gradient-accent)" }}
+                >
+                  <Sparkles className="size-4" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <h2 className="font-display text-xl leading-none text-foreground">Ask Storeel</h2>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">
-                    Captions, pictures and style, in your words. New pictures and renders wait for your OK.
+                  <h2 className="text-sm font-semibold text-foreground">Editor</h2>
+                  <p className="truncate text-xs text-muted-foreground">
+                    Edits captions, pictures and style. Asks before new pictures or a render.
                   </p>
                 </div>
                 {messages.length > 0 ? (
@@ -442,9 +444,10 @@ export function AgentComposer({
           aria-label="Send"
           disabled={!canSend}
           className={cn(
-            "flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-full bg-primary text-sm font-semibold text-primary-foreground transition-opacity disabled:opacity-40",
+            "flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-full text-sm font-semibold text-white transition-opacity disabled:opacity-40",
             sendLabel ? "px-4" : "w-11",
           )}
+          style={{ background: "var(--gradient-accent)" }}
         >
           {sendLabel ?? null}
           <ArrowUp className="size-5" />
@@ -529,7 +532,7 @@ export function AssistantBubble({ children, className }: { children: ReactNode; 
 }
 
 /** How the chat draws messages: in bubbles (the editor's sheet) or as plain text beside a
- * neutral bubble for the user (the part studio's chat panel). */
+ * neutral bubble for the user (the part studio, after OpusClip's editor). */
 export const ChatLook = createContext<"bubbles" | "plain">("bubbles");
 
 function ActionLine({ action, applying }: { action: AgentAction; applying: boolean }) {

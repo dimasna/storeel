@@ -47,7 +47,7 @@ import {
   agentSuggestions,
 } from "./agent-dock";
 
-// A novel part: the chat (the request, the plan, a checklist of the
+// A novel part, after OpusClip's editor: the chat (the request, the plan, a checklist of the
 // six steps as they run, then the editor's conversation) in one panel, and the editor (the
 // reel, its script or its pictures, a player and a timeline) in another. On a phone the two
 // panels are tabs: the chat until the first reel is rendered, then the editor. Start (or Send
@@ -83,7 +83,7 @@ function useNow(on: boolean): number {
   return now;
 }
 
-/** "1m 05s": how long a run has taken. */
+/** "1m 05s", as OpusClip counts a run. */
 function elapsedLabel(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
   const m = Math.floor(total / 60);

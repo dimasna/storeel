@@ -25,7 +25,7 @@ import { seconds } from "@/lib/format";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { cn } from "@/lib/utils";
 
-// The part studio's editor panel: a toolbar (the view, then Render again and
+// The part studio's editor panel, after OpusClip's: a toolbar (the view, then Render again and
 // Download), the stage (the reel, the script or the pictures), a player bar, and a timeline of
 // what the reel shows when. The timeline is read-only: changes go through the chat, and a
 // moment can be handed to it from here.
@@ -373,13 +373,13 @@ function ReelStage({
 function GeneratingBand({ step, progress }: { step: string; progress: number }) {
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0">
-      <div className="h-28 bg-gradient-to-t from-[#c9452c]/85 via-[#ea7a37]/40 to-transparent" />
+      <div className="h-28 bg-gradient-to-t from-[#2f6df0]/90 via-[#3d7bf7]/45 to-transparent" />
       <div className="absolute inset-x-4 bottom-3 flex items-center gap-2 text-sm font-medium text-white">
         <Sparkles className="size-4 animate-pulse" />
         <span className="truncate">{step || "Generating"}…</span>
         <span className="ml-auto tabular-nums text-white/80">{Math.round((progress || 0) * 100)}%</span>
       </div>
-      <div className="h-1 bg-[#c9452c]">
+      <div className="h-1 bg-[#2f6df0]">
         <div className="h-full bg-white/80 transition-[width] duration-500" style={{ width: `${Math.round((progress || 0) * 100)}%` }} />
       </div>
     </div>

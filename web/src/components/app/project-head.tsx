@@ -34,7 +34,7 @@ export function ProjectHead({ project, state }: { project: Project; state: UsePr
           if (value && value !== project.title)
             state.act(() => api.renameProject(project.id, value));
         }}
-        className="-ml-2 w-full rounded-xl border border-transparent bg-transparent px-2 py-0.5 font-display text-[2.4rem] leading-tight tracking-[-0.01em] text-foreground transition-colors hover:border-border focus:border-border focus:bg-card focus:outline-none"
+        className="-ml-2 w-full rounded-lg border border-transparent bg-transparent px-2 py-1 text-2xl font-bold tracking-tight text-foreground transition-colors hover:border-border focus:border-border focus:bg-card focus:outline-none"
       />
       <ol className="flex flex-wrap gap-1.5">
         {steps.map(([key, label], i) => (

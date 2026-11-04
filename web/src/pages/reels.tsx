@@ -35,7 +35,7 @@ export function ReelsPage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="font-display text-[2.6rem] leading-none tracking-[-0.01em] sm:text-[3rem]">My reels</h1>
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">My reels</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           The reels and novels made in this browser.
           {ttl ? ` Each is kept for ${ttl} hours after you last touch it: download your reels.` : ""}

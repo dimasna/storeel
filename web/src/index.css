@@ -1,81 +1,67 @@
 @import "tailwindcss";
-@import "@fontsource-variable/plus-jakarta-sans";
-@import "@fontsource/instrument-serif/400.css";
-@import "@fontsource/instrument-serif/400-italic.css";
+@import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 
 /* Dark mode is a `.dark` class on <html>, set by next-themes. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Storeel's palette: a storyteller's page by lamplight. Light is warm paper and ink; dark is
- * the room after sunset, lit by the lamp. The primary is the lamp's amber (ink on it), the
- * accent its ember; the brand gradient is the flame (amber to ember), as in the logo
- * (web/src/components/brand/logo.tsx). Light first, then dark.
+ * Storeel's palette. The neutrals lean a little cool, toward the brand gradient (the logo's:
+ * teal, blue, violet); the accent is its teal and the primary its blue. Light first, then dark.
  */
 :root {
   color-scheme: light;
 
-  --background: #fbf8f2;
-  --foreground: #1f1a15;
-  --muted-foreground: #6e655a;
-  --card: #f4eee4;
-  --frame: #efe7da; /* behind the part studio's panels */
-  --panel-tile: #e9e0d1; /* tiles and bubbles inside a panel */
-  --border: #1f1a1514;
-  --border-strong: #1f1a1526;
+  --background: #fbfbfd;
+  --foreground: #101114;
+  --muted-foreground: #5f636e;
+  --card: #f2f3f6;
+  --frame: #e9eaee; /* the app frame around the panels */
+  --panel-tile: #e4e5ea; /* tiles and bubbles inside a panel */
+  --border: #1011140f;
+  --border-strong: #10111421;
 
-  --primary: #f0a53c;
-  --primary-foreground: #1f1a15;
-  --accent: #b9581c;
-  --accent-foreground: #fffaf2;
-  --danger: #c8412f;
-  --success: #2f8a57;
-  --warning: #c9810f;
+  --primary: #2f6df0;
+  --primary-foreground: #ffffff;
+  --accent: #00939d;
+  --accent-foreground: #061417;
+  --danger: #e5484d;
+  --success: #13a05a;
+  --warning: #e8930c;
 
   /* Frosted surfaces over the video and the gallery. */
-  --glass: #fbf8f2a8;
-  --glass-line: #1f1a1514;
-  --glass-solid: #fffdf8c9;
+  --glass: #fbfbfda3;
+  --glass-line: #10111414;
+  --glass-solid: #ffffffc4;
 
-  /* The flame: the logo's gradient. */
-  --gradient-accent: linear-gradient(120deg, #f6b24a 0%, #ea7a37 55%, #c9452c 100%);
-  /* The lamp's glow behind the hero. */
-  --glow: radial-gradient(ellipse at center, #f6b24a33 0%, #ea7a3714 38%, transparent 70%);
+  /* The brand gradient, the same as the logo's (web/src/components/brand/logo.tsx). */
+  --gradient-accent: linear-gradient(to right, #00c6cf 0%, #3d7bf7 55%, #7b5cfa 100%);
 }
 
 .dark {
   color-scheme: dark;
 
-  --background: #17130f;
-  --foreground: #f6efe5;
-  --muted-foreground: #a99d8d;
-  --card: #201b16;
-  --frame: #0f0c0a;
-  --panel-tile: #2c251e;
-  --border: #f6efe512;
-  --border-strong: #f6efe522;
+  --background: #121316;
+  --foreground: #f3f4f6;
+  --muted-foreground: #8a8d96;
+  --card: #1a1b1f;
+  --frame: #000000;
+  --panel-tile: #26272c;
+  --border: #ffffff0f;
+  --border-strong: #ffffff1f;
 
-  --primary: #f5b04b;
-  --primary-foreground: #1a140e;
-  --accent: #f08c4c;
-  --accent-foreground: #1a140e;
-  --danger: #ef6b57;
-  --success: #4fbf7f;
-  --warning: #f0a63a;
+  --primary: #3d7bf7;
+  --accent: #00c6cf;
 
-  --glass: #201b169e;
-  --glass-line: #f6efe517;
-  --glass-solid: #201b16bd;
-
-  --glow: radial-gradient(ellipse at center, #f5b04b2b 0%, #f08c4c12 40%, transparent 70%);
+  --glass: #1a1b1f99;
+  --glass-line: #ffffff17;
+  --glass-solid: #1a1b1fb8;
 }
 
 /* The Tailwind colour utilities (bg-card, text-muted-foreground, border-border-strong…). The names
    follow shadcn/ui; several are aliases of the palette above. */
 @theme inline {
-  --font-sans: "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, monospace;
 
   --color-background: var(--background);
@@ -92,8 +78,8 @@
   --color-panel-tile: var(--panel-tile);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
-  --color-input: var(--border-strong);
-  --color-ring: var(--accent);
+  --color-input: var(--border);
+  --color-ring: var(--border-strong);
 
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
@@ -126,31 +112,24 @@
   :disabled {
     cursor: default;
   }
-  ::selection {
-    background: color-mix(in srgb, var(--primary) 45%, transparent);
-  }
 }
 
-/* The hero's stamp: a small pill with a dot of lamp light. */
-.stamp {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
+/* The hero's badge: a pill with a thin rainbow edge, drawn as a ring masked to its border so the
+   pill itself stays see-through. */
+.rainbow-ring {
+  position: relative;
 }
-.stamp::before {
+.rainbow-ring::after {
   content: "";
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 999px;
-  background: var(--gradient-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
-}
-
-/* A page's paper: a faint grain over the background, so it reads as a sheet, not a screen. */
-.paper {
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.12  0 0 0 0 0.10  0 0 0 0 0.08  0 0 0 0.05 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  position: absolute;
+  inset: 0;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  background: conic-gradient(from 200deg, #00c6cf, #3d7bf7, #7b5cfa, #ff7ab2, #00c6cf) border-box;
+  mask:
+    linear-gradient(#000 0 0) padding-box exclude,
+    linear-gradient(#000 0 0) border-box;
+  pointer-events: none;
 }
 
 /* Gallery tiles play like short videos: a slow push-in (the caption is read word by word in JS). */

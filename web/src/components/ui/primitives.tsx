@@ -17,13 +17,13 @@ export function Card({
   return (
     <section
       className={cn(
-        "rounded-[22px] border border-border bg-card p-5 shadow-[0_1px_0_rgb(0_0_0/0.02)] sm:p-6",
+        "rounded-3xl border border-border bg-card/60 p-5 backdrop-blur-sm sm:p-6",
         className,
       )}
     >
       {(title || actions) && (
         <div className="mb-4 flex items-center justify-between gap-3">
-          {title ? <h2 className="font-display text-[22px] leading-tight text-foreground">{title}</h2> : <span />}
+          {title ? <h2 className="text-base font-semibold text-foreground">{title}</h2> : <span />}
           {actions}
         </div>
       )}
@@ -34,7 +34,7 @@ export function Card({
 
 export function SubHeading({ children }: { children: ReactNode }) {
   return (
-    <h3 className="mt-2 mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">
+    <h3 className="mt-2 mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
       {children}
     </h3>
   );
@@ -158,7 +158,7 @@ export function Banner({
 
 export function ProgressBar({ value }: { value: number }) {
   return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-border-strong">
+    <div className="h-2 w-full overflow-hidden rounded-full bg-border-strong">
       <div
         className="h-full rounded-full transition-[width] duration-300"
         style={{
