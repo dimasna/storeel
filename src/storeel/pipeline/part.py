@@ -179,6 +179,9 @@ class Job:
     refs: list[str] = field(default_factory=list)  # ids of pictures this one is drawn from
     name: str = ""  # a character's name, for the portrait check
     screen: bool = False  # drawn on a green screen and keyed out (a scene, a close-up)
+    # A variant written out in words: drawn without the portrait when the safety filter keeps
+    # refusing it with the portrait (a person made younger from their own picture, say).
+    alone: str = ""
 
 
 @dataclass
@@ -273,15 +276,17 @@ class Painter:
                     picture.checked, picture.problems = True, [] if check.ok else check.problems
             files.write_bytes(job.key, take.png)
             picture.width, picture.height, picture.cutout = take.width, take.height, take.cutout
+            picture.prompt = " ".join(p["text"] for p in job.request.content if p["type"] == "input_text")
         except MetaAPIError as exc:
             picture.key, picture.error = None, str(exc)
             if exc.content_policy:
-                portraits = job.kind == "prop" and any(
-                    p["type"] == "input_image" for p in job.request.content
+                images = any(p["type"] == "input_image" for p in job.request.content)
+                without = (job.kind == "prop" and images) or (
+                    job.kind == "variant" and bool(job.alone) and not images
                 )
                 picture.error = (
                     f"Muse Image's safety filter refused this picture {POLICY_TRIES} times"
-                    + (", also without the portraits" if portraits else "")
+                    + (", also without the portraits" if without else "")
                     + ". It often passes on another try: press Update to draw it again."
                 )
             self.ctx.log(f"Muse Image: {job.id} failed: {exc}")
@@ -291,11 +296,20 @@ class Painter:
         """The picture, drawn again while the safety filter refuses it. A scene it keeps refusing
         with the characters' portraits is drawn from its words alone: the people may look less
         like their portraits, but the beat has its picture (on the real API, both scenes refused
-        with portraits were drawn without them)."""
+        with portraits were drawn without them). A variant it keeps refusing with its portrait
+        (on the real API: an old woman drawn forty years younger from her own portrait, refused
+        three times) is drawn from its words alone too."""
         try:
             return self._take(job, job.request)
         except MetaAPIError as exc:
             content = job.request.content
+            if exc.content_policy and job.kind == "variant" and job.alone:
+                self.ctx.log(
+                    f"Muse Image: {job.id} is drawn from its words only, without {job.name}'s portrait"
+                )
+                # The portrait check and its redraw then go by these words too.
+                job.request = replace(job.request, content=[_text(job.alone)], references=[])
+                return self._take(job, job.request)
             words = [
                 p for p in content if p["type"] == "input_text" and not p["text"].startswith("Reference ")
             ]
@@ -472,6 +486,14 @@ def make_part_pictures(ctx: JobContext, only: set[str] | None = None) -> dict[st
             f" the whole body visible from head to feet, on a {PLAIN}. Style: {style}. {NO_TEXT}"
         )
         request = Request([_text(text)], PORTRAIT, False, [v.base])
+        look = chapter_look(c, n)
+        alone = (
+            f"Full-body character portrait of {c.name}, a {c.subject}: {c.description.rstrip('.')}."
+            + (f" Wearing: {look.outfit.rstrip('.')}." if look and look.outfit else "")
+            + f" At this moment: {v.change.rstrip('.')} (this wins over anything above). One figure"
+            f" alone, standing, facing the viewer, the whole body visible from head to feet with space"
+            f" around it, arms relaxed, on a {PLAIN}. Style: {style}. {NO_TEXT}"
+        )
         second.append(
             Job(
                 vid,
@@ -483,6 +505,7 @@ def make_part_pictures(ctx: JobContext, only: set[str] | None = None) -> dict[st
                 subject=c.subject,
                 refs=[v.base],
                 name=c.name,
+                alone=alone,
             )
         )
 

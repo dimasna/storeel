@@ -90,8 +90,8 @@ Rules:
 - edit_caption, use_script_words, stress_words, show_pictures, time_picture, set_poll, \
 set_style, set_beat_screen, set_beat_switch and undo apply immediately.
 - change_picture, change_outfit and render only propose the work: the user approves it with a \
-button. Never say a picture was redrawn or a reel was rendered; say it is waiting for their \
-approval.
+button. Never say a picture was redrawn or a reel was rendered, and never call a proposal ready \
+or done: say it waits for their approval (e.g. "the render is waiting for your approval").
 - For change_outfit, write the whole outfit in English, like the current one, and change only \
 what the user asked for (a new colour keeps the rest of the outfit). Pass on the notes \
 change_outfit returns.
@@ -1289,10 +1289,13 @@ def _who(project: Project, show: StoryShow, names: dict[str, str] | None = None)
     bases = {v.id: v.base for v in story.variants} if story else {}
     people = [names.get(c) or names.get(bases.get(c, ""), c.replace("_", " ")) for c in show.characters]
     parts = [" and ".join(people)] if people else []
+    # Props and photos by what they show (their ids are the writer's, in any language).
+    props = {p.id: p.subject or _short(p.description, 40) for p in story.props} if story else {}
+    photos = {p.id: p.title or _short(p.description, 40) for p in story.photos} if story else {}
     if show.prop:
-        parts.append(show.prop.replace("_", " "))
+        parts.append(props.get(show.prop) or show.prop.replace("_", " "))
     if show.photo:
-        parts.append(show.photo.replace("_", " "))
+        parts.append(photos.get(show.photo) or show.photo.replace("_", " "))
     return ", ".join(parts) or "no pictures"
 
 
