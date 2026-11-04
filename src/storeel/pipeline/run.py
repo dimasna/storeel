@@ -33,6 +33,13 @@ def _language(project: Project) -> str:
     return project.style.language
 
 
+def faces_wanted(project: Project) -> bool:
+    """Whether a part's takes need their face found: to blur only behind a picture over it, or
+    (in their own video) for the speaker to know where their head is when making room."""
+    style = project.style
+    return style.speaker_behind == "auto" or (style.speaker_room == "auto" and style.background == "dalang")
+
+
 def _keywords(project: Project) -> list[str]:
     """Names from the script, so the transcription spells them the way the script does."""
     if project.story is not None:
@@ -88,7 +95,7 @@ def _part_pictures(ctx: JobContext, end: float = 1.0) -> None:
     make_part_pictures(ctx)
     ctx.flush_usage()
     ctx.check()
-    if ctx.project().style.speaker_behind == "auto":
+    if faces_wanted(ctx.project()):
         ctx.step("Finding the face", end - 0.08, end - 0.04)
         find_part_faces(ctx)
     if title_needs_masks(ctx.project()):
@@ -219,7 +226,7 @@ def _render(ctx: JobContext, fit_mb: int | None) -> None:
         project = ctx.project()
     compositor = None
     if project.path == "novel":
-        if keyed and project.style.speaker_behind == "auto" and not project.part_faces:
+        if keyed and faces_wanted(project) and not project.part_faces:
             find_part_faces(ctx)  # chosen after processing: check the face now
             project = ctx.project()
         cast: dict[str, BibleCharacter] = {}

@@ -5,8 +5,7 @@ through the studio itself: process the part once, then render it in each style, 
 Each becomes a few seconds of it, silent and small, cut from the same moments of every render so
 only the style changes from one to the next, and a still from one of those moments.
 
-    uv run python scripts/make_style_previews.py RENDERS --cuts 0.3-2.8,25.6-27.9,33.8-36.6 \
-        --still 26.6 --still-for dalang=35.2
+    uv run python scripts/make_style_previews.py RENDERS --cuts 0.3-2.8,25.6-27.9,33.8-36.6 --still 26.6
 """
 
 from __future__ import annotations

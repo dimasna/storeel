@@ -160,6 +160,15 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   highlight colour and a light outline; a photo card that would cover little of you goes
   behind you, one over your face stays in front. You are blurred only while a picture is in
   front of you. The title behind you reuses these masks.
+- **Room for the pictures**, in every look: while a picture, a note, chat bubbles or the
+  poll is up top, you step back, smaller about the bottom middle of your video, until the
+  top of your head is just under it, and come back when it goes (eased over half a second;
+  pictures that follow closely keep you back in between, so you never bob). The head comes
+  from your masks when you are cut out, and from the face found in each take in your own
+  video, which then shrinks over a blurred, dimmed copy of itself. You get no smaller than
+  60%, and a picture that only grazes your hair moves nothing. It is free: the encoder
+  scales your video frame by frame on the same curve the cut-out follows. *When a picture
+  is up top* turns it off.
 - **Your size and place** in the cut-out looks: make yourself smaller or bigger and move
   anywhere on the frame, with three sliders or by asking the editor ("make me small in the
   bottom left corner", "a bit bigger", "move me up a little"). The encoder scales and moves
@@ -304,8 +313,9 @@ A novel is told as a series: one reel per chapter, called a
   storyteller): a "Part N" badge from the first frame, the hook on the sharp speaker, then
   each beat's red tag, its photo card, scene, cut-out object, note or chat bubbles up top,
   and up to two characters standing at the bottom (a character's name over their head the
-  first time you voice them). The speaker stays sharp and is blurred only while a picture
-  covers their face (SAM finds it once in each take, about $0.0025 a take). Then the poll
+  first time you voice them). While a picture, a note or chats are up top, the speaker steps
+  back, smaller, under it (see "Room for the pictures"), so it never covers their face (SAM
+  finds the face once in each take, about $0.0025 a take). Then the poll
   screen and the end card. The *scene* and *studio* looks cut you out instead (see "A
   background behind you"). Pictures follow your recording: with one video of the whole part,
   each line starts where its words are heard.

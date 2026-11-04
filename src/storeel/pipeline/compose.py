@@ -49,6 +49,7 @@ from .layout import (
     card_box,
     character_x,
     covered,
+    expand_face,
     object_box,
     to_region,
 )
@@ -108,6 +109,15 @@ SWING_MIN = 1.4  # seconds a photo card must be up to swing in through 3D (see m
 CUTOUT_FEATHER = 1.2  # pixels at half size: the soft edge of the cut-out speaker
 OUTLINE = (4.0, 3.2, 230)  # the "studio" outline: blur (half-size px), gain, opacity
 BEHIND_SEEN = 0.6  # in "studio", a photo card goes behind the speaker when this much of it still shows
+# Making room (Style.speaker_room): while a picture up top is showing, the speaker steps back,
+# smaller about the bottom middle of their video, until the top of their head is under it.
+ROOM_GAP = 0.012  # of the height, between the picture's lower edge and the top of the head
+ROOM_SMALLEST = 0.6  # of their size: never smaller (a picture low down may then still touch them)
+ROOM_SKIP = 0.97  # a smaller step than this is not taken: the picture only grazes the hair
+ROOM_EARLY, ROOM_LATE = 0.15, 0.40  # seconds: the step back starts before a picture, ends after it
+ROOM_EASE = 0.45  # seconds the step takes, eased
+ROOM_JOIN = 1.0  # pictures closer than this keep the speaker back in between (no bobbing)
+ROOM_HEAD = 0.05  # the share of a picture's frames the head may rise above the top used (SAM's strays)
 # A theme's effect on the stressed words (see themes.py): how long each moves after the word
 # comes in, in seconds (its frames are drawn anew meanwhile), and what it leaves behind.
 EFFECT_SECONDS = {"pulse": 1.75, "shake": 0.6, "stamp": 0.4, "flash": 0.5, "glow": 0.9}
@@ -579,6 +589,19 @@ class Placement:
         s, dx, dy = self.scale, self.x / W, self.y / H
         return (dx + box[0] * s, dy + box[1] * s, dx + box[2] * s, dy + box[3] * s)
 
+    @property
+    def anchor(self) -> tuple[float, float]:
+        """The bottom middle of the placed video (pixels): what a step back scales about."""
+        return self.x + self.width / 2, self.y + self.height
+
+    def stepped(self, k: float) -> Placement:
+        """This placement made `k` times smaller about its bottom middle (making room)."""
+        if k >= 1.0:
+            return self
+        ax, ay = self.anchor
+        width, height = self.width * k, self.height * k
+        return Placement(round(width), round(height), round(ax - width / 2), round(ay - height))
+
 
 def placement(style: Style) -> Placement:
     """The speaker's placement from the style: scaled about the bottom middle of the video."""
@@ -643,27 +666,58 @@ class _Track:
     width: int
     height: int
     place: Placement = field(default_factory=Placement)  # where the speaker's video is put
-    _half: dict[int, np.ndarray] = field(default_factory=dict, repr=False)
+    _raw: dict[int, np.ndarray] = field(default_factory=dict, repr=False)
+    _tops: np.ndarray | None = field(default=None, repr=False)
 
-    def _mask(self, k: int) -> np.ndarray:
+    def _recorded(self, k: int) -> np.ndarray:
+        """Frame `k`'s mask as recorded (float 0..1, at the masks' size)."""
         k = min(max(k, 0), len(self.packed) - 1)
-        mask = self._half.get(k)
+        mask = self._raw.get(k)
         if mask is None:
             bits = np.unpackbits(self.packed[k])[: self.width * self.height]
-            mask = self.place.move(bits.reshape(self.height, self.width).astype(np.float32))
-            if len(self._half) > 6:  # frames are read in order: keep only the latest few
-                self._half.pop(min(self._half))
-            self._half[k] = mask
+            mask = bits.reshape(self.height, self.width).astype(np.float32)
+            if len(self._raw) > 6:  # frames are read in order: keep only the latest few
+                self._raw.pop(min(self._raw))
+            self._raw[k] = mask
         return mask
 
-    def half(self, t: float) -> Image.Image:
-        """The speaker at `t` (L, half size, soft-edged)."""
+    def _mask(self, k: int) -> np.ndarray:
+        return self.place.move(self._recorded(k))
+
+    def half(self, t: float, place: Placement | None = None) -> Image.Image:
+        """The speaker at `t` (L, half size, soft-edged), where `place` puts them (by default
+        where the style does)."""
         position = max(0.0, t * self.fps)
         k = int(position)
         f = position - k
-        mask = self._mask(k) if f < 0.05 else (1 - f) * self._mask(k) + f * self._mask(k + 1)
+        mask = self._recorded(k) if f < 0.05 else (1 - f) * self._recorded(k) + f * self._recorded(k + 1)
+        mask = (place or self.place).move(mask)
         image = Image.fromarray((mask * 255).astype(np.uint8))
         return image.filter(ImageFilter.GaussianBlur(CUTOUT_FEATHER))
+
+    def top(self, start: float, end: float, x0: float, x1: float) -> float:
+        """The top of the speaker's head from `start` to `end` (a fraction of the frame, where the
+        style puts them) in the columns `x0` to `x1` (fractions of the frame); 1.0 when they are
+        never there. The highest few frames are left out: a stray of SAM's is not a head."""
+        if self._tops is None:  # each frame's highest speaker pixel in each column, as recorded
+            tops = np.full((len(self.packed), self.width), self.height, dtype=np.int16)
+            for k in range(len(self.packed)):
+                bits = np.unpackbits(self.packed[k])[: self.width * self.height]
+                mask = bits.reshape(self.height, self.width).astype(bool)
+                tops[k] = np.where(mask.any(axis=0), mask.argmax(axis=0), self.height)
+            self._tops = tops
+        s, dx, dy = self.place.scale, self.place.x / W, self.place.y / H
+        c0 = max(0, int((x0 - dx) / s * self.width))
+        c1 = min(self.width, int(np.ceil((x1 - dx) / s * self.width)))
+        first = max(0, int(start * self.fps))
+        last = min(len(self.packed), int(np.ceil(end * self.fps)) + 1)
+        if c1 <= c0 or last <= first:
+            return 1.0
+        per_frame = self._tops[first:last, c0:c1].min(axis=1)
+        highest = float(np.quantile(per_frame, ROOM_HEAD)) if len(per_frame) > 3 else float(per_frame.min())
+        if highest >= self.height:
+            return 1.0
+        return dy + highest / self.height * s
 
     def visible(self, start: float, end: float, box: tuple[float, float, float, float]) -> float:
         """The share of `box` (frame pixels) the speaker leaves uncovered from `start` to `end`."""
@@ -730,6 +784,11 @@ class _Card:
     intro: Motion | None = None
     picture: Image.Image | None = None  # a photo card's picture itself (a "scene" backdrop)
     entry: str = ""
+    # The speaker makes room for it (a picture up top, a note, chat bubbles, the poll), and where
+    # the top of their head is meanwhile in their own video (from the face boxes; None: not
+    # known). Cut out, the masks say where the head is instead.
+    room: bool = False
+    head: float | None = None
     _puppet: Image.Image | None = field(default=None, repr=False)
 
     @property
@@ -811,6 +870,59 @@ def _box(card: _Card) -> tuple[float, float, float, float]:
 def _top_left(card: _Card) -> tuple[int, int]:
     """Where a card's sprite goes on the frame, as _Card.draw puts it."""
     return round(card.center[0] - card.image.width / 2), round(card.center[1] - card.image.height / 2)
+
+
+def _seen_box(card: _Card) -> tuple[float, float, float, float]:
+    """The box of what is seen of a card on the frame (pixels): its picture or text, not its
+    soft shadow."""
+    box = (
+        card.image.getchannel("A").point(lambda v: 255 if v > 128 else 0).getbbox()
+        if card.image.mode == "RGBA"
+        else None
+    )
+    x, y = _top_left(card)
+    if box is None:
+        return x, y, x + card.image.width, y + card.image.height
+    return x + box[0], y + box[1], x + box[2], y + box[3]
+
+
+def head_top(faces: list[Region] | None, x0: float, x1: float) -> float | None:
+    """The top of the speaker's head (a fraction of the frame) from their face boxes in the
+    columns `x0` to `x1` (fractions), hair included; 1.0 with no face there, None when the faces
+    were not looked for."""
+    if faces is None:
+        return None
+    tops = [expand_face(f).y0 for f in faces if f.x1 > x0 and f.x0 < x1]
+    return min(tops, default=1.0)
+
+
+def room_ease(t: float, windows: list[tuple[float, float, float]]) -> float:
+    """How big the speaker is at `t` (1 as placed) for the windows (start, end, size) where they
+    make room: they step back from ROOM_EARLY before a window, eased over ROOM_EASE, and come
+    back after it. ffmpeg_room() writes this same curve for the encoder."""
+    k = 1.0
+    for start, end, size in windows:
+        up = _smooth((t - (start - ROOM_EARLY)) / ROOM_EASE)
+        down = _smooth(((end + ROOM_LATE) - t) / ROOM_EASE)
+        k -= (1.0 - size) * min(up, down)
+    return k
+
+
+def ffmpeg_room(windows: list[tuple[float, float, float]], fps: float) -> str:
+    """room_ease() as an ffmpeg expression of `in`, the perspective filter's frame number (it
+    counts from 1)."""
+    t = f"((in-1)/{fps:.6f})"
+
+    def smooth(x: str) -> str:
+        c = f"clip({x},0,1)"
+        return f"({c}*{c}*(3-2*{c}))"
+
+    terms = [
+        f"{1.0 - size:.5f}*min({smooth(f'({t}-{start - ROOM_EARLY:.4f})/{ROOM_EASE}')},"
+        f"{smooth(f'({end + ROOM_LATE:.4f}-{t})/{ROOM_EASE}')})"
+        for start, end, size in windows
+    ]
+    return "(1-" + "-".join(terms) + ")" if terms else "1"
 
 
 def _load_track(project: Project, files: ProjectFiles) -> _Track | None:
@@ -899,6 +1011,7 @@ class Compositor:
             raise PipelineError("process the clips before rendering")
         self.duration = project.source.duration
         fps = project.source.fps
+        self.fps = fps
         self.overlay_fps = fps if fps <= OVERLAY_FPS_MAX else fps // 2
         # A genre theme dresses the look: it fills in the caption style and highlight where the
         # user kept the defaults, and the rest of what it changes is set below.
@@ -988,14 +1101,20 @@ class Compositor:
                     keep.append(item)
             self.cards = keep
             self.cutaways.sort(key=lambda c: c.start)
+        # While a picture is up top, the speaker steps back under it (see _make_room).
+        self.roomed: set[int] = set()  # ids of the cards they make room for
+        self.room = self._make_room() if style.speaker_room == "auto" else []
         self.behind: set[int] = set()  # ids of the photo cards drawn behind the cut-out speaker
         if self.background == "studio" and self.track is not None:
             for item in self.cards:
                 if (
                     item.kind == "photo"
+                    and id(item) not in self.roomed
                     and self.track.visible(item.start, item.end, _box(item)) >= BEHIND_SEEN
                 ):
                     self.behind.add(id(item))
+        if self.room:  # stepped back under the pictures, they need no blur behind them
+            self.blurs = _minus(self.blurs, [(a - ROOM_EARLY, b + ROOM_LATE) for a, b, _ in self.room])
         if self.background != "dalang":  # no blur while a picture is behind them, only over them
             clear = [(c.start, c.end) for c in self.cutaways] if self.background == "scene" else []
             clear += [(c.start, c.end) for c in self.cards if id(c) in self.behind]
@@ -1154,6 +1273,42 @@ class Compositor:
             return None
         return title
 
+    def _make_room(self) -> list[tuple[float, float, float]]:
+        """The stretches (start, end, size) where the speaker steps back, smaller about the bottom
+        middle of their video, so that each picture up top shows clear above their head. They
+        get as small as the lowest picture then needs (never under ROOM_SMALLEST), and stay so
+        through pictures that follow closely. The head is found in the masks when they are cut
+        out, else from the face boxes of their own video; where neither is known, they stay."""
+        ay = self.place.anchor[1] / H
+        steps: list[tuple[float, float, float]] = []
+        for item in self.cards:
+            if not item.room or item.end - item.start < 0.3:
+                continue
+            x0, _, x1, y1 = _seen_box(item)
+            top = (
+                self.track.top(item.start, item.end, x0 / W, x1 / W) if self.track is not None else item.head
+            )
+            bottom = y1 / H
+            if top is None or top >= bottom or ay - top <= 0.05:
+                continue  # not known, or the picture is all above them
+            size = (ay - bottom - ROOM_GAP) / (ay - top)
+            if size >= ROOM_SKIP:
+                continue
+            steps.append((item.start, item.end, max(ROOM_SMALLEST, size)))
+            self.roomed.add(id(item))
+        merged: list[list[float]] = []
+        for start, end, size in sorted(steps):
+            if merged and start - merged[-1][1] < ROOM_JOIN:
+                merged[-1][1] = max(merged[-1][1], end)
+                merged[-1][2] = min(merged[-1][2], size)
+            else:
+                merged.append([start, end, size])
+        return [(a, min(b, self.duration), k) for a, b, k in merged]
+
+    def place_at(self, t: float) -> Placement:
+        """Where the speaker's video is at `t`: as placed, or stepped back to make room."""
+        return self.place.stepped(room_ease(t, self.room)) if self.room else self.place
+
     def _build_pictures(self, project: Project, files: ProjectFiles) -> list[tuple[float, float]]:
         """The moments' pictures as cutaways and cards; returns the spans to blur the speaker in."""
         style = project.style
@@ -1178,17 +1333,19 @@ class Compositor:
             kind = "photo"  # a card; a cut-out standing at the bottom is a character
             if is_cutout(moment):
                 kind = "character" if is_standing(moment, picture) else ""
+            faces = moved_faces(speaker_place(project), moment.faces)
             self.cards.append(
                 _Card(
                     start, end, placed.image, placed.center, ident=len(self.cards) + 1, kind=kind,
-                    picture=picture if kind == "photo" else None,
+                    picture=picture if kind == "photo" else None, room=kind != "character",
+                    head=head_top(faces, placed.box.x0, placed.box.x1),
                 )
             )  # fmt: skip
             blur = style.speaker_behind == "blur" or (
                 style.speaker_behind == "top" and not is_standing(moment, picture)
             )
             if style.speaker_behind == "auto":
-                hit = covered(placed.box, moved_faces(speaker_place(project), moment.faces))
+                hit = covered(placed.box, faces)
                 if hit is None:
                     self.unchecked_faces += 1
                 blur = hit is not False
@@ -1281,7 +1438,7 @@ class Compositor:
         """Take what is drawn so far out where the speaker is, so they stand in front of it (the
         video under the layer shows through); "studio" draws an outline around them too."""
         assert self.track is not None
-        half = self.track.half(t)
+        half = self.track.half(t, self.place_at(t))
         person = half.resize((W, H), Image.BILINEAR)
         alpha = canvas.getchannel("A")
         top = ImageChops.multiply(alpha.crop((0, 0, W, H)), ImageChops.invert(person))
@@ -1379,7 +1536,34 @@ def encode(
         graded = f"[0:v]{compositor.grade}[graded];"
         video = "[graded]"
     place = compositor.place
-    if not place.identity:
+    if compositor.room:
+        # Making room: the speaker's video, placed and then stepped back over time (scaled about
+        # its bottom middle frame by frame, on the curve the cut-out's masks follow), over a
+        # blurred, dimmed copy of their own video where it no longer fills the frame. The 2-pixel
+        # transparent border keeps the stretched edge pixels out.
+        k = ffmpeg_room(compositor.room, compositor.fps)
+        ax, ay = place.anchor
+
+        def corner(x: float, y: float) -> tuple[str, str]:
+            gx = f"'{2 + ax:.3f}+{k}*({place.x + x * place.scale - ax:.3f})'"
+            gy = f"'{2 + ay:.3f}+{k}*({place.y + y * place.scale - ay:.3f})'"
+            return gx, gy
+
+        corners = [corner(-2, -2), corner(W + 2, -2), corner(-2, H + 2), corner(W + 2, H + 2)]
+        named = ":".join(f"x{i}={gx}:y{i}={gy}" for i, (gx, gy) in enumerate(corners))
+        dim = BLUR_DIM
+        moved = (
+            f"{video}split=2[stepping][around];"
+            f"[around]scale={W // 4}:{H // 4},gblur=sigma={BLUR_SIGMA},"
+            f"lutyuv=y='16+(val-16)*{dim}':u='128+(val-128)*{dim}':v='128+(val-128)*{dim}',"
+            f"scale={W}:{H}[ground];"
+            f"[stepping]format=yuva420p,pad={W + 4}:{H + 4}:2:2:color=black@0,"
+            f"perspective={named}:interpolation=linear:sense=destination:eval=frame,"
+            f"crop={W}:{H}:2:2[stepped];"
+            "[ground][stepped]overlay=x=0:y=0:format=yuv420[moved];"
+        )
+        video = "[moved]"
+    elif not place.identity:
         # The speaker resized and moved (a cut-out look): their video on black, where the
         # layer's cut-out of them is; the layer covers the rest.
         moved = (
@@ -1484,6 +1668,12 @@ def compose(
             )
     if compositor.background_note:
         ctx.log(compositor.background_note)
+    if compositor.room:
+        smallest = min(k for _, _, k in compositor.room)
+        ctx.log(
+            f"making room: the speaker steps back under {len(compositor.roomed)} picture(s) up top,"
+            f" in {len(compositor.room)} stretch(es), down to {smallest:.0%} of their size"
+        )
     if compositor.unchecked_faces:
         ctx.log(
             f"{compositor.unchecked_faces} picture(s) have no face check yet, so the speaker is blurred"

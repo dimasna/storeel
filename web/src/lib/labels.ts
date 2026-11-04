@@ -59,6 +59,10 @@ export const LABELS: Record<string, Record<string, string>> = {
     auto: "Blur only when the face is covered",
     top: "Blur only behind a picture at the top",
   },
+  speaker_room: {
+    auto: "Step back under a picture up top",
+    off: "Stay where you are",
+  },
   display: { none: "Speaker only", overlay: "Card", cutout: "Cut-out", cutaway: "Full screen" },
   novel_language: { id: "Indonesian", en: "English" },
   narration: {

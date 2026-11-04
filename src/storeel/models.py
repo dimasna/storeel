@@ -76,6 +76,10 @@ class Style(Strict):
     speaker_scale: float = Field(1.0, ge=0.3, le=1.6)
     speaker_x: float = Field(0.5, ge=0.0, le=1.0)
     speaker_y: float = Field(1.0, ge=0.6, le=1.8)
+    # While a picture up top is showing (a card, a cut-out object, a note, chat bubbles, the poll),
+    # the speaker steps back, smaller about the bottom middle of their video, so it never covers
+    # them, in every look ("auto"); "off" keeps them where they are, behind it (speaker_behind).
+    speaker_room: Literal["auto", "off"] = "auto"
 
     _clean_watermark = field_validator("watermark")(_one_line)
     _clean_title = field_validator("title_text")(_one_line)

@@ -24,7 +24,7 @@ from ..files import ProjectFiles
 from ..models import Beat, BibleCharacter, Project, Story, StoryShow, Word
 from .align import Text, align, tokens
 from .analyze import find_quote
-from .compose import Compositor, H, W, _Card, moved_faces, speaker_place, speaker_side
+from .compose import Compositor, H, W, _Card, _seen_box, head_top, moved_faces, speaker_place, speaker_side
 from .layout import covered, to_region
 from .motion import Renderer
 from .render import (
@@ -378,6 +378,7 @@ class Sprites:
         # ids of the pictures up top (photo and scene cards, cut-out objects): what may cover the
         # storyteller's face (the characters standing at the bottom, notes and chats never count)
         self.up_top: set[int] = set()
+        self.names: set[int] = set()  # ids of the name tags over the characters' heads
         self.speaker_side = speaker_side(project)
 
     def image(self, picture_id: str) -> Image.Image | None:
@@ -534,6 +535,7 @@ class Sprites:
     ) -> tuple[Image.Image, tuple[int, int]]:
         """`text` centred just above the top of the picture in `sprite` (not its shadow)."""
         tag = self._cached(("name", text), lambda: name_tag(text, round(NAME_SIZE * H), round(0.9 * W)))
+        self.names.add(id(tag))
         top = _solid(sprite)[1]
         bottom = _solid(tag)[3]
         tx = min(max(0, x + sprite.width // 2 - tag.width // 2), W - tag.width)
@@ -613,6 +615,7 @@ class PartCompositor(Compositor):
             animate: bool = True,
             enter: bool = True,
             group: str = "",
+            room: bool = True,
         ) -> _Card:
             nonlocal ident
             ident += 1
@@ -621,6 +624,9 @@ class PartCompositor(Compositor):
             card = _Card(
                 start, end, image, center, ident=ident, animate=animate, enter=enter, kind=kind, group=group,
                 picture=None if group else sprites.originals.get(id(image)),
+                # what is up top (a picture, a note, chats, the poll); not the people standing at
+                # the bottom with their names, the badge or the end screen
+                room=room and not group and kind != "character" and id(image) not in sprites.names,
             )  # fmt: skip
             self.cards.append(card)
             return card
@@ -645,6 +651,7 @@ class PartCompositor(Compositor):
         # when it leaves. `sides`: where each standing character is, so nobody jumps across.
         live: dict[tuple[int, int, int], _Card] = {}
         sides: dict[str, str] = {}
+        unknown: set[int] = set()  # ids of the cards up while a take's face was not looked for
         for line in lines:
             if line.kind == "hook":
                 live, sides = {}, {}
@@ -668,6 +675,16 @@ class PartCompositor(Compositor):
                     card = add(image, xy, line.start, line.end, group="cta" if line.kind == "cta" else "")
                 now[key] = card
             live = now
+            heads = moved_faces(place, faces.get(line.take))
+            for card in now.values():  # where the head is while it is up (their own video)
+                if not card.room:
+                    continue
+                x0, _, x1, _ = _seen_box(card)
+                top = head_top(heads, x0 / W, x1 / W)
+                if top is None:
+                    unknown.add(id(card))
+                elif card.head is None or top < card.head:
+                    card.head = top
             behind = style.speaker_behind
             blur = behind == "blur"
             if behind == "top":
@@ -685,12 +702,15 @@ class PartCompositor(Compositor):
                     )
             if blur and line.kind != "hook":
                 spans.append((line.start, line.end))
+        for card in self.cards:
+            if id(card) in unknown:
+                card.head = None
         if lines:
             part = f"Part {story.part}"
             mark = badge(part, story.chapter_title, round(BADGE_SIZE * H), round(0.86 * W))
             end = next((x.start for x in lines if x.kind == "cta"), self.duration)
             add(
-                mark, (round(BADGE_XY[0] * W), round(BADGE_XY[1] * H)), 0.0, end, enter=False
+                mark, (round(BADGE_XY[0] * W), round(BADGE_XY[1] * H)), 0.0, end, enter=False, room=False
             )  # on the cover frame
         return spans
 

@@ -133,6 +133,15 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
         <SelectField name="visual_style" label="Look" hint={pictureHint} />
         <SelectField name="visuals" label="How many" />
         <SelectField name="picture_layout" label="Layout" hint="Each picture can also be changed in Review." />
+        <SelectField
+          name="speaker_room"
+          label="When a picture is up top"
+          hint={
+            style.speaker_room === "auto"
+              ? "You step back, smaller, so the picture never covers you, and come back when it goes. Your own video shrinks over a blurred copy of it; cut out, you stand smaller in front of the backdrop."
+              : undefined
+          }
+        />
         <SelectField name="speaker_behind" label="Speaker behind a card or cut-out" />
         {project.path === "video" ? <SelectField name="language" label="Spoken language" /> : null}
 

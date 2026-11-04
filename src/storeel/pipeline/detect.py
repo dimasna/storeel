@@ -206,7 +206,9 @@ def find_faces(
     def needs(m: Moment) -> bool:
         if m.display == "cutaway" or m.faces is not None or not m.enabled:
             return False
-        return style.speaker_behind == "auto" or m.display == "cutout"
+        # (in their own video, a speaker making room finds their head from the face)
+        stepping = style.speaker_room == "auto" and style.background == "dalang"
+        return style.speaker_behind == "auto" or stepping or m.display == "cutout"
 
     wanted = [m for m in analysis.moments if needs(m) and (only is None or m.id in only)]
     if not wanted:

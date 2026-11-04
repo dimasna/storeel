@@ -73,8 +73,8 @@ speak. Use only pictures listed in 'drawn'.
 screen, the reel's look (dalang: their own video with the characters at the bottom and the \
 pictures up top; or cut out in front of a scene or a studio backdrop), the genre theme that sets \
 its mood (romance, horror, mystery, drama, legend), the cut-out speaker's \
-size and place, watermark, how the speaker looks behind a picture, the pictures' look and \
-amount (set_style).
+size and place, whether the speaker steps back under a picture up top, watermark, how the \
+speaker looks behind a picture, the pictures' look and amount (set_style).
 - Propose rendering the reel (render).
 
 Rules:
@@ -166,9 +166,12 @@ watermark: text shown over \
 the video ("" for none). \
 watermark_position: center, top or bottom. speaker_behind: how the speaker looks behind a \
 picture: blur, sharp, auto (blur only when the picture covers the face), top (blur only behind \
-a picture in the upper part). picture_layout: cards (pictures over the speaker) or full (full \
-screen). visual_style: the pictures' look. visuals: how many pictures (off, few, balanced, \
-many). language: the spoken language (auto, id, en)."""
+a picture in the upper part). speaker_room: auto (the default: while a picture, note, chat or \
+the poll is up top, the speaker steps back, smaller, so it never covers them, in every look; \
+their own video shrinks over a blurred copy of it) or off (they stay where they are, behind it, \
+as speaker_behind says); set off for "keep me full size". picture_layout: cards (pictures over \
+the speaker) or full (full screen). visual_style: the pictures' look. visuals: how many \
+pictures (off, few, balanced, many). language: the spoken language (auto, id, en)."""
 
 DISPLAY_WORDS = {"overlay": "card", "cutout": "cut-out", "cutaway": "full-screen picture"}
 PROPOSALS = frozenset({"picture", "outfit", "render"})  # the actions that wait for approval
