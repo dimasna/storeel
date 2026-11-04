@@ -156,7 +156,7 @@ def get_settings() -> Settings:
         image_parallel=_get_int("STOREEL_IMAGE_PARALLEL", 4),
         asr_model=_get("STOREEL_ASR_MODEL", "muse-voice-transcribe-1.0"),
         sam_model=_get("STOREEL_SAM_MODEL", "sam-3.1"),
-        max_input_seconds=_get_int("STOREEL_MAX_INPUT_SECONDS", 180, minimum=5),
+        max_input_seconds=_get_int("STOREEL_MAX_INPUT_SECONDS", 300, minimum=5),
         max_upload_mb=_get_int("STOREEL_MAX_UPLOAD_MB", 1024),
         workers=_get_int("STOREEL_WORKERS", 2),
         allowed_hosts=SERVED_HOSTS + extra_hosts,

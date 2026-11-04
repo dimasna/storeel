@@ -10,7 +10,7 @@ from ..common import slug
 from ..jobs import JobContext, PipelineError
 from ..meta import MetaAPIError
 from ..meta.schema import OutputError, parse_output, text_format
-from ..models import DEFAULT_TITLE, Idea, Project, Scene, Script, ScriptEntity, text_model_name
+from ..models import DEFAULT_TITLE, MAX_SCENES, Idea, Project, Scene, Script, ScriptEntity, text_model_name
 from ..prompts import load_prompt
 
 WORDS_PER_SECOND = {"id": 2.2, "en": 2.4}  # read from a teleprompter, a little slower than chat
@@ -83,7 +83,7 @@ def idea_title(idea: Idea) -> str:
 
 def _prompt(idea: Idea) -> str:
     words = round(idea.length * WORDS_PER_SECOND[idea.language])
-    scenes = min(12, max(3, round(idea.length / 7)))
+    scenes = min(MAX_SCENES, max(3, round(idea.length / 7)))
     return "\n".join(
         [
             "IDEA:",
@@ -142,7 +142,7 @@ def clean_script(
     return Script(
         title=" ".join(out.title.split())[:120] or fallback_title,
         language=language,
-        scenes=scenes[:20],
+        scenes=scenes[:MAX_SCENES],
         entities=entities,
     )
 

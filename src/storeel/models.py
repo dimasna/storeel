@@ -116,7 +116,7 @@ class Idea(Strict):
     text: str = Field(min_length=3, max_length=2000)
     format: Literal["storytime", "explainer", "tips", "review", "opinion"] = "storytime"
     tone: Literal["casual", "energetic", "calm", "funny", "dramatic"] = "casual"
-    length: int = Field(30, ge=15, le=90)  # target seconds
+    length: int = Field(30, ge=15, le=300)  # target seconds: up to five minutes
     language: Literal["id", "en"] = "id"
 
 
@@ -136,6 +136,8 @@ class Clip(Strict):
 
 
 # ---- path B: the scene script ------------------------------------------------------------
+
+MAX_SCENES = 40  # a five-minute script, one short take per scene
 
 
 class ScriptEntity(Strict):
@@ -165,7 +167,7 @@ class Scene(SceneEdit):
 class ScriptEdit(Strict):
     title: str = Field(min_length=1, max_length=120)
     language: Literal["id", "en"]
-    scenes: list[SceneEdit] = Field(min_length=1, max_length=20)
+    scenes: list[SceneEdit] = Field(min_length=1, max_length=MAX_SCENES)
     entities: list[ScriptEntity] = Field(default_factory=list, max_length=20)
 
 

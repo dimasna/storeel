@@ -12,6 +12,14 @@ import { mediaUrl } from "@/lib/api";
 import { seconds } from "@/lib/format";
 import type { UseProjectState } from "./project-view";
 
+/** A target length, whole seconds: "45s", "1 min 30s", "5 min". */
+function clock(total: number): string {
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  if (!m) return `${s}s`;
+  return s ? `${m} min ${s}s` : `${m} min`;
+}
+
 export function IdeaSection({ project, state }: { project: Project; state: UseProjectState }) {
   const config = useConfig();
   const { toast } = useToast();
@@ -74,12 +82,12 @@ export function IdeaSection({ project, state }: { project: Project; state: UsePr
             </Select>
           </Field>
         </div>
-        <Field label={`Length — ${length}s`}>
+        <Field label={`Length — ${clock(length)}`}>
           <input
             type="range"
             min={15}
-            max={90}
-            step={5}
+            max={300}
+            step={length < 60 ? 5 : 15}
             value={length}
             onChange={(e) => setLength(Number(e.target.value))}
             className="w-full accent-accent"
