@@ -17,7 +17,8 @@ novels, and whatever is left untouched for 24 hours is deleted, so download your
 2. Paste a chapter of a story (200 characters or more), pick a style and press send. Muse
    Spark writes the part (a hook, the beats, a poll and a call to action) and checks it
    against the chapter, and Muse Image draws its characters and pictures. A 3,000-character
-   chapter costs about $0.33, or $0.56 in a look that cuts you out.
+   chapter costs about $0.56, with SAM 3.1 cutting you out so you can step back under the
+   pictures ($0.33 with that turned off).
 3. Read the part from the teleprompter, take by take, or upload one video of the whole part.
    Process it, then render (rendering is free).
 4. Ask the editor for changes in your own words: "make it feel scarier", "pakai tema
@@ -147,7 +148,8 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   half, and puts it where your head and shoulders cover a little of it but at least 70% of
   its letters show; their pixels where you are are taken out frame by frame. When you fill
   the frame so that no place is readable, it goes in front of you, as high as it can.
-- **A background behind you** (optional; the default *dalang* look keeps your own video):
+- **A background behind you** (optional; the default *dalang* look keeps your own video, and
+  uses these masks only to step you back under the pictures, see below):
   SAM 3.1 tracks you through the whole video at 12 frames a second, in 20-second stretches
   sent side by side (about $0.0024 a second: $0.24 for a 100-second reel). Meta's mask
   decoder is pure Python, about a second a mask, so on the server the masks are shared out
@@ -163,12 +165,15 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
 - **Room for the pictures**, in every look: while a picture, a note, chat bubbles or the
   poll is up top, you step back, smaller about the bottom middle of your video, until the
   top of your head is just under it, and come back when it goes (eased over half a second;
-  pictures that follow closely keep you back in between, so you never bob). The head comes
-  from your masks when you are cut out, and from the face found in each take in your own
-  video, which then shrinks over a blurred, dimmed copy of itself. You get no smaller than
-  60%, and a picture that only grazes your hair moves nothing. It is free: the encoder
-  scales your video frame by frame on the same curve the cut-out follows. *When a picture
-  is up top* turns it off.
+  pictures that follow closely keep you back in between, so you never bob). SAM 3.1 cuts
+  you out for it (the masks of "A background behind you", about $0.0024 a second, once), so
+  only you move: in your own video you step back in front of a blurred, dimmed copy of your
+  room, which gives way to the room itself as you come back to full size; in *studio* you
+  stand smaller in front of the backdrop; *scene*'s full-screen pictures leave you as you
+  are. The top of your head comes from your masks. You get no smaller than 60%, and a
+  picture that only grazes your hair moves nothing. The encoder scales your video frame by
+  frame on the same curve as the masks, which ride under each overlay frame. *When a
+  picture is up top* turns it off (then the dalang look needs no cut-out).
 - **Your size and place** in the cut-out looks: make yourself smaller or bigger and move
   anywhere on the frame, with three sliders or by asking the editor ("make me small in the
   bottom left corner", "a bit bigger", "move me up a little"). The encoder scales and moves
@@ -324,7 +329,8 @@ A novel is told as a series: one reel per chapter, called a
   shows the script's wording and can use it.
 - **Cost** (October 2026, list prices): a 110-second part cost about $0.25 on the real API:
   $0.13 for the script (Muse Spark at max effort), eight to nine pictures and five SAM
-  cut-outs, and the transcription. Later parts reuse the bible's pictures.
+  cut-outs, and the transcription. Cutting you out to step back under the pictures (the
+  default) adds about $0.26 for those 110 seconds. Later parts reuse the bible's pictures.
 
 ## Later: Messenger and Instagram
 

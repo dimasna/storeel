@@ -115,8 +115,8 @@ export function StyleGallery({
         <span className="text-sm font-semibold text-foreground">Behind you</span>
         <LookSwitch value={look} onChange={setLook} className="w-full sm:w-80" />
         <span className="text-sm text-muted-foreground">
-          {about?.blurb}
-          {about?.cutout ? " (SAM 3.1 cuts you out, about $0.24 for 100 seconds)" : ", at no extra cost"}
+          {about?.blurb}. SAM 3.1 cuts you out, about $0.24 for 100 seconds
+          {about?.cutout ? "" : ", so you can step back under the pictures"}
         </span>
       </div>
       <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

@@ -167,8 +167,9 @@ the video ("" for none). \
 watermark_position: center, top or bottom. speaker_behind: how the speaker looks behind a \
 picture: blur, sharp, auto (blur only when the picture covers the face), top (blur only behind \
 a picture in the upper part). speaker_room: auto (the default: while a picture, note, chat or \
-the poll is up top, the speaker steps back, smaller, so it never covers them, in every look; \
-their own video shrinks over a blurred copy of it) or off (they stay where they are, behind it, \
+the poll is up top, the speaker steps back, smaller, so it never covers them, in every look; SAM \
+3.1 cuts them out for it, about $0.0024 a second once, and in their own video they stand in \
+front of a blurred copy of it) or off (they stay where they are, behind it, \
 as speaker_behind says); set off for "keep me full size". picture_layout: cards (pictures over \
 the speaker) or full (full screen). visual_style: the pictures' look. visuals: how many \
 pictures (off, few, balanced, many). language: the spoken language (auto, id, en)."""

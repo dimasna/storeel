@@ -425,7 +425,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         background: Annotated[Literal["dalang", "scene", "studio"], Query()] = "dalang",
     ) -> dict[str, float | int]:
         """What making a part of a chapter this long costs at list prices (nothing runs), in the
-        look chosen for it (the scene and studio looks cut the speaker out all through)."""
+        look chosen for it (every look cuts the speaker out all through, so they can step back
+        under the pictures; the scene and studio looks also put something behind them)."""
         return estimate_part(chars, background)
 
     @app.get("/api/projects")

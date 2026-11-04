@@ -48,10 +48,13 @@ REMOTE_BATCH = 5  # lines a machine decodes (about 3 s each on one there; 240 in
 
 def needed(project: Project) -> bool:
     """Whether the title needs its own masks: a title behind the speaker, unless the speaker is
-    tracked all through for a cut-out background (those masks serve the title too)."""
+    tracked all through (for a cut-out background, or to step back under the pictures: those
+    masks serve the title too)."""
+    style = project.style
     return (
-        project.style.title_style == "behind"
-        and project.style.background == "dalang"
+        style.title_style == "behind"
+        and style.background == "dalang"
+        and style.speaker_room != "auto"
         and title_window(project) is not None
     )
 

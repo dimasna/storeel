@@ -65,7 +65,10 @@ def filled(mask: np.ndarray, rounds: int = 40) -> np.ndarray:
 
 
 def needed(project: Project) -> bool:
-    return project.style.background != "dalang" and project.source is not None
+    """Whether the speaker is cut out of every frame: for a scene or studio background, and for
+    stepping back under the pictures up top (in their own video too, see Style.speaker_room)."""
+    style = project.style
+    return project.source is not None and (style.background != "dalang" or style.speaker_room == "auto")
 
 
 def track_reel(ctx: JobContext) -> None:

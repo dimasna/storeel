@@ -119,7 +119,7 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
     genre === null || genre === "other" ? "No theme" : genre === "auto" ? "Not picked yet" : themeCard(genre)?.name ?? genre;
   const backgroundHint =
     style.background === "dalang"
-      ? `Your own video, the characters standing at the bottom and the pictures up top. SAM 3.1 can also cut you out${cutoutCost}: Scene puts the pictures behind you, Studio a backdrop.`
+      ? `Your own video, the characters standing at the bottom and the pictures up top. SAM 3.1 cuts you out${cutoutCost} to step back under the pictures; Scene also puts the pictures behind you, Studio a backdrop.`
       : `SAM 3.1 cuts you out${cutoutCost}, when processing or rendering with your key. ${
           style.background === "scene"
             ? "Each photo fills the screen behind you."
@@ -138,7 +138,7 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
           label="When a picture is up top"
           hint={
             style.speaker_room === "auto"
-              ? "You step back, smaller, so the picture never covers you, and come back when it goes. Your own video shrinks over a blurred copy of it; cut out, you stand smaller in front of the backdrop."
+              ? "You step back, smaller, so the picture never covers you, and come back when it goes. SAM 3.1 cuts you out for it: in your own video you stand in front of a blurred copy of your room; in Studio, in front of the backdrop."
               : undefined
           }
         />

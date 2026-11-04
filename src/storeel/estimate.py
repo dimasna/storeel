@@ -31,17 +31,22 @@ def part_seconds(chapter_chars: int) -> int:
     return min(MAX_SECONDS, round(90 + chapter_chars / 200))
 
 
-def estimate_part(chapter_chars: int, background: str = "dalang") -> dict[str, float | int]:
+def estimate_part(
+    chapter_chars: int, background: str = "dalang", room: bool = True
+) -> dict[str, float | int]:
     """The cost of a part's first pass: writing, transcribing (with the stressed words),
-    drawing (with the title's tracking and the face check in each take, or the speaker cut out
-    all through for a `background` other than the dalang look); rendering is free."""
+    drawing (with the face check in each take, and the speaker cut out all through, for a
+    `background` other than the dalang look or to step back under the pictures (`room`, see
+    Style.speaker_room); else only tracked under the title); rendering is free."""
     chars = max(0, chapter_chars)
     pictures = part_pictures(chars)
     seconds = part_seconds(chars)
     write = TEXT_BASE_USD + chars * TEXT_PER_CHAR_USD
     draw = pictures * (PRICE_IMAGE + CUT_OUT_SHARE * PRICE_SAM_IMAGE) + FACE_TAKES * PRICE_SAM_IMAGE
     cutout = seconds * TRACK_FPS * PRICE_SAM_FRAME
-    draw += cutout if background != "dalang" else TITLE_FRAMES * PRICE_SAM_FRAME  # (the title reuses it)
+    draw += (
+        cutout if background != "dalang" or room else TITLE_FRAMES * PRICE_SAM_FRAME
+    )  # (the title reuses it)
     transcribe = seconds * PRICE_ASR_SECOND + STRESS_USD
     return {
         "write_usd": round(write, 3),

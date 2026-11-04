@@ -908,6 +908,17 @@ def room_ease(t: float, windows: list[tuple[float, float, float]]) -> float:
     return k
 
 
+def room_cut(t: float, windows: list[tuple[float, float, float]]) -> float:
+    """How far into a step back the speaker is at `t` (0 as placed, 1 all the way): there, their
+    own video around them gives way to a blurred copy of it, so only they are seen moving."""
+    cut = 0.0
+    for start, end, _ in windows:
+        up = _smooth((t - (start - ROOM_EARLY)) / ROOM_EASE)
+        down = _smooth(((end + ROOM_LATE) - t) / ROOM_EASE)
+        cut = max(cut, min(up, down))
+    return cut
+
+
 def ffmpeg_room(windows: list[tuple[float, float, float]], fps: float) -> str:
     """room_ease() as an ffmpeg expression of `in`, the perspective filter's frame number (it
     counts from 1)."""
@@ -926,9 +937,10 @@ def ffmpeg_room(windows: list[tuple[float, float, float]], fps: float) -> str:
 
 
 def _load_track(project: Project, files: ProjectFiles) -> _Track | None:
-    """The speaker's masks for the whole reel, when a cut-out background has them."""
+    """The speaker's masks for the whole reel, when they were cut out (for a cut-out background,
+    or to step back under the pictures)."""
     stored = project.speaker_track
-    if project.style.background == "dalang" or stored is None or not files.exists(stored.key):
+    if stored is None or not stored.key or not files.exists(stored.key):
         return None
     with np.load(files.path(stored.key)) as data:
         packed = data["masks"]
@@ -1104,6 +1116,10 @@ class Compositor:
         # While a picture is up top, the speaker steps back under it (see _make_room).
         self.roomed: set[int] = set()  # ids of the cards they make room for
         self.room = self._make_room() if style.speaker_room == "auto" else []
+        # Stepping back in their own video (dalang, or scene between its pictures), the speaker is
+        # cut out: their masks ride under each overlay frame, and the encoder shows their video
+        # only there, over a blurred copy of it (see encode). Studio's backdrop covers the rest.
+        self.room_mask = bool(self.room) and self.track is not None and not self.backdrop
         self.behind: set[int] = set()  # ids of the photo cards drawn behind the cut-out speaker
         if self.background == "studio" and self.track is not None:
             for item in self.cards:
@@ -1309,6 +1325,12 @@ class Compositor:
         """Where the speaker's video is at `t`: as placed, or stepped back to make room."""
         return self.place.stepped(room_ease(t, self.room)) if self.room else self.place
 
+    @property
+    def person_rows(self) -> int:
+        """The rows under each overlay frame (after the blur level) carrying the speaker's mask
+        while they step back in their own video; 0 when they never do."""
+        return self.track.height if self.room_mask and self.track is not None else 0
+
     def _build_pictures(self, project: Project, files: ProjectFiles) -> list[tuple[float, float]]:
         """The moments' pictures as cutaways and cards; returns the spans to blur the speaker in."""
         style = project.style
@@ -1381,8 +1403,9 @@ class Compositor:
         return level
 
     def frame(self, t: float) -> Image.Image:
-        """The overlay layer at `t`, with MASK_ROWS extra rows at the bottom holding the blur level."""
-        canvas = Image.new("RGBA", (W, H + MASK_ROWS), (0, 0, 0, 0))
+        """The overlay layer at `t`, with MASK_ROWS extra rows at the bottom holding the blur level
+        (and under them, while the speaker steps back in their own video, their mask)."""
+        canvas = Image.new("RGBA", (W, H + MASK_ROWS + self.person_rows), (0, 0, 0, 0))
         if self.backdrop:  # a theme's own, or the studio's glow
             theme = self.theme
             ground = theme.backdrop(t, self.accent) if theme is not None else studio_backdrop(t, self.accent)
@@ -1393,7 +1416,7 @@ class Compositor:
                 canvas.paste(cut.frame(t), (0, 0))
             else:
                 _composite(canvas, cut.frame(t), 0, 0)
-        cutout = self.track is not None and (self.backdrop or bool(cuts))
+        cutout = self.track is not None and self.background != "dalang" and (self.backdrop or bool(cuts))
         title = self.title if self.title is not None and self.title.start <= t < self.title.end else None
         # Cut out, the speaker stands in front of all that is drawn before them: a title that
         # could not be read behind them (no masks) is drawn over them, after.
@@ -1432,6 +1455,19 @@ class Compositor:
             _composite(canvas, self.mark[0], *self.mark[1])
         level = round(255 * self.blur_level(t))
         canvas.paste((0, 0, 0, level), (0, H, W, H + MASK_ROWS))  # after the sprites: nothing spills
+        if self.room_mask and self.track is not None:
+            # Where the encoder shows their video: everywhere as placed, only them stepped back.
+            top = H + MASK_ROWS
+            cut = room_cut(t, self.room)
+            if cut <= 0.0:
+                canvas.paste((0, 0, 0, 255), (0, top, self.track.width, top + self.track.height))
+            else:
+                person = self.track.half(t, self.place_at(t))
+                if cut < 1.0:
+                    person = person.point(lambda v, c=cut: round(v + (255 - v) * (1 - c)))
+                rows = Image.new("RGBA", person.size, (0, 0, 0, 0))
+                rows.putalpha(person)
+                canvas.paste(rows, (0, top))
         return canvas
 
     def _cut_out(self, canvas: Image.Image, t: float) -> None:
@@ -1457,6 +1493,8 @@ class Compositor:
         """Identifies what is on screen; None while something is moving."""
         if self.backdrop and self.track is not None:
             return None  # the speaker moves in front of the backdrop
+        if self.room_mask and room_cut(t, self.room) > 0.0:
+            return None  # their mask, under the layer, moves with them
         if any(c.start <= t < c.end for c in self.cutaways):
             return None
         if self.title is not None and self.title.start <= t < self.title.end:
@@ -1526,7 +1564,10 @@ def encode(
         f"afade=t=out:st={max(0.0, compositor.duration - 0.08):.3f}:d=0.08",
     ]
     audio = ",".join([audio_filter, *fades] if audio_filter else fades)
-    layer_in = f"[1:v]split=2[lraw][mraw];[lraw]crop={W}:{H}:0:0,"
+    extra = compositor.person_rows
+    layer_in = (
+        f"[1:v]split={3 if extra else 2}[lraw][mraw]{'[praw]' if extra else ''};[lraw]crop={W}:{H}:0:0,"
+    )
     layer = layer_in + "scale=out_color_matrix=bt709:out_range=tv,format=yuva420p[layer]"
     finish = f"overlay=x=0:y=0:format=yuv420:eof_action=repeat,format=yuv420p,{ff.TAG_BT709}[v]"
     video, graded, moved = "[0:v]", "", ""
@@ -1552,6 +1593,16 @@ def encode(
         corners = [corner(-2, -2), corner(W + 2, -2), corner(-2, H + 2), corner(W + 2, H + 2)]
         named = ":".join(f"x{i}={gx}:y{i}={gy}" for i, (gx, gy) in enumerate(corners))
         dim = BLUR_DIM
+        if extra and compositor.track is not None:
+            # Cut out by their mask (from under the layer), so only they step back.
+            alone = (
+                f"[praw]crop={compositor.track.width}:{extra}:0:{H + MASK_ROWS},alphaextract,"
+                f"scale={W}:{H}[person];"
+                "[stepped][person]alphamerge[alone];"
+                "[ground][alone]overlay=x=0:y=0:format=yuv420[moved];"
+            )
+        else:
+            alone = "[ground][stepped]overlay=x=0:y=0:format=yuv420[moved];"
         moved = (
             f"{video}split=2[stepping][around];"
             f"[around]scale={W // 4}:{H // 4},gblur=sigma={BLUR_SIGMA},"
@@ -1559,8 +1610,7 @@ def encode(
             f"scale={W}:{H}[ground];"
             f"[stepping]format=yuva420p,pad={W + 4}:{H + 4}:2:2:color=black@0,"
             f"perspective={named}:interpolation=linear:sense=destination:eval=frame,"
-            f"crop={W}:{H}:2:2[stepped];"
-            "[ground][stepped]overlay=x=0:y=0:format=yuv420[moved];"
+            f"crop={W}:{H}:2:2[stepped];" + alone
         )
         video = "[moved]"
     elif not place.identity:
@@ -1589,7 +1639,7 @@ def encode(
     else:
         graph = f"{graded}{moved}{layer};[mraw]nullsink;{video}[layer]{finish}"
     cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-i", str(master)]
-    cmd += ["-f", "rawvideo", "-pix_fmt", "rgba", "-video_size", f"{W}x{H + MASK_ROWS}"]
+    cmd += ["-f", "rawvideo", "-pix_fmt", "rgba", "-video_size", f"{W}x{H + MASK_ROWS + extra}"]
     cmd += ["-framerate", str(compositor.overlay_fps), "-i", "pipe:0"]
     cmd += ["-filter_complex", graph, "-map", "[v]", "-map", "0:a:0"]
     cmd += ["-c:v", "libx264", "-preset", "medium", "-profile:v", "high", *rate]
@@ -1670,9 +1720,10 @@ def compose(
         ctx.log(compositor.background_note)
     if compositor.room:
         smallest = min(k for _, _, k in compositor.room)
+        how = ", cut out by SAM 3.1 over a blurred copy of their video" if compositor.room_mask else ""
         ctx.log(
             f"making room: the speaker steps back under {len(compositor.roomed)} picture(s) up top,"
-            f" in {len(compositor.room)} stretch(es), down to {smallest:.0%} of their size"
+            f" in {len(compositor.room)} stretch(es), down to {smallest:.0%} of their size{how}"
         )
     if compositor.unchecked_faces:
         ctx.log(
