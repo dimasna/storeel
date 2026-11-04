@@ -17,8 +17,9 @@ from ..jobs import JobContext
 from ..media.speech import Envelope
 from ..models import Source, Transcript, Turn, Word
 
-VERSION = 1
+VERSION = 2  # 2: special tokens are taken out of the text
 LANGUAGE_BIAS = {"auto": [], "id": ["Indonesian", "English"], "en": ["English"]}
+SPECIAL_TOKEN = re.compile(r"<\|[^|<>]{0,40}\|>")
 KEYWORD_MAX = 30  # characters: Muse Voice Transcribe rejects a longer keyword (400)
 KEYWORDS_MAX = 50
 VOWELS = re.compile(r"[aeiouyàáâãäåæèéêëìíîïòóôõöøùúûüýœ]+", re.IGNORECASE)
@@ -167,7 +168,9 @@ def build_turns(raw_turns: list[dict], envelope: Envelope, duration: float) -> l
     """
     cleaned: list[tuple[float, float, str, str | None]] = []
     for raw in sorted(raw_turns, key=lambda t: t.get("startMs", 0)):
-        text = " ".join(str(raw.get("transcript") or "").split())
+        # A speaker change inside a turn comes back as a marker in the text ("<|speaker_A|>"):
+        # it is not speech, and never a caption.
+        text = " ".join(SPECIAL_TOKEN.sub(" ", str(raw.get("transcript") or "")).split())
         if not text:
             continue  # e.g. a turn the clip ended part-way through
         start = max(0.0, float(raw.get("startMs", 0)) / 1000)
