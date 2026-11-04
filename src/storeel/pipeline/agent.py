@@ -170,7 +170,12 @@ a picture in the upper part). speaker_room: auto (the default: while a picture, 
 the poll is up top, the speaker steps back, smaller, so it never covers them, in every look; SAM \
 3.1 cuts them out for it, about $0.0024 a second once, and in their own video they stand in \
 front of a blurred copy of it) or off (they stay where they are, behind it, \
-as speaker_behind says); set off for "keep me full size". picture_layout: cards (pictures over \
+as speaker_behind says); set off for "keep me full size". effects: on (the default, free: the \
+theme's particles, photo cards that slowly grow, characters that breathe and slide in, the \
+character the storyteller voices moving with the voice and glowing, a punch-in on the face at \
+the hook's end and the cliffhanger, the room going dark round them at the cliffhanger, a rim of \
+light as they step back, horror's echo on the stressed words) or off (none of them); set off for \
+"no effects", "keep it clean" or "no zooms". picture_layout: cards (pictures over \
 the speaker) or full (full screen). visual_style: the pictures' look. visuals: how many \
 pictures (off, few, balanced, many). language: the spoken language (auto, id, en)."""
 

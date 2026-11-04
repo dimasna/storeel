@@ -63,6 +63,10 @@ export const LABELS: Record<string, Record<string, string>> = {
     auto: "Step back under a picture up top",
     off: "Stay where you are",
   },
+  effects: {
+    on: "On: particles, living pictures, a talking puppet, punch-ins",
+    off: "Off",
+  },
   display: { none: "Speaker only", overlay: "Card", cutout: "Cut-out", cutaway: "Full screen" },
   novel_language: { id: "Indonesian", en: "English" },
   narration: {

@@ -38,8 +38,9 @@ from ..common import Cancelled, now_iso
 from ..files import ProjectFiles
 from ..jobs import JobContext, PipelineError
 from ..media import ffmpeg as ff
+from ..media.speech import Envelope
 from ..models import Moment, Project, Region, Render, SpeakerMasks, Style
-from . import themes
+from . import effects, themes
 from .captions import build_pages, stressed
 from .layout import (
     CAPTION_CENTER,
@@ -127,7 +128,7 @@ GLOW = 0.9  # the opacity of the glow a "glow" word keeps
 WORD_EDGE = 0.015  # of the width: how close to the frame's sides a word may grow
 # A theme's entrance for a card instead of its pop, in seconds: horror's photo cards glitch in,
 # legend's characters come in as shadow puppets that fill with colour.
-ENTRY_SECONDS = {"glitch": 0.5, "silhouette": 1.2}
+ENTRY_SECONDS = {"glitch": 0.5, "silhouette": 1.2, "slide": effects.SLIDE}
 PUPPET = (26, 16, 10)  # the shadow puppet's colour
 LETTERBOX = 0.05  # drama's bars, top and bottom, of the height
 
@@ -602,6 +603,18 @@ class Placement:
         width, height = self.width * k, self.height * k
         return Placement(round(width), round(height), round(ax - width / 2), round(ay - height))
 
+    def zoomed(self, z: float, fx: float, fy: float) -> Placement:
+        """This placement made `z` times bigger about the point (`fx`, `fy`) of the frame (a
+        punch-in on the face)."""
+        if z == 1.0:
+            return self
+        return Placement(
+            round(self.width * z),
+            round(self.height * z),
+            round(fx + z * (self.x - fx)),
+            round(fy + z * (self.y - fy)),
+        )
+
 
 def placement(style: Style) -> Placement:
     """The speaker's placement from the style: scaled about the bottom middle of the video."""
@@ -789,6 +802,7 @@ class _Card:
     # known). Cut out, the masks say where the head is instead.
     room: bool = False
     head: float | None = None
+    who: str = ""  # the character a standing figure is (for the voice moving them)
     _puppet: Image.Image | None = field(default=None, repr=False)
 
     @property
@@ -806,13 +820,27 @@ class _Card:
         entering = self.enter and self.intro is None and t - self.start < self.entrance
         return self.animate and (entering or self.end - t < self.fade)
 
-    def draw(self, canvas: Image.Image, t: float) -> None:
+    def draw(
+        self,
+        canvas: Image.Image,
+        t: float,
+        scale: float = 1.0,
+        lift: float = 0.0,
+        glow: tuple[Image.Image, int, float] | None = None,
+    ) -> None:
+        """Draw it at `t`; the effects may grow it (`scale`, about its middle, or about its feet
+        for a standing character), `lift` it (pixels up) and put a `glow` (image, reach,
+        opacity) behind it."""
         if self.intro is not None and self._introducing(t):
             _composite(canvas, self.intro.at(t - self.start), *self.intro.xy)
             return
-        alpha, rise, image = 1.0, 0.0, self.image
+        alpha, rise, image, slide = 1.0, 0.0, self.image, 0.0
         entering = self.animate and self.enter and self.intro is None and t - self.start < self.entrance
-        if entering and self.entry:
+        if entering and self.entry == "slide":  # in from their side of the frame
+            p = _ease_out((t - self.start) / effects.SLIDE)
+            alpha = min(1.0, (t - self.start) / (0.4 * effects.SLIDE))
+            slide = (1 - p) * effects.SLIDE_FAR * W * (-1 if self.center[0] < W / 2 else 1)
+        elif entering and self.entry:
             image = self._entering(t - self.start)
         elif entering:
             alpha = _ease_out((t - self.start) / POP_IN)
@@ -820,10 +848,25 @@ class _Card:
                 rise = (1 - alpha) * 0.02 * H
         elif self.animate and self.end - t < self.fade:
             alpha = max(0.0, (self.end - t) / self.fade)
-        image = _faded(image, alpha)
-        x = round(self.center[0] - image.width / 2)
-        y = round(self.center[1] - image.height / 2 + rise)
-        _composite(canvas, image, x, y)
+        feet = self.center[1] + self.image.height / 2
+        if abs(scale - 1.0) > 1e-3:
+            image = image.resize(
+                (max(1, round(image.width * scale)), max(1, round(image.height * scale))), Image.BILINEAR
+            )
+        x = round(self.center[0] - image.width / 2 + slide)
+        if self.kind == "character":  # standing on the bottom edge, they grow from their feet
+            y = round(feet - image.height + rise - lift)
+        else:
+            y = round(self.center[1] - image.height / 2 + rise - lift)
+        if glow is not None and alpha > 0.01:
+            light, reach, strength = glow
+            if abs(scale - 1.0) > 1e-3:
+                light = light.resize(
+                    (round(light.width * scale), round(light.height * scale)), Image.BILINEAR
+                )
+                reach = round(reach * scale)
+            _composite(canvas, _faded(light, strength * alpha), x - reach, y - reach)
+        _composite(canvas, _faded(image, alpha), x, y)
 
     def _entering(self, since: float) -> Image.Image:
         """The sprite `since` seconds into its theme entrance (the same size as the sprite)."""
@@ -1088,6 +1131,12 @@ class Compositor:
         self.cutaways: list[_Cutaway | _Pan] = []
         self.cards: list[_Card] = []
         self.unchecked_faces = 0  # "auto" blur without face boxes: blurred to be safe
+        # Set by a novel part's pictures: when a character the storyteller voices speaks
+        # (start, end, character), the cliffhanger (start, end), and where a punch-in may go
+        # (start, end, the face's middle x, y in pixels), for the effects.
+        self.talking: list[tuple[float, float, str]] = []
+        self.spot: list[tuple[float, float]] = []
+        self.punch: list[tuple[float, float, float, float]] = []
         self.blurs = blur_windows(self._build_pictures(project, files), self.duration)
         # A cut-out background, when SAM found the speaker all through (else their own video).
         self.track = _load_track(project, files)
@@ -1143,6 +1192,30 @@ class Compositor:
                 item.entry = "glitch"
             elif item.kind == "character" and "silhouette" in self.extras:
                 item.entry = "silhouette"
+            elif item.kind == "character" and style.effects == "on":
+                item.entry = "slide"
+        # The effects (see effects.py): the theme's particles, and the voice moving the character
+        # the storyteller voices.
+        self.effects = style.effects == "on"
+        kind = effects.PARTICLES.get(theme.name) if theme is not None else None
+        self.particles = effects.Particles(kind, W, H) if self.effects and kind else None
+        self.voice: effects.Voice | None = None
+        audio = project.source.audio_key
+        if self.effects and self.talking and audio and files.exists(audio):
+            self.voice = effects.Voice(Envelope.from_wav(files.path(audio)))
+        # Horror's echo: a ghost of the speaker trails them on each stressed word.
+        self.echo: list[tuple[float, float]] = []
+        if self.effects and theme is not None and theme.name == "horror" and project.transcript is not None:
+            for word in (w for turn in project.transcript.turns for w in turn.words if w.emphasis):
+                start, end = word.start, word.start + effects.ECHO_SECONDS
+                if self.echo and start - self.echo[-1][1] < 0.2:
+                    self.echo[-1] = (self.echo[-1][0], end)
+                else:
+                    self.echo.append((start, end))
+        self._glows: dict[int, tuple[Image.Image, int]] = {}
+        self._person: tuple[float, Image.Image] | None = None
+        accent = self.theme.accent if self.theme is not None else style.caption_color
+        self.light = hex_rgb(accent)
         self.letterbox = "letterbox" in self.extras
         self.mark: tuple[Image.Image, tuple[int, int]] | None = None
         if style.watermark:
@@ -1152,6 +1225,7 @@ class Compositor:
         self.title_note = ""
         self.title_showing: float | None = None  # the share of the title showing past the speaker
         self.title = self._build_title(project, files)
+        self.punch = self._punch_windows() if self.effects else []
         if style.motion == "plain":
             self.motion_note = "plain (chosen in the style)"
         elif motion is None or not motion.available:
@@ -1322,8 +1396,94 @@ class Compositor:
         return [(a, min(b, self.duration), k) for a, b, k in merged]
 
     def place_at(self, t: float) -> Placement:
-        """Where the speaker's video is at `t`: as placed, or stepped back to make room."""
-        return self.place.stepped(room_ease(t, self.room)) if self.room else self.place
+        """Where the speaker's video is at `t`: as placed, punched in on the face, or stepped
+        back to make room (never both: a punch-in keeps clear of every step back)."""
+        place = self.place
+        if self.punch and (hit := self.punch_at(t)) is not None:
+            place = place.zoomed(*hit)
+        return place.stepped(room_ease(t, self.room)) if self.room else place
+
+    def punch_at(self, t: float) -> tuple[float, float, float] | None:
+        """The punch-in at `t` (how much, and about which point of the frame), or None."""
+        for start, end, fx, fy in self.punch:
+            if start <= t <= end:
+                return effects.PUNCH, fx, fy
+        return None
+
+    def _punch_windows(self) -> list[tuple[float, float, float, float]]:
+        """The punch-ins: where the pictures allow them, less the title and every step back
+        (with its eases), cut on the middle between two frames so the encoder and the cut-out
+        switch on the same frame, and at least PUNCH_SHORTEST long."""
+        busy = [(a - ROOM_EARLY - ROOM_EASE, b + ROOM_LATE + ROOM_EASE) for a, b, _ in self.room]
+        if self.title is not None:
+            busy.append((0.0, self.title.end + 0.1))
+        out = []
+        for start, end, fx, fy in self.punch:
+            pieces = [(start, end)]
+            for c0, c1 in busy:
+                kept = []
+                for s, e in pieces:
+                    if e <= c0 or s >= c1:
+                        kept.append((s, e))
+                        continue
+                    if s < c0:
+                        kept.append((s, c0))
+                    if e > c1:
+                        kept.append((c1, e))
+                pieces = kept
+            for s, e in pieces:
+                s = (math.ceil(s * self.fps) - 0.5) / self.fps
+                e = (math.floor(e * self.fps) - 0.5) / self.fps
+                if e - s >= effects.PUNCH_SHORTEST:
+                    out.append((round(s, 4), round(e, 4), fx, fy))
+        return out
+
+    def _person_at(self, t: float) -> Image.Image | None:
+        """The speaker's mask at `t` (half size, where their video is then), made once a frame."""
+        if self.track is None:
+            return None
+        if self._person is None or self._person[0] != t:
+            self._person = (t, self.track.half(t, self.place_at(t)))
+        return self._person[1]
+
+    def spot_level(self, t: float) -> float:
+        """How dark the room is round the speaker at `t` (0 to 1): the cliffhanger's spotlight."""
+        level = 0.0
+        for start, end in self.spot:
+            level = max(
+                level, min(_smooth((t - start) / effects.SPOT_EASE), _smooth((end - t) / effects.SPOT_EASE))
+            )
+        return level
+
+    def _voiced(self, t: float, who: str) -> float:
+        """How much the character `who` is being voiced at `t` (0 to 1, eased in and out)."""
+        level = 0.0
+        for start, end, person in self.talking:
+            if person == who:
+                ease = effects.TALK_EASE
+                level = max(level, min(_smooth((t - start) / ease), _smooth((end - t) / ease)))
+        return level
+
+    def _draw_card(self, canvas: Image.Image, item: _Card, t: float) -> None:
+        """A card with the effects: a photo card slowly grows (a living still), a standing
+        character breathes, and the one the storyteller voices rises with the voice and glows."""
+        if not self.effects or item.group or not item.animate:
+            item.draw(canvas, t)
+            return
+        scale, lift, glow = 1.0, 0.0, None
+        if item.kind == "photo":
+            scale = 1.0 + effects.GROW * _smooth((t - item.start) / max(0.5, item.end - item.start))
+        elif item.kind == "character":
+            scale = 1.0 + effects.BREATH * math.sin(2 * math.pi * t / effects.BREATH_SECONDS + item.ident)
+            voiced = self._voiced(t, item.who) if item.who else 0.0
+            if voiced > 0.0:
+                loud = self.voice.at(t) if self.voice is not None else 0.0
+                lift = effects.BOB * H * loud * voiced
+                if id(item.image) not in self._glows:
+                    self._glows[id(item.image)] = effects.glow_of(item.image, self.light)
+                light, reach = self._glows[id(item.image)]
+                glow = (light, reach, effects.TALK_GLOW * voiced)
+        item.draw(canvas, t, scale=scale, lift=lift, glow=glow)
 
     @property
     def person_rows(self) -> int:
@@ -1423,15 +1583,22 @@ class Compositor:
         title_last = cutout and title is not None and title.masks is None
         if title is not None and not title_last:
             title.draw(canvas, t, behind=cutout or not cuts)  # over a full-screen picture: in front
+        spot = self.spot_level(t) if self.effects and self.spot else 0.0
+        if spot > 0.0 and (person := self._person_at(t)) is not None:  # the room goes dark round them
+            _composite(canvas, effects.veil(person, spot, (W, H)), 0, 0)
         front = self.cards
         if cutout:
             behind = [c for c in self.cards if id(c) in self.behind]
             for item in behind:  # the pictures behind the speaker
                 if item.start <= t < item.end:
-                    item.draw(canvas, t)
+                    self._draw_card(canvas, item, t)
             self._cut_out(canvas, t)
             drawn = {id(c) for c in behind}
             front = [c for c in self.cards if id(c) not in drawn]
+        if self.effects and self.room_mask and (cut := room_cut(t, self.room)) > 0.01:
+            person = self._person_at(t)  # a rim of light round them as they step back
+            if person is not None:
+                _composite(canvas, effects.rim(person, self.light, cut, (W, H)), 0, 0)
         if title is not None and title_last:
             title.draw(canvas, t, behind=False)
         if self.letterbox:  # over the speaker, under the pictures, the badge and the captions
@@ -1440,7 +1607,9 @@ class Compositor:
             canvas.paste((0, 0, 0, 255), (0, H - bar, W, H))
         for item in front:
             if item.start <= t < item.end:
-                item.draw(canvas, t)
+                self._draw_card(canvas, item, t)
+        if self.particles is not None:  # the theme's, over the pictures and under the captions
+            self.particles.draw(canvas, t, _composite)
         index = self._page_at(t)
         if index is not None:
             page = self.pages[index]
@@ -1462,7 +1631,8 @@ class Compositor:
             if cut <= 0.0:
                 canvas.paste((0, 0, 0, 255), (0, top, self.track.width, top + self.track.height))
             else:
-                person = self.track.half(t, self.place_at(t))
+                person = self._person_at(t)
+                assert person is not None
                 if cut < 1.0:
                     person = person.point(lambda v, c=cut: round(v + (255 - v) * (1 - c)))
                 rows = Image.new("RGBA", person.size, (0, 0, 0, 0))
@@ -1474,7 +1644,8 @@ class Compositor:
         """Take what is drawn so far out where the speaker is, so they stand in front of it (the
         video under the layer shows through); "studio" draws an outline around them too."""
         assert self.track is not None
-        half = self.track.half(t, self.place_at(t))
+        half = self._person_at(t)
+        assert half is not None
         person = half.resize((W, H), Image.BILINEAR)
         alpha = canvas.getchannel("A")
         top = ImageChops.multiply(alpha.crop((0, 0, W, H)), ImageChops.invert(person))
@@ -1493,6 +1664,12 @@ class Compositor:
         """Identifies what is on screen; None while something is moving."""
         if self.backdrop and self.track is not None:
             return None  # the speaker moves in front of the backdrop
+        if self.effects and (
+            self.particles is not None
+            or self.spot_level(t) > 0.0
+            or any(c.start <= t < c.end and c.kind in ("photo", "character") for c in self.cards)
+        ):
+            return None  # the particles, the spotlight, growing pictures and breathing people move
         if self.room_mask and room_cut(t, self.room) > 0.0:
             return None  # their mask, under the layer, moves with them
         if any(c.start <= t < c.end for c in self.cutaways):
@@ -1577,17 +1754,28 @@ def encode(
         graded = f"[0:v]{compositor.grade}[graded];"
         video = "[graded]"
     place = compositor.place
-    if compositor.room:
+    if compositor.room or compositor.punch:
         # Making room: the speaker's video, placed and then stepped back over time (scaled about
         # its bottom middle frame by frame, on the curve the cut-out's masks follow), over a
-        # blurred, dimmed copy of their own video where it no longer fills the frame. The 2-pixel
-        # transparent border keeps the stretched edge pixels out.
+        # blurred, dimmed copy of their own video where it no longer fills the frame; or punched
+        # in on the face (cut in, never while stepped back). The 2-pixel transparent border keeps
+        # the stretched edge pixels out.
         k = ffmpeg_room(compositor.room, compositor.fps)
         ax, ay = place.anchor
+        clock = f"((in-1)/{compositor.fps:.6f})"
+
+        def punched(base: float, axis: int) -> str:
+            """A placed corner's coordinate, moved by whichever punch-in is on."""
+            terms = "".join(
+                f"+between({clock},{a},{b})*({(effects.PUNCH - 1) * (base - (fx, fy)[axis]):.3f})"
+                for a, b, fx, fy in compositor.punch
+            )
+            return f"({base:.3f}{terms})"
 
         def corner(x: float, y: float) -> tuple[str, str]:
-            gx = f"'{2 + ax:.3f}+{k}*({place.x + x * place.scale - ax:.3f})'"
-            gy = f"'{2 + ay:.3f}+{k}*({place.y + y * place.scale - ay:.3f})'"
+            bx, by = place.x + x * place.scale, place.y + y * place.scale
+            gx = f"'{2 + ax:.3f}+{k}*({punched(bx, 0)}-{ax:.3f})'"
+            gy = f"'{2 + ay:.3f}+{k}*({punched(by, 1)}-{ay:.3f})'"
             return gx, gy
 
         corners = [corner(-2, -2), corner(W + 2, -2), corner(-2, H + 2), corner(W + 2, H + 2)]
@@ -1623,6 +1811,17 @@ def encode(
             f"[black][small]overlay=x={place.x}:y={place.y}:format=yuv420[moved];"
         )
         video = "[moved]"
+    echo = ""
+    if compositor.echo:
+        # Horror: on each stressed word, a ghost of the last frames (only what moves, the
+        # speaker, shows doubled) over the video.
+        enable = "+".join(f"between(t,{a:.3f},{b:.3f})" for a, b in compositor.echo)
+        echo = (
+            f"{video}split=2[clean][trail];[trail]tmix=frames={effects.ECHO_FRAMES},format=yuva420p,"
+            "colorchannelmixer=aa=0.4[ghost];"
+            f"[clean][ghost]overlay=x=0:y=0:format=yuv420:enable='{enable}'[echoed];"
+        )
+        video = "[echoed]"
     if compositor.blurs:
         # The blurred, dimmed copy is made at quarter size (cheap) and blended in by the level
         # carried in the layer's extra rows.
@@ -1635,9 +1834,9 @@ def encode(
             "[blurred][mask]alphamerge[veil];"
             "[sharp][veil]overlay=x=0:y=0:format=yuv420:eof_action=repeat[base]"
         )
-        graph = f"{graded}{moved}{layer};{blur};[base][layer]{finish}"
+        graph = f"{graded}{moved}{echo}{layer};{blur};[base][layer]{finish}"
     else:
-        graph = f"{graded}{moved}{layer};[mraw]nullsink;{video}[layer]{finish}"
+        graph = f"{graded}{moved}{echo}{layer};[mraw]nullsink;{video}[layer]{finish}"
     cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-i", str(master)]
     cmd += ["-f", "rawvideo", "-pix_fmt", "rgba", "-video_size", f"{W}x{H + MASK_ROWS + extra}"]
     cmd += ["-framerate", str(compositor.overlay_fps), "-i", "pipe:0"]

@@ -41,6 +41,7 @@ export interface Style {
   speaker_x: number;
   speaker_y: number;
   speaker_room: "auto" | "off";
+  effects: "on" | "off";
 }
 
 export interface Idea {

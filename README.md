@@ -174,6 +174,15 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   picture that only grazes your hair moves nothing. The encoder scales your video frame by
   frame on the same curve as the masks, which ride under each overlay frame. *When a
   picture is up top* turns it off (then the dalang look needs no cut-out).
+- **Effects** (free, drawn at render time; *Effects* turns them off): each theme's particles
+  (romance's bokeh, horror's mist, mystery's rain, drama's gold sparkle, legend's embers);
+  photo cards that slowly grow and standing characters that breathe; characters sliding in
+  from their side; the character you voice in a novel part rising with the loudness of your
+  voice and glowing, like the puppet a dalang moves as he speaks for it; a punch-in, the shot
+  cutting in 12% on your face, at the end of the hook and at the cliffhanger (never under
+  the title or while you step back); the room going dark round you at the cliffhanger, your
+  masks keeping you lit; a rim of light in the theme's colour as you step back; and in
+  horror, a ghost of the last frames trailing you on each stressed word.
 - **Your size and place** in the cut-out looks: make yourself smaller or bigger and move
   anywhere on the frame, with three sliders or by asking the editor ("make me small in the
   bottom left corner", "a bit bigger", "move me up a little"). The encoder scales and moves

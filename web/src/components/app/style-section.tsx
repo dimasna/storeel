@@ -143,6 +143,15 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
           }
         />
         <SelectField name="speaker_behind" label="Speaker behind a card or cut-out" />
+        <SelectField
+          name="effects"
+          label="Effects"
+          hint={
+            style.effects === "on"
+              ? "Free, at render: the theme's particles, photo cards that slowly grow, characters that breathe and slide in, the character you voice moving with your voice, a punch-in on your face at the hook and the cliffhanger, the room going dark round you at the cliffhanger, a rim of light as you step back, and horror's echo on the stressed words."
+              : undefined
+          }
+        />
         {project.path === "video" ? <SelectField name="language" label="Spoken language" /> : null}
 
         <SubHeading>Captions</SubHeading>

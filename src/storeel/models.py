@@ -80,6 +80,10 @@ class Style(Strict):
     # the speaker steps back, smaller about the bottom middle of their video, so it never covers
     # them, in every look ("auto"); "off" keeps them where they are, behind it (speaker_behind).
     speaker_room: Literal["auto", "off"] = "auto"
+    # Free effects drawn at render time (see pipeline/effects.py): the voiced character moving
+    # with the voice, living stills, characters sliding in, a rim of light round the stepped-back
+    # speaker, a spotlight at the cliffhanger and the theme's particles; "off" leaves them out.
+    effects: Literal["on", "off"] = "on"
 
     _clean_watermark = field_validator("watermark")(_one_line)
     _clean_title = field_validator("title_text")(_one_line)

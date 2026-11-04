@@ -21,7 +21,8 @@ from dataclasses import dataclass, replace
 from PIL import Image
 
 from ..files import ProjectFiles
-from ..models import Beat, BibleCharacter, Project, Story, StoryShow, Word
+from ..models import Beat, BibleCharacter, Project, Region, Story, StoryShow, Word
+from . import effects
 from .align import Text, align, tokens
 from .analyze import find_quote
 from .compose import Compositor, H, W, _Card, _seen_box, head_top, moved_faces, speaker_place, speaker_side
@@ -379,6 +380,7 @@ class Sprites:
         # storyteller's face (the characters standing at the bottom, notes and chats never count)
         self.up_top: set[int] = set()
         self.names: set[int] = set()  # ids of the name tags over the characters' heads
+        self.who: dict[int, str] = {}  # id of a standing figure -> the character it is
         self.speaker_side = speaker_side(project)
 
     def image(self, picture_id: str) -> Image.Image | None:
@@ -521,6 +523,7 @@ class Sprites:
                 )
             x = round(SLOT_X[slot] * W) - sprite.width // 2
             y = round(STAND_BOTTOM * H) - sprite.height
+            self.who[id(sprite)] = self.person(cid)
             out.append((sprite, (x, y)))
             if cid == name and (text := self.label(cid)):
                 named = self._name_over(text, sprite, x, y)
@@ -552,6 +555,14 @@ def _solid(image: Image.Image) -> tuple[int, int, int, int]:
     """The box of an image's opaque part: the picture or the text, without its soft shadow."""
     box = image.getchannel("A").point(lambda v: 255 if v > 128 else 0).getbbox()
     return box or (0, 0, image.width, image.height)
+
+
+def _face_point(faces: list[Region] | None) -> tuple[float, float] | None:
+    """The middle of the biggest face (pixels), for a punch-in; None without one."""
+    if not faces:
+        return None
+    face = max(faces, key=lambda f: (f.x1 - f.x0) * (f.y1 - f.y0))
+    return (face.x0 + face.x1) / 2 * W, (face.y0 + face.y1) / 2 * H
 
 
 def _card_width(picture: Image.Image) -> int:
@@ -627,6 +638,7 @@ class PartCompositor(Compositor):
                 # what is up top (a picture, a note, chats, the poll); not the people standing at
                 # the bottom with their names, the badge or the end screen
                 room=room and not group and kind != "character" and id(image) not in sprites.names,
+                who=sprites.who.get(id(image), ""),
             )  # fmt: skip
             self.cards.append(card)
             return card
@@ -655,12 +667,27 @@ class PartCompositor(Compositor):
         for line in lines:
             if line.kind == "hook":
                 live, sides = {}, {}
+                face = _face_point(moved_faces(place, faces.get(line.take)))
+                if face is not None:  # the punch-in at the end of the hook
+                    begin = line.start + (1 - effects.PUNCH_SHARE) * (line.end - line.start)
+                    self.punch.append((begin, line.end, *face))
                 continue
             if line.kind == "beat" and line.show is not None:
                 chars = sprites.standing(line.show)
                 placed = arrange(chars, sides, sprites.slot)
                 sides = dict(zip(chars, placed, strict=True))
                 layers = sprites.layers(line.show, name=voiced(line), sides=placed)
+                beat = line.beat
+                if beat is not None and beat.speaker and beat.speaker != "narrator":
+                    self.talking.append((line.start, line.end, sprites.person(beat.speaker)))
+                if beat is not None and beat.act == "cliffhanger":
+                    if self.spot and line.start - self.spot[-1][1] < 0.3:
+                        self.spot[-1] = (self.spot[-1][0], line.end)
+                    else:
+                        self.spot.append((line.start, line.end))
+                    face = _face_point(moved_faces(place, faces.get(line.take)))
+                    if face is not None:
+                        self.punch.append((line.start, line.end, *face))
             elif line.kind == "poll":
                 layers, sides = self._poll(story, words), {}
             else:
