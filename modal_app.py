@@ -154,7 +154,7 @@ def _remote_decode(batches: list[tuple[list[str], int, int]]) -> list[tuple[list
     scaledown_window=60 * 20,
 )
 @modal.concurrent(max_inputs=100)  # one ASGI app serving many concurrent HTTP requests
-@modal.asgi_app(label="storeel")  # short public address: https://<workspace>--storeel.modal.run
+@modal.asgi_app(label="studio")  # short public address: https://<workspace>--studio.modal.run
 def web():
     from storeel.pipeline import depth
     from storeel.web.app import create_app

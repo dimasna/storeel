@@ -7,7 +7,7 @@ watermark.
 
 ## Try it
 
-The studio runs at https://blogdimas3399--storeel.us-east.modal.run. Bring your
+The studio runs at https://storeel--studio.us-east.modal.run. Bring your
 own Meta Model API key (**Add key**, top right): it stays in your browser and goes to the
 server only with an action that uses it. There, each browser sees only its own reels and
 novels, and whatever is left untouched for 24 hours is deleted, so download your reel.
