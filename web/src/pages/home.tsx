@@ -1,5 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Film, Lightbulb, Play } from "lucide-react";
+import {
+  ArrowRight,
+  AudioLines,
+  BookOpen,
+  ChevronDown,
+  Film,
+  Lightbulb,
+  Palette,
+  PenLine,
+  Play,
+  Scissors,
+  type LucideIcon,
+} from "lucide-react";
+import { LogoMark } from "@/components/brand/logo";
 import { motion } from "motion/react";
 import { api } from "@/lib/api";
 import type { ProjectSummary } from "@/lib/types";
@@ -13,7 +26,7 @@ import { HAS_PREVIEWS, lookName, themeCard, type Look } from "@/lib/styles";
 
 // The home page: a badge, one line of headline, the card, the showcase of every style (the
 // looks, themes and effects by example, and the picture styles), the questions people ask, and
-// a short footer.
+// a footer: a closing card to start a reel, the four models in order, and one line of links.
 
 // Lines from the stories in the gallery, set as a faint texture behind the headline.
 const TEXTURE = (
@@ -48,6 +61,14 @@ const FAQ: [string, string][] = [
     "What does the finished reel look like?",
     "An MP4 at 1080×1920, usually one and a half to two minutes long, with word-by-word captions, the pictures, a poll screen and an end card that sends viewers to the full chapter. Ask the chat for changes (caption colours, a character's outfit, a picture) and render again.",
   ],
+];
+
+// The footer's row of the four Meta models, in the order a reel goes through them.
+const MADE_WITH: [LucideIcon, string, string][] = [
+  [PenLine, "Muse Spark", "Writes the part, checks it against the chapter and edits it in the chat"],
+  [Palette, "Muse Image", "Draws the characters, objects and places"],
+  [Scissors, "SAM 3.1", "Cuts them out of their background"],
+  [AudioLines, "Muse Voice Transcribe", "Hears your reading for word-by-word captions"],
 ];
 
 function useShowcase(): ProjectSummary | null {
@@ -204,40 +225,69 @@ export function HomePage() {
         </div>
       </section>
 
-      <footer className="mt-16 grid gap-8 border-t border-border pt-10 text-sm sm:grid-cols-3">
-        <div className="flex flex-col gap-3">
-          <p className="font-semibold text-foreground">Make</p>
-          <button onClick={() => card.current?.scrollIntoView({ behavior: "smooth", block: "center" })} className="w-fit text-muted-foreground hover:text-foreground">
-            A novel part
-          </button>
-          <button onClick={() => create("video")} className="w-fit text-muted-foreground hover:text-foreground">
-            A reel from your video
-          </button>
-          <button onClick={() => create("idea")} className="w-fit text-muted-foreground hover:text-foreground">
-            A reel from an idea
-          </button>
+      <footer className="mt-20 flex flex-col gap-10 sm:mt-28">
+        <div className="relative overflow-hidden rounded-3xl px-6 py-10 text-center text-white sm:px-10 sm:py-14" style={{ background: "var(--gradient-accent)" }}>
+          <div aria-hidden className="pointer-events-none absolute -right-16 -top-16 size-56 rounded-full bg-white/10 blur-2xl" />
+          <div aria-hidden className="pointer-events-none absolute -bottom-20 -left-10 size-64 rounded-full bg-white/10 blur-3xl" />
+          <h2 className="relative text-balance text-3xl font-bold tracking-tight sm:text-4xl">Your next chapter is one reel away</h2>
+          <p className="relative mx-auto mt-3 max-w-xl text-balance text-white/80">
+            Paste it, read it, and post it. Your key, your voice, your characters.
+          </p>
+          <div className="relative mt-7 flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={() => card.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+              className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-[#0064e0] shadow-sm transition-transform hover:scale-[1.03]"
+            >
+              <BookOpen className="size-4" /> Paste a chapter
+            </button>
+            <button
+              onClick={() => create("video")}
+              className="inline-flex items-center gap-2 rounded-full bg-white/15 px-5 py-2.5 text-sm font-semibold text-white ring-1 ring-white/40 transition-colors hover:bg-white/25"
+            >
+              <Film className="size-4" /> Use my video
+            </button>
+            <button
+              onClick={() => create("idea")}
+              className="inline-flex items-center gap-2 rounded-full bg-white/15 px-5 py-2.5 text-sm font-semibold text-white ring-1 ring-white/40 transition-colors hover:bg-white/25"
+            >
+              <Lightbulb className="size-4" /> Start from an idea
+            </button>
+          </div>
         </div>
-        <div className="flex flex-col gap-3">
-          <p className="font-semibold text-foreground">Made with</p>
-          <span className="text-muted-foreground">Muse Spark: writing, checks and the chat</span>
-          <span className="text-muted-foreground">Muse Image: characters and scenes</span>
-          <span className="text-muted-foreground">SAM 3.1: cut-outs</span>
-          <span className="text-muted-foreground">Muse Voice Transcribe: captions</span>
+
+        <div>
+          <p className="text-center text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">How a reel is made</p>
+          <ol className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {MADE_WITH.map(([Icon, model, job], i) => (
+              <li key={model} className="relative flex flex-col gap-2 rounded-2xl bg-card p-4 ring-1 ring-border">
+                <div className="flex items-center justify-between">
+                  <span className="grid size-8 place-items-center rounded-full bg-primary/10 text-primary">
+                    <Icon className="size-4" />
+                  </span>
+                  <span className="font-mono text-xs text-muted-foreground">0{i + 1}</span>
+                </div>
+                <p className="text-sm font-semibold text-foreground">{model}</p>
+                <p className="text-xs leading-relaxed text-muted-foreground">{job}</p>
+                {i < MADE_WITH.length - 1 ? (
+                  <ArrowRight aria-hidden className="absolute -right-3 top-1/2 z-10 hidden size-4 -translate-y-1/2 rounded-full bg-background text-muted-foreground sm:block" />
+                ) : null}
+              </li>
+            ))}
+          </ol>
         </div>
-        <div className="flex flex-col gap-3">
-          <p className="font-semibold text-foreground">About</p>
-          <a
-            href="https://cerebralvalley.ai/e/meta-ai-developer-hackathon"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-fit text-muted-foreground hover:text-foreground"
-          >
-            Built for the Meta AI Developer Hackathon
-          </a>
-          <Link to="/reels" className="w-fit text-muted-foreground hover:text-foreground">
-            My reels
-          </Link>
-          <span className="text-muted-foreground">Reels are kept for 24 hours</span>
+
+        <div className="flex flex-col items-center gap-3 border-t border-border py-6 text-sm text-muted-foreground sm:flex-row sm:justify-between">
+          <span className="inline-flex items-center gap-2">
+            <LogoMark size={20} /> Storeel · reels are kept for 24 hours
+          </span>
+          <span className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1">
+            <Link to="/reels" className="hover:text-foreground">
+              My reels
+            </Link>
+            <a href="https://cerebralvalley.ai/e/meta-ai-developer-hackathon" target="_blank" rel="noopener noreferrer" className="hover:text-foreground">
+              Meta AI Developer Hackathon
+            </a>
+          </span>
         </div>
       </footer>
     </div>
