@@ -5,6 +5,26 @@ Meta's Model API. The studio transcribes the speech, plans and draws pictures fo
 moments that need them, and compiles a 1080×1920 reel with captions, the pictures and a
 watermark.
 
+## Try it
+
+The studio runs at https://blogdimas3399--storeel-studio-web.us-east.modal.run. Bring your
+own Meta Model API key (**Add key**, top right): it stays in your browser and goes to the
+server only with an action that uses it. There, each browser sees only its own reels and
+novels, and whatever is left untouched for 24 hours is deleted, so download your reel.
+
+1. On the home page, scroll to **Pick a style for your reel**: one example part, made by the
+   studio from one video, in its three looks and six themes.
+2. Paste a chapter of a story (200 characters or more), pick a style and press send. Muse
+   Spark writes the part (a hook, the beats, a poll and a call to action) and checks it
+   against the chapter, and Muse Image draws its characters and pictures. A 3,000-character
+   chapter costs about $0.33, or $0.56 in a look that cuts you out.
+3. Read the part from the teleprompter, take by take, or upload one video of the whole part.
+   Process it, then render (rendering is free).
+4. Ask the editor for changes in your own words: "make it feel scarier", "pakai tema
+   romance", "make me small in the bottom left corner".
+
+## How it works
+
 ```
             ┌─ I have a video ───────► upload clips ──────────────────────┐
 Create reel ┤                                                             ├─► transcribe ─► analyze ─► generate ─► compile
@@ -197,8 +217,10 @@ studio behind an HTTPS tunnel and add the tunnel's host name to `STOREEL_ALLOWED
   small silent copy, uploaded with a one-hour expiry and deleted right after the call.
 - The default models run in Standard mode. The cheaper `-contributor` Muse Spark models let
   Meta train on what you send; don't use them for other people's videos.
-- The server has no login. It binds to 127.0.0.1, rejects unknown Host headers and
-  cross-site requests, and should not be exposed on a network you don't trust.
+- The server has no login. On your own machine it binds to 127.0.0.1, rejects unknown Host
+  headers and cross-site requests, and should not be exposed on a network you don't trust.
+  Hosted (`modal_app.py`, with `STOREEL_PRIVATE_PROJECTS`), each browser sees only its own
+  reels and novels, and anything untouched for `STOREEL_TTL_HOURS` is deleted.
 - List prices: $0.01 per picture, $0.0025 per SAM image, $0.20 per 1,000 SAM video frames
   (at least 50 a request), $0.18 per hour of transcription, plus text-model tokens. Muse
   Wonder costs $4 per 1M input and $20 per 1M output tokens (Muse Spark: $1.25 and $4.25),
