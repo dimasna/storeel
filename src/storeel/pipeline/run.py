@@ -7,6 +7,7 @@ import contextlib
 from ..common import Cancelled
 from ..jobs import Handler, JobContext, PipelineError, describe_error
 from ..models import AgentAction, Analysis, BibleCharacter, Novel, PartPicture, Project
+from . import translate
 from .agent import handle_agent
 from .analyze import analyze
 from .assets import make_anchors, make_pictures
@@ -225,6 +226,10 @@ def _render(ctx: JobContext, fit_mb: int | None) -> None:
         ctx.flush_usage()
         project = ctx.project()
     compositor = None
+    if keyed and translate.needed(project):
+        translate.translate_captions(ctx)  # a caption language chosen, or captions changed since
+        ctx.flush_usage()
+        project = ctx.project()
     if project.path == "novel":
         if keyed and faces_wanted(project) and not project.part_faces:
             find_part_faces(ctx)  # chosen after processing: check the face now

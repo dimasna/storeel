@@ -114,6 +114,14 @@ Every option is documented in `.env.example`. Projects, uploads and renders are 
   five). Redrawing a picture, a new outfit and a render are proposed, with their cost, and
   run only when you approve them. It cannot cut a chosen stretch of your video, rewrite the
   script or delete anything.
+- **Caption language**: keep the captions as spoken, or translate them into English,
+  Indonesian, Malay, Spanish, Portuguese or French ("translate the captions into English" in
+  the editor). Muse Spark translates them sentence by sentence (a 59-second part cost $0.008)
+  and picks the words to stress in the new language, guided by the ones stressed in yours;
+  each translated sentence shows while you say its original. Your spoken captions are kept, so
+  switching back is free, and a caption you change later is translated again on its own. The
+  editor's caption edits and stressed words then apply to the translation. Without your key,
+  or for a sentence that could not be translated, a caption stays as spoken.
 - **Pauses** (free, at render; "remove the pauses" in the editor): *Cut the long pauses*
   shortens every silence over 0.7 s to about half a second. The render cuts them out of the
   finished reel, sound and picture together on whole frames, so the captions and pictures

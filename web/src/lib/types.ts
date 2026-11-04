@@ -28,6 +28,8 @@ export interface Style {
   caption_color: string;
   caption_position: string;
   caption_case: string;
+  /** "spoken", or a language the captions are translated into (en, id, ms, es, pt, fr). */
+  caption_language: string;
   watermark: string;
   watermark_position: string;
   language: string;

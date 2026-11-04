@@ -22,6 +22,15 @@ export const LABELS: Record<string, Record<string, string>> = {
   },
   caption_position: { lower: "Lower third", middle: "Middle" },
   caption_case: { original: "As spoken", upper: "UPPERCASE" },
+  caption_language: {
+    spoken: "As spoken",
+    en: "English",
+    id: "Indonesian",
+    ms: "Malay",
+    es: "Spanish",
+    pt: "Portuguese",
+    fr: "French",
+  },
   title_style: { behind: "Behind the speaker", front: "In front of the speaker", off: "No title" },
   motion: { animated: "Animated (HyperFrames)", plain: "Plain fades" },
   background: {

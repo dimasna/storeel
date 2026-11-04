@@ -20,6 +20,9 @@ Display = Literal["overlay", "cutout", "cutaway"]
 # A reel's genre theme (see pipeline/themes.py), one per novel Genre (below) but "other": "auto"
 # follows a novel part's genre (no theme for other reels), "none" keeps the plain look.
 Theme = Literal["auto", "none", "romance", "horror", "mystery", "drama", "legend"]
+# The captions' language (see pipeline/translate.py): "spoken" is what was said; the others are
+# Latin-script languages the caption fonts draw.
+CaptionLanguage = Literal["spoken", "en", "id", "ms", "es", "pt", "fr"]
 
 
 class Strict(BaseModel):
@@ -49,6 +52,9 @@ class Style(Strict):
     caption_color: str = Field("#E50914", pattern=HEX_COLOR)
     caption_position: Literal["lower", "middle"] = "lower"
     caption_case: Literal["original", "upper"] = "original"
+    # The captions' language: "spoken" shows what was said; another translates them (Muse Spark,
+    # sentence by sentence, once, at the next render with a key; see pipeline/translate.py).
+    caption_language: CaptionLanguage = "spoken"
     watermark: str = Field("", max_length=60)
     watermark_position: Literal["center", "top", "bottom"] = "center"
     language: Literal["auto", "id", "en"] = "auto"
@@ -449,6 +455,19 @@ class Turn(Strict):
     words: list[Word] = Field(default_factory=list)
 
 
+class TranslatedLine(Strict):
+    """One sentence of a turn's captions in another language: the turn's words first..last-1,
+    as they were when translated (a changed caption is translated again)."""
+
+    turn: int
+    first: int
+    last: int
+    source: str
+    text: str
+    stressed: list[int] = Field(default_factory=list)  # which of the translation's words to stress
+    edited: bool = False  # written in the editor: the whole turn, kept while its words stay
+
+
 class Transcript(Strict):
     turns: list[Turn]
     duration: float
@@ -457,6 +476,8 @@ class Transcript(Strict):
     keywords: list[str] = Field(default_factory=list)
     digest: str = ""
     emphasis_picked: bool = False  # Muse Spark chose the words to stress (none may be stressed)
+    # The captions in other languages, by CaptionLanguage (see pipeline/translate.py).
+    translations: dict[str, list[TranslatedLine]] = Field(default_factory=dict)
 
 
 class SpeakerMasks(Strict):
@@ -711,6 +732,7 @@ class EditUndo(Strict):
     transcript_digest: str = ""  # the captions below belong to this transcription
     turns: list[Turn] = Field(default_factory=list)  # the captions it changed, as they were
     emphasis_picked: bool | None = None
+    translations: dict[str, list[TranslatedLine]] | None = None  # as they were, when it changed them
     moments: list[MomentWas] = Field(default_factory=list)
     beats: list[BeatWas] = Field(default_factory=list)
     poll: Poll | None = None

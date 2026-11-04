@@ -40,7 +40,7 @@ from ..jobs import JobContext, PipelineError
 from ..media import ffmpeg as ff
 from ..media.speech import Envelope
 from ..models import Moment, Project, Region, Render, SpeakerMasks, Style
-from . import effects, pauses, themes
+from . import effects, pauses, themes, translate
 from .captions import build_pages, stressed
 from .layout import (
     CAPTION_CENTER,
@@ -1080,14 +1080,15 @@ class Compositor:
         self.extras = theme.extras if theme is not None else frozenset()
         self.pages: list[_Page] = []
         self.kinetic: list[_Kinetic] = []
+        # The captions' words: as spoken, or translated (Style.caption_language, see translate.py).
+        shown, picked = translate.shown_turns(project)
+        self.caption_note = translate.describe(project, shown)
         if style.captions in KINETIC and project.transcript is not None:
             spec = KINETIC[style.captions]
             size = round(H * spec["size"])
             center_y = CAPTION_CENTER[style.caption_position] * H
-            pages = build_pages(
-                project.transcript.turns, style.caption_case, spec["words"], spec["chars"], clauses=True
-            )
-            flags = stressed(pages, project.transcript.emphasis_picked)
+            pages = build_pages(shown, style.caption_case, spec["words"], spec["chars"], clauses=True)
+            flags = stressed(pages, picked)
             for page, stress in zip(pages, flags, strict=True):
                 kinetic = kinetic_page(
                     [w.text for w in page.words],
@@ -1117,7 +1118,7 @@ class Compositor:
         elif style.captions != "off" and project.transcript is not None:
             size = round(H * CAPTION_SIZE)
             center_y = CAPTION_CENTER[style.caption_position] * H
-            for page in build_pages(project.transcript.turns, style.caption_case):
+            for page in build_pages(shown, style.caption_case):
                 layout = caption_page(
                     [w.text for w in page.words],
                     size,
@@ -1923,6 +1924,8 @@ def compose(
         f" stretch(es) ({project.style.speaker_behind}), motion: {compositor.motion_note}"
     )
     ctx.log(f"theme: {compositor.theme_note}")
+    if compositor.caption_note:
+        ctx.log(compositor.caption_note)
     if compositor.title_note:
         ctx.log(compositor.title_note)
     if compositor.background != "dalang":

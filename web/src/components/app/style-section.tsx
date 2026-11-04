@@ -183,6 +183,15 @@ export function StyleSection({ project, state }: { project: Project; state: UseP
           <SelectField name="caption_case" label="Case" />
         </div>
         <SelectField name="caption_position" label="Position" />
+        <SelectField
+          name="caption_language"
+          label="Language"
+          hint={
+            style.caption_language !== "spoken"
+              ? "Muse Spark translates the captions sentence by sentence at your next render with your key (about a cent a minute of video), each sentence shown while you say it. Your spoken captions are kept: switching back is free."
+              : undefined
+          }
+        />
 
         <SubHeading>Title</SubHeading>
         <SelectField
