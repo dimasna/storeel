@@ -4,6 +4,7 @@ import {
   AudioLines,
   BookOpen,
   ChevronDown,
+  Eye,
   Film,
   Lightbulb,
   Palette,
@@ -26,7 +27,7 @@ import { HAS_PREVIEWS, lookName, themeCard, type Look } from "@/lib/styles";
 
 // The home page: a badge, one line of headline, the card, the showcase of every style (the
 // looks, themes and effects by example, and the picture styles), the questions people ask, and
-// a footer: a closing card to start a reel, the four models in order, and one line of links.
+// a footer: a closing card to start a reel, the five models in order, and one line of links.
 
 // Lines from the stories in the gallery, set as a faint texture behind the headline.
 const TEXTURE = (
@@ -47,7 +48,7 @@ const FAQ: [string, string][] = [
   ],
   [
     "Which Meta models does it use?",
-    "Muse Spark writes the part, checks its storyboard against the chapter and edits the reel when you ask in the chat. Muse Image draws the characters, objects and places. SAM 3.1 cuts them out of their background. Muse Voice Transcribe hears your narration for the captions.",
+    "Muse Spark writes the part, checks its storyboard against the chapter and edits the reel when you ask in the chat. Muse Voice Transcribe hears your narration for the captions. Muse Wonder watches a video you bring and plans where each picture goes. Muse Image draws the characters, objects and places. SAM 3.1 cuts them out of their background.",
   ],
   [
     "What does a reel cost?",
@@ -63,12 +64,13 @@ const FAQ: [string, string][] = [
   ],
 ];
 
-// The footer's row of the four Meta models, in the order a reel goes through them.
+// The footer's row of the five Meta models, roughly in the order a reel goes through them.
 const MADE_WITH: [LucideIcon, string, string][] = [
   [PenLine, "Muse Spark", "Writes the part, checks it against the chapter and edits it in the chat"],
+  [AudioLines, "Muse Voice Transcribe", "Hears your reading for word-by-word captions"],
+  [Eye, "Muse Wonder", "Watches your video and plans where each picture goes"],
   [Palette, "Muse Image", "Draws the characters, objects and places"],
   [Scissors, "SAM 3.1", "Cuts them out of their background"],
-  [AudioLines, "Muse Voice Transcribe", "Hears your reading for word-by-word captions"],
 ];
 
 function useShowcase(): ProjectSummary | null {
@@ -257,9 +259,9 @@ export function HomePage() {
 
         <div>
           <p className="text-center text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">How a reel is made</p>
-          <ol className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <ol className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
             {MADE_WITH.map(([Icon, model, job], i) => (
-              <li key={model} className="relative flex flex-col gap-2 rounded-2xl bg-card p-4 ring-1 ring-border">
+              <li key={model} className="relative flex flex-col gap-2 rounded-2xl bg-card p-4 ring-1 ring-border last:col-span-2 lg:last:col-span-1">
                 <div className="flex items-center justify-between">
                   <span className="grid size-8 place-items-center rounded-full bg-primary/10 text-primary">
                     <Icon className="size-4" />
@@ -269,7 +271,7 @@ export function HomePage() {
                 <p className="text-sm font-semibold text-foreground">{model}</p>
                 <p className="text-xs leading-relaxed text-muted-foreground">{job}</p>
                 {i < MADE_WITH.length - 1 ? (
-                  <ArrowRight aria-hidden className="absolute -right-3 top-1/2 z-10 hidden size-4 -translate-y-1/2 rounded-full bg-background text-muted-foreground sm:block" />
+                  <ArrowRight aria-hidden className="absolute -right-3 top-1/2 z-10 hidden size-4 -translate-y-1/2 rounded-full bg-background text-muted-foreground lg:block" />
                 ) : null}
               </li>
             ))}
