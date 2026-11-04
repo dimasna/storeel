@@ -135,7 +135,7 @@ a large italic serif in the highlight colour), serif (the same in an elegant ser
 off. caption_color: the highlight colour as #RRGGBB. caption_case: original or upper. \
 caption_position: lower or middle. caption_language: the captions' language: spoken (as said, \
 the default), en, id, ms, es, pt or fr (English, Indonesian, Malay, Spanish, Portuguese, French): \
-Muse Spark translates them sentence by sentence at once, under a cent a minute of video, each \
+Muse Spark translates them sentence by sentence at once, about a cent a minute of video, each \
 sentence shown while its original is said (the result lists them as captions_now); set it for \
 "translate the captions into English", "English subtitles", "caption bahasa Indonesia"; spoken \
 puts back the captions as said, free. title_style: the big title over the first seconds: behind \

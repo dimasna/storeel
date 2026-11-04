@@ -44,7 +44,8 @@ INSTRUCTIONS = """\
 You translate the captions of a vertical video into {language}. Each line is a stretch the \
 speaker says in one breath, in order; a line may stop mid-sentence and the next one carry on. \
 Translate line by line so that the lines read naturally in order, as spoken {language}, the way \
-a native creator would caption their own video: short, plain words, no added meaning. Keep \
+a native creator would caption their own video: short, plain words, no added meaning. Leave out \
+a word the speaker said twice by mistake ("later later" is "later"). Keep \
 names, numbers and titles as they are. Never merge, split, skip or reorder lines, and never move \
 words to another line: answer every id once. For each line, also copy from your translation the \
 words to stress, the punch of the line (a name at a reveal, a number, a strong verb or \
