@@ -1,14 +1,18 @@
 import { useId } from "react";
 import { cn } from "@/lib/utils";
 
-// Storeel's mark: an open book whose right page is a play button (stories that play), white on
-// the brand gradient. The same drawing is web/public/favicon.svg; keep the two in step.
+// Storeel's mark: a bookmark ribbon (the place you stopped in a story) with a play mark on it
+// (the story told as a reel), in the lamp's flame, amber to ember. The same drawing is
+// web/public/favicon.svg and the app icons; keep them in step.
 
 export const BRAND_STOPS: [number, string][] = [
-  [0, "#00C6CF"],
-  [0.55, "#3D7BF7"],
-  [1, "#7B5CFA"],
+  [0, "#F6B24A"],
+  [0.55, "#EA7A37"],
+  [1, "#C9452C"],
 ];
+
+export const RIBBON = "M12.5 4.5H35.5A5 5 0 0 1 40.5 9.5V43L24 34.6L7.5 43V9.5A5 5 0 0 1 12.5 4.5Z";
+export const PLAY = "M20.2 13.6C20.2 12.5 21.4 11.8 22.4 12.4L31.3 17.9C32.2 18.5 32.2 19.8 31.3 20.4L22.4 25.9C21.4 26.5 20.2 25.8 20.2 24.7Z";
 
 export function LogoMark({ size = 32, className, title }: { size?: number; className?: string; title?: string }) {
   const id = useId().replace(/:/g, "");
@@ -23,36 +27,28 @@ export function LogoMark({ size = 32, className, title }: { size?: number; class
       aria-hidden={title ? undefined : true}
     >
       <defs>
-        <linearGradient id={`storeel-${id}`} x1="3" y1="2" x2="45" y2="46" gradientUnits="userSpaceOnUse">
+        <linearGradient id={`storeel-${id}`} x1="8" y1="4" x2="41" y2="43" gradientUnits="userSpaceOnUse">
           {BRAND_STOPS.map(([offset, color]) => (
             <stop key={offset} offset={offset} stopColor={color} />
           ))}
         </linearGradient>
       </defs>
-      <rect width="48" height="48" rx="12" fill={`url(#storeel-${id})`} />
-      <g transform="translate(-0.8 0)">
-        <g opacity="0.58">
-          <path
-            d="M22 15.6C18.8 13.7 15 12.9 11.4 13.3V34.5C15 34.1 18.8 34.9 22 36.8Z"
-            fill="#fff"
-            stroke="#fff"
-            strokeWidth="2"
-            strokeLinejoin="round"
-          />
-        </g>
-        <path d="M28 17.6V34.4L38.6 26Z" fill="#fff" stroke="#fff" strokeWidth="4" strokeLinejoin="round" />
-      </g>
+      <path d={RIBBON} fill={`url(#storeel-${id})`} />
+      <path d={PLAY} fill="#FFF8EE" />
     </svg>
   );
 }
 
-/** The mark and the name on one line: "Storeel" set tight and bold, "Studio" quieter beside it. */
-export function LogoLockup({ size = 28, className }: { size?: number; className?: string }) {
+/** The mark and the name: "Storeel" in the storybook serif, "studio" small beside it. */
+export function LogoLockup({ size = 30, className }: { size?: number; className?: string }) {
   return (
-    <span className={cn("inline-flex items-center gap-2.5", className)}>
+    <span className={cn("inline-flex items-center gap-2", className)}>
       <LogoMark size={size} />
-      <span className="whitespace-nowrap text-[19px] font-semibold leading-none tracking-[-0.03em] text-foreground">
-        Storeel<span className="ml-[0.28em] font-medium text-muted-foreground max-[420px]:hidden">Studio</span>
+      <span className="whitespace-nowrap font-display text-[27px] leading-none tracking-[-0.01em] text-foreground">
+        Storeel
+        <span className="ml-1.5 align-[0.32em] font-sans text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground max-[420px]:hidden">
+          Studio
+        </span>
       </span>
     </span>
   );

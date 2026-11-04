@@ -4,8 +4,8 @@ import { Check, Scissors, Sparkles } from "lucide-react";
 import { LOOKS, THEME_CARDS, preview, themeCard, type Look, type ThemeCard } from "@/lib/styles";
 import { cn } from "@/lib/utils";
 
-// The reel styles shown by example (see lib/styles.ts): the home page's gallery, after
-// OpusClip's grid of styles, and a compact picker for the home card and a reel's style card.
+// The reel styles shown by example (see lib/styles.ts): the home page's gallery of styles,
+// and a compact picker for the home card and a reel's style card.
 // Every example is the same part, so only the style changes from one to the next.
 
 /** A style's example filling its box: the loop while it is on screen and `play` allows it,
@@ -77,7 +77,7 @@ export function LookSwitch({
   className?: string;
 }) {
   return (
-    <div role="radiogroup" aria-label="Behind you" className={cn("grid grid-cols-3 gap-1 rounded-xl bg-panel-tile p-1", className)}>
+    <div role="radiogroup" aria-label="Behind you" className={cn("grid grid-cols-3 gap-1 rounded-full border border-border-strong bg-background p-1", className)}>
       {LOOKS.map((item) => (
         <button
           key={item.look}
@@ -87,8 +87,8 @@ export function LookSwitch({
           title={item.blurb}
           onClick={() => onChange(item.look)}
           className={cn(
-            "inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
-            value === item.look ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            "inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-full px-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+            value === item.look ? "bg-foreground text-background shadow-sm" : "text-muted-foreground hover:text-foreground",
           )}
         >
           {item.cutout ? <Scissors className="size-3.5 shrink-0" aria-hidden /> : null}
@@ -155,13 +155,13 @@ function GalleryTile({
       >
         <span
           className={cn(
-            "relative block aspect-[9/16] w-full overflow-hidden rounded-xl transition-shadow group-focus-visible:ring-2 group-focus-visible:ring-accent",
+            "relative block aspect-[9/16] w-full overflow-hidden rounded-[18px] border border-border transition-shadow group-focus-visible:ring-2 group-focus-visible:ring-accent",
             chosen && "ring-2 ring-accent",
           )}
         >
           <StyleVideo look={look} theme={card.theme} />
           {/* Hover (pointer screens): how to use it; a tap on a touch screen uses it at once. */}
-          <span className="absolute inset-x-2 bottom-2 hidden items-center justify-center gap-1.5 rounded-[10px] bg-white py-2 text-[13px] font-semibold text-black opacity-0 shadow-sm transition-opacity duration-200 group-hover:opacity-100 [@media(hover:hover)]:flex">
+          <span className="absolute inset-x-2 bottom-2 hidden items-center justify-center gap-1.5 rounded-full bg-[#fff8ee] py-2 text-[13px] font-semibold text-[#1f1a15] opacity-0 shadow-sm transition-opacity duration-200 group-hover:opacity-100 [@media(hover:hover)]:flex">
             <Sparkles className="size-3.5" /> Use this style
           </span>
           {chosen ? (

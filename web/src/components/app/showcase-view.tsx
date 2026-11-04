@@ -19,7 +19,7 @@ export function ShowcaseView({ project }: { project: Project }) {
         >
           {project.novel ? `← ${project.novel.title}` : "← Home"}
         </Link>
-        <h1 className="text-2xl font-bold tracking-tight">{project.title}</h1>
+        <h1 className="font-display text-[2.4rem] leading-none tracking-[-0.01em]">{project.title}</h1>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-accent/40 bg-accent/5 px-4 py-3 text-sm">

@@ -72,7 +72,7 @@ export function NovelPage({ id }: { id: string }) {
         <Link to={novel.read_only ? "/" : "/reels"} className="w-fit text-sm text-muted-foreground hover:text-foreground">
           {novel.read_only ? "← Home" : "← My reels"}
         </Link>
-        <h1 className="text-2xl font-bold tracking-tight">{novel.title}</h1>
+        <h1 className="font-display text-[2.4rem] leading-none tracking-[-0.01em] sm:text-[2.8rem]">{novel.title}</h1>
       </div>
 
       {readOnly ? (

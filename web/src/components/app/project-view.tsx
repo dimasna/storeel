@@ -88,7 +88,7 @@ export function ProjectView({ state }: { state: UseProject }) {
         <JobPanel project={project} state={state} />
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
         <div className={cn("flex flex-col gap-5", locked && "pointer-events-none opacity-60")}>
           {project.path === "novel" ? (
             <>

@@ -8,18 +8,19 @@ type Size = "sm" | "md" | "lg" | "icon";
 
 const VARIANT: Record<Variant, string> = {
   primary:
-    "bg-primary text-primary-foreground border border-transparent hover:brightness-110 shadow-sm",
+    "bg-primary text-primary-foreground border border-transparent hover:brightness-105 shadow-[0_1px_0_rgb(0_0_0/0.08),0_6px_18px_-8px_color-mix(in_srgb,var(--primary)_80%,transparent)]",
   secondary:
-    "bg-card text-foreground border border-border-strong hover:border-accent/60 hover:bg-card/80",
+    "bg-background text-foreground border border-border-strong hover:border-accent/60 hover:bg-card",
   ghost: "bg-transparent text-muted-foreground border border-transparent hover:text-foreground hover:bg-card",
   danger: "bg-transparent text-danger border border-danger/40 hover:bg-danger/10",
 };
 
+// Pills: the studio's buttons are round-ended, like its chips and its badges.
 const SIZE: Record<Size, string> = {
-  sm: "h-8 px-3 text-xs gap-1.5 rounded-lg",
-  md: "h-10 px-4 text-sm gap-2 rounded-xl",
-  lg: "h-12 px-6 text-base gap-2 rounded-2xl",
-  icon: "size-8 rounded-lg",
+  sm: "h-8 px-3.5 text-xs gap-1.5 rounded-full",
+  md: "h-10 px-4.5 text-sm gap-2 rounded-full",
+  lg: "h-12 px-6 text-base gap-2 rounded-full",
+  icon: "size-8 rounded-full",
 };
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {

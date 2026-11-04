@@ -5,7 +5,7 @@ import { GALLERY, type GalleryTile } from "@/lib/gallery";
 import { labelFor } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
-// The gallery under the home page's card, after OpusClip's grid of creator styles: tall tiles
+// The picture looks on the home page: tall tiles
 // that play like muted shorts. Each is a frame of a novel part in one picture look, read word
 // by word; "Use this look" puts that look on the card above.
 
@@ -27,7 +27,7 @@ function Tile({ tile, tick, onUse }: { tile: GalleryTile; tick: number; onUse: (
   const at = (tick + tile.id.length) % cycle;
   const look = labelFor("visual_style", tile.look);
   return (
-    <li className="group relative aspect-[9/16] overflow-hidden rounded-xl bg-panel-tile">
+    <li className="group relative aspect-[9/16] overflow-hidden rounded-[18px] border border-border bg-panel-tile">
       <div className="size-full transition-transform duration-300 ease-[cubic-bezier(.25,1,.5,1)] group-hover:scale-[1.07] motion-reduce:transition-none">
         <img
           src={tile.image}
@@ -72,7 +72,7 @@ function Tile({ tile, tick, onUse }: { tile: GalleryTile; tick: number; onUse: (
           type="button"
           onClick={() => onUse(tile.look)}
           aria-label={`Use the ${look} look`}
-          className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[10px] bg-white text-[13px] font-semibold text-black transition-colors hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+          className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-full bg-[#fff8ee] text-[13px] font-semibold text-[#1f1a15] transition-colors hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
         >
           <Sparkles className="size-3.5" /> Use this look
         </button>

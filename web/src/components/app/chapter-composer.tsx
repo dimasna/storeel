@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
-import { BookText, Check, ChevronDown, Clapperboard, FileUp, Languages, Loader2, Mic, Palette, Sparkles } from "lucide-react";
+import { BookText, Check, ChevronDown, Clapperboard, Feather, FileUp, Languages, Loader2, Mic, Palette } from "lucide-react";
 import { api, ApiError, apiKey } from "@/lib/api";
 import type { Novel, NovelSummary, PartEstimate } from "@/lib/types";
 import { useConfig } from "@/lib/config";
@@ -15,10 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/primitives";
 import { StylePicker } from "./style-picker";
 
-// The home page's card, after OpusClip's: two large tiles (the chapter, and an optional look),
-// a row of chips (the voice, the language and the reel's style) and a send button. Send makes
-// the novel, the chapter and its part, and starts writing it; the part's page takes over from
-// there.
+// The home page's composer, a manuscript card: the chapter (a ruled page) beside the picture
+// look, a row of chips (the voice, the language and the reel's style), and the button that
+// writes the part. Writing makes the novel, the chapter and its part, and starts the part; the
+// part's page takes over from there.
 
 /** What the reel looks like: what is behind the speaker, and its theme ("auto": by genre). */
 export interface ReelStyle {
@@ -71,8 +71,8 @@ function ChipSelect({
     <label
       title={label}
       className={cn(
-        "relative inline-flex h-10 min-w-0 items-center gap-2 rounded-xl bg-panel-tile pl-3 pr-8 text-sm font-medium text-foreground transition-colors focus-within:ring-2 focus-within:ring-accent/40 max-sm:w-full",
-        disabled ? "opacity-70" : "hover:brightness-110",
+        "relative inline-flex h-10 min-w-0 items-center gap-2 rounded-full border border-border-strong bg-background pl-3.5 pr-8 text-sm font-medium text-foreground transition-colors focus-within:ring-2 focus-within:ring-accent/40 max-sm:w-full",
+        disabled ? "opacity-70" : "hover:border-accent/50",
       )}
     >
       <Icon className="size-4 shrink-0 text-muted-foreground" />
@@ -94,7 +94,7 @@ function ChipSelect({
   );
 }
 
-/** One of the card's two large tiles. */
+/** One of the composer's two tiles: the chapter is a ruled page (`page`), the look a picture. */
 function Tile({
   icon: Icon,
   title,
@@ -103,6 +103,7 @@ function Tile({
   done,
   picture,
   highlight,
+  page,
 }: {
   icon: ComponentType<{ className?: string }>;
   title: ReactNode;
@@ -111,27 +112,44 @@ function Tile({
   done?: boolean;
   picture?: string;
   highlight?: boolean;
+  page?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        "group relative flex min-h-[7.5rem] flex-col items-center justify-center gap-1 overflow-hidden rounded-2xl bg-panel-tile px-4 py-5 text-center transition-[filter,box-shadow] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+        "group relative flex min-h-[8.5rem] flex-col justify-end gap-1 overflow-hidden rounded-[18px] border border-border px-4 py-4 text-left transition-[border-color,box-shadow] hover:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50",
+        page ? "bg-background" : "bg-card",
         highlight && "ring-2 ring-accent/70",
       )}
+      style={
+        page
+          ? {
+              backgroundImage:
+                "repeating-linear-gradient(to bottom, transparent 0, transparent 27px, var(--border) 27px, var(--border) 28px)",
+              backgroundPosition: "0 14px",
+            }
+          : undefined
+      }
     >
+      {page ? <span className="absolute inset-y-0 left-9 w-px bg-accent/25" aria-hidden /> : null}
       {picture ? (
         <>
-          <img src={picture} alt="" className="absolute inset-0 size-full object-cover object-[50%_28%] opacity-60 transition-transform duration-500 group-hover:scale-105" />
-          <span className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/45 to-black/20" />
+          <img src={picture} alt="" className="absolute inset-0 size-full object-cover object-[50%_28%] opacity-70 transition-transform duration-500 group-hover:scale-105" />
+          <span className="absolute inset-0 bg-gradient-to-t from-[#1f1a15]/85 via-[#1f1a15]/40 to-transparent" />
         </>
       ) : null}
-      <span className={cn("relative mb-1 grid size-7 place-items-center rounded-lg", done ? "bg-success/20 text-success" : picture ? "text-white" : "text-foreground")}>
-        {done ? <Check className="size-4" /> : <Icon className="size-5" />}
+      <span
+        className={cn(
+          "absolute left-3 top-3 grid size-8 place-items-center rounded-full",
+          done ? "bg-success/15 text-success" : picture ? "bg-white/15 text-white backdrop-blur-sm" : "bg-primary/20 text-accent",
+        )}
+      >
+        {done ? <Check className="size-4" /> : <Icon className="size-4" />}
       </span>
-      <span className={cn("relative text-base font-medium", picture ? "text-white" : "text-foreground")}>{title}</span>
-      <span className={cn("relative text-xs leading-snug", picture ? "text-white/80" : "text-muted-foreground")}>{subtitle}</span>
+      <span className={cn("relative font-display text-[23px] leading-tight", page && "pl-7", picture ? "text-white" : "text-foreground")}>{title}</span>
+      <span className={cn("relative text-xs leading-snug", page && "pl-7", picture ? "text-white/80" : "text-muted-foreground")}>{subtitle}</span>
     </button>
   );
 }
@@ -277,14 +295,14 @@ export function ChapterComposer({
   const cost = estimate && chars >= MIN_CHARS ? `≈ $${estimate.total_usd.toFixed(2)}` : "";
 
   return (
-    <div className="rounded-[28px] bg-card p-3 shadow-2xl shadow-black/10 sm:p-3.5">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Tile icon={BookText} title={chapterTitle} subtitle={chapterSub} done={ready} onClick={() => setPasting(true)} />
+    <div className="rounded-[26px] border border-border-strong bg-card p-2.5 shadow-[0_28px_70px_-40px_rgb(90_55_20/0.45)] sm:p-3">
+      <div className="grid gap-2.5 sm:grid-cols-[1.35fr_1fr]">
+        <Tile icon={BookText} title={chapterTitle} subtitle={chapterSub} done={ready} page onClick={() => setPasting(true)} />
         <Tile
           icon={Palette}
-          title={chosenLook ? `Look: ${labelFor("visual_style", chosenLook)}` : "(Optional) Pick a look"}
+          title={chosenLook ? labelFor("visual_style", chosenLook) : "Pick a look"}
           subtitle={
-            novel ? "Every part of a novel keeps its look" : chosenLook ? "Tap to change" : "Show Storeel the picture style you'd like"
+            novel ? "Every part of a novel keeps its look" : chosenLook ? "How the pictures are drawn · tap to change" : "Optional: how the pictures are drawn"
           }
           picture={chosenLook ? lookPicture(chosenLook) : undefined}
           highlight={highlightLook}
@@ -318,7 +336,7 @@ export function ChapterComposer({
             title="The reel's style: what is behind you, and its theme"
             onClick={() => setStyling(true)}
             className={cn(
-              "relative col-span-2 inline-flex h-10 min-w-0 items-center gap-2 rounded-xl bg-panel-tile pl-3 pr-8 text-left text-sm font-medium text-foreground transition-[filter,box-shadow] hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 sm:col-span-1",
+              "relative col-span-2 inline-flex h-10 min-w-0 items-center gap-2 rounded-full border border-border-strong bg-background pl-3.5 pr-8 text-left text-sm font-medium text-foreground transition-[border-color,box-shadow] hover:border-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 sm:col-span-1",
               highlightStyle && "ring-2 ring-accent/70",
             )}
           >
@@ -328,39 +346,37 @@ export function ChapterComposer({
           </button>
         ) : null}
         <div className="hidden flex-1 items-center justify-end gap-3 sm:flex">
-          {cost ? <span className="text-xs text-muted-foreground">{cost}</span> : null}
+          {cost ? <span className="text-xs tabular-nums text-muted-foreground">{cost}</span> : null}
           <button
             type="button"
             onClick={send}
             disabled={sending}
-            aria-label="Send"
-            title={ready ? "Send: write the part" : "Paste a chapter first"}
+            title={ready ? "Write the part" : "Paste a chapter first"}
             className={cn(
-              "grid size-10 place-items-center rounded-xl transition-[opacity,filter]",
-              ready ? "text-white hover:brightness-110" : "bg-panel-tile text-muted-foreground",
+              "inline-flex h-10 items-center gap-2 rounded-full px-4.5 text-sm font-semibold transition-[opacity,filter]",
+              ready ? "bg-primary text-primary-foreground hover:brightness-105" : "bg-panel-tile text-muted-foreground",
             )}
-            style={ready ? { background: "var(--gradient-accent)" } : undefined}
           >
-            {sending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+            {sending ? <Loader2 className="size-4 animate-spin" /> : <Feather className="size-4" />}
+            {sending ? "Starting…" : "Write the part"}
           </button>
         </div>
       </div>
-      {/* Phones: one wide button, as on OpusClip. */}
+      {/* Phones: one wide button. */}
       <button
         type="button"
         onClick={send}
         disabled={sending}
         className={cn(
-          "mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-xl text-base font-semibold transition-[opacity,filter] sm:hidden",
-          ready ? "text-white" : "bg-panel-tile text-muted-foreground",
+          "mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-full text-base font-semibold transition-[opacity,filter] sm:hidden",
+          ready ? "bg-primary text-primary-foreground" : "bg-panel-tile text-muted-foreground",
         )}
-        style={ready ? { background: "var(--gradient-accent)" } : undefined}
       >
-        {sending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+        {sending ? <Loader2 className="size-4 animate-spin" /> : <Feather className="size-4" />}
         {sending
           ? "Starting…"
           : ready
-            ? `Send & write the part${cost ? ` · ${cost}` : ""}`
+            ? `Write the part${cost ? ` · ${cost}` : ""}`
             : chars >= MIN_CHARS
               ? "Add the novel's title first"
               : "Paste a chapter first"}
